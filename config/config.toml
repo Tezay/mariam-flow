@@ -1,0 +1,7 @@
+# Minimal placeholder configuration (no business logic yet)
+
+[app]
+name = "mariam-flow"
+
+[logging]
+level = "info"
