@@ -17,23 +17,42 @@ pub struct SensorReading {
     pub status: ReadingStatus,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OccupancyStatus {
+    Ok,
+    NoData,
+    Degraded,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OccupancyReading {
+    pub occupancy_percent: Option<f64>,
+    pub timestamp: SystemTime,
+    pub status: OccupancyStatus,
+}
+
 #[derive(Debug)]
 pub struct AppState {
     sensors: Vec<SensorInfo>,
     sensors_tx: watch::Sender<Vec<SensorInfo>>,
     readings: Vec<SensorReading>,
     readings_tx: watch::Sender<Vec<SensorReading>>,
+    occupancy: Option<OccupancyReading>,
+    occupancy_tx: watch::Sender<Option<OccupancyReading>>,
 }
 
 impl AppState {
     pub fn new() -> Self {
         let (sensors_tx, _sensors_rx) = watch::channel(Vec::new());
         let (readings_tx, _readings_rx) = watch::channel(Vec::new());
+        let (occupancy_tx, _occupancy_rx) = watch::channel(None);
         Self {
             sensors: Vec::new(),
             sensors_tx,
             readings: Vec::new(),
             readings_tx,
+            occupancy: None,
+            occupancy_tx,
         }
     }
 
@@ -66,6 +85,21 @@ impl AppState {
             .send(readings)
             .map_err(|_| AppError::WatchSend)
     }
+
+    pub fn occupancy(&self) -> Option<&OccupancyReading> {
+        self.occupancy.as_ref()
+    }
+
+    pub fn subscribe_occupancy(&self) -> watch::Receiver<Option<OccupancyReading>> {
+        self.occupancy_tx.subscribe()
+    }
+
+    pub fn set_occupancy(&mut self, occupancy: OccupancyReading) -> Result<(), AppError> {
+        self.occupancy = Some(occupancy.clone());
+        self.occupancy_tx
+            .send(Some(occupancy))
+            .map_err(|_| AppError::WatchSend)
+    }
 }
 
 #[cfg(test)]
@@ -86,7 +120,7 @@ mod tests {
             },
         };
 
-        state.set_readings(vec![reading.clone()]).unwrap();
+        assert!(state.set_readings(vec![reading.clone()]).is_ok());
 
         assert_eq!(state.readings(), &[reading.clone()]);
         assert_eq!(receiver.borrow().as_slice(), &[reading]);
@@ -105,7 +139,7 @@ mod tests {
             },
         };
 
-        state.set_readings(vec![reading.clone()]).unwrap();
+        assert!(state.set_readings(vec![reading.clone()]).is_ok());
 
         assert_eq!(state.readings(), &[reading]);
     }
