@@ -155,6 +155,14 @@ impl Vl53l1xFactory {
     }
 }
 
+#[cfg(target_os = "linux")]
+impl Default for Vl53l1xFactory {
+    fn default() -> Self {
+        Self::new(IOVoltage::Volt2_8) // Default to 2.8V IO
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
 impl Default for Vl53l1xFactory {
     fn default() -> Self {
         Self::new()
