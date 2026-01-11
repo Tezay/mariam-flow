@@ -1,5 +1,6 @@
 use crate::error::AppError;
 use crate::sensor::{SensorId, SensorInfo, SensorRangeStatus};
+use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 use tokio::sync::watch;
 
@@ -24,11 +25,32 @@ pub enum OccupancyStatus {
     Degraded,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WaitTimeStatus {
+    Ok,
+    Degraded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WaitTimeErrorCode {
+    NoData,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct OccupancyReading {
     pub occupancy_percent: Option<f64>,
     pub timestamp: SystemTime,
     pub status: OccupancyStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WaitTimeEstimate {
+    pub wait_time_minutes: Option<f64>,
+    pub timestamp: SystemTime,
+    pub status: WaitTimeStatus,
+    pub error_code: Option<WaitTimeErrorCode>,
 }
 
 #[derive(Debug)]
@@ -39,6 +61,8 @@ pub struct AppState {
     readings_tx: watch::Sender<Vec<SensorReading>>,
     occupancy: Option<OccupancyReading>,
     occupancy_tx: watch::Sender<Option<OccupancyReading>>,
+    wait_time: Option<WaitTimeEstimate>,
+    wait_time_tx: watch::Sender<Option<WaitTimeEstimate>>,
 }
 
 impl AppState {
@@ -46,6 +70,7 @@ impl AppState {
         let (sensors_tx, _sensors_rx) = watch::channel(Vec::new());
         let (readings_tx, _readings_rx) = watch::channel(Vec::new());
         let (occupancy_tx, _occupancy_rx) = watch::channel(None);
+        let (wait_time_tx, _wait_time_rx) = watch::channel(None);
         Self {
             sensors: Vec::new(),
             sensors_tx,
@@ -53,6 +78,8 @@ impl AppState {
             readings_tx,
             occupancy: None,
             occupancy_tx,
+            wait_time: None,
+            wait_time_tx,
         }
     }
 
@@ -100,6 +127,27 @@ impl AppState {
             .send(Some(occupancy))
             .map_err(|_| AppError::WatchSend)
     }
+
+    pub fn wait_time(&self) -> Option<&WaitTimeEstimate> {
+        self.wait_time.as_ref()
+    }
+
+    pub fn subscribe_wait_time(&self) -> watch::Receiver<Option<WaitTimeEstimate>> {
+        self.wait_time_tx.subscribe()
+    }
+
+    pub fn set_wait_time(&mut self, wait_time: WaitTimeEstimate) -> Result<(), AppError> {
+        self.wait_time = Some(wait_time.clone());
+        self.wait_time_tx
+            .send(Some(wait_time))
+            .map_err(|_| AppError::WatchSend)
+    }
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -142,5 +190,22 @@ mod tests {
         assert!(state.set_readings(vec![reading.clone()]).is_ok());
 
         assert_eq!(state.readings(), &[reading]);
+    }
+
+    #[test]
+    fn set_wait_time_updates_state_and_watch() {
+        let mut state = AppState::new();
+        let receiver = state.subscribe_wait_time();
+        let estimate = WaitTimeEstimate {
+            wait_time_minutes: Some(12.0),
+            timestamp: UNIX_EPOCH + Duration::from_secs(10),
+            status: WaitTimeStatus::Ok,
+            error_code: None,
+        };
+
+        assert!(state.set_wait_time(estimate.clone()).is_ok());
+
+        assert_eq!(state.wait_time(), Some(&estimate));
+        assert_eq!(*receiver.borrow(), Some(estimate));
     }
 }

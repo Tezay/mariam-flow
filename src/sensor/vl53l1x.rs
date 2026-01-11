@@ -155,6 +155,12 @@ impl Vl53l1xFactory {
     }
 }
 
+impl Default for Vl53l1xFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(not(target_os = "linux"))]
 pub struct Vl53l1xDriver;
 

@@ -1,8 +1,42 @@
-use crate::state::{OccupancyReading, OccupancyStatus, SensorReading};
+use crate::state::{
+    OccupancyReading, OccupancyStatus, SensorReading, WaitTimeErrorCode, WaitTimeEstimate,
+    WaitTimeStatus,
+};
 use std::time::SystemTime;
 
 /// Distance threshold (mm) below which a sensor is considered occupied.
 pub const OCCUPANCY_DISTANCE_MM: u16 = 1200;
+pub const DEFAULT_WAIT_TIME_MINUTES_AT_EMPTY: f64 = 0.0;
+pub const DEFAULT_WAIT_TIME_MINUTES_AT_FULL: f64 = 20.0;
+
+pub fn compute_wait_time(occupancy: &OccupancyReading, timestamp: SystemTime) -> WaitTimeEstimate {
+    if occupancy.occupancy_percent.is_none() || matches!(occupancy.status, OccupancyStatus::NoData)
+    {
+        return WaitTimeEstimate {
+            wait_time_minutes: None,
+            timestamp,
+            status: WaitTimeStatus::Degraded,
+            error_code: Some(WaitTimeErrorCode::NoData),
+        };
+    }
+
+    let occupancy_percent = occupancy.occupancy_percent.unwrap_or(0.0).clamp(0.0, 100.0);
+    let wait_time_minutes = DEFAULT_WAIT_TIME_MINUTES_AT_EMPTY
+        + (occupancy_percent / 100.0)
+            * (DEFAULT_WAIT_TIME_MINUTES_AT_FULL - DEFAULT_WAIT_TIME_MINUTES_AT_EMPTY);
+    let status = if matches!(occupancy.status, OccupancyStatus::Degraded) {
+        WaitTimeStatus::Degraded
+    } else {
+        WaitTimeStatus::Ok
+    };
+
+    WaitTimeEstimate {
+        wait_time_minutes: Some(wait_time_minutes),
+        timestamp,
+        status,
+        error_code: None,
+    }
+}
 
 pub fn compute_occupancy(readings: &[SensorReading], timestamp: SystemTime) -> OccupancyReading {
     let mut valid_count = 0u32;
@@ -75,6 +109,14 @@ mod tests {
         }
     }
 
+    fn occupancy_reading(percent: Option<f64>, status: OccupancyStatus) -> OccupancyReading {
+        OccupancyReading {
+            occupancy_percent: percent,
+            timestamp: UNIX_EPOCH,
+            status,
+        }
+    }
+
     #[test]
     fn occupancy_mixed_valid_and_error_is_degraded() {
         let readings = vec![
@@ -117,5 +159,62 @@ mod tests {
 
         assert_eq!(occupancy.occupancy_percent, None);
         assert_eq!(occupancy.status, OccupancyStatus::NoData);
+    }
+
+    #[test]
+    fn wait_time_linear_conversion_uses_defaults() {
+        let occupancy = occupancy_reading(Some(50.0), OccupancyStatus::Ok);
+
+        let estimate = compute_wait_time(&occupancy, UNIX_EPOCH);
+
+        assert_eq!(estimate.wait_time_minutes, Some(10.0));
+        assert_eq!(estimate.status, WaitTimeStatus::Ok);
+        assert_eq!(estimate.error_code, None);
+    }
+
+    #[test]
+    fn wait_time_linear_conversion_hits_endpoints() {
+        let empty = occupancy_reading(Some(0.0), OccupancyStatus::Ok);
+        let full = occupancy_reading(Some(100.0), OccupancyStatus::Ok);
+
+        let empty_estimate = compute_wait_time(&empty, UNIX_EPOCH);
+        let full_estimate = compute_wait_time(&full, UNIX_EPOCH);
+
+        assert_eq!(empty_estimate.wait_time_minutes, Some(0.0));
+        assert_eq!(full_estimate.wait_time_minutes, Some(20.0));
+    }
+
+    #[test]
+    fn wait_time_no_data_returns_degraded_no_data() {
+        let occupancy = occupancy_reading(None, OccupancyStatus::NoData);
+
+        let estimate = compute_wait_time(&occupancy, UNIX_EPOCH);
+
+        assert_eq!(estimate.wait_time_minutes, None);
+        assert_eq!(estimate.status, WaitTimeStatus::Degraded);
+        assert_eq!(estimate.error_code, Some(WaitTimeErrorCode::NoData));
+    }
+
+    #[test]
+    fn wait_time_degraded_without_no_data_keeps_degraded_status() {
+        let occupancy = occupancy_reading(Some(75.0), OccupancyStatus::Degraded);
+
+        let estimate = compute_wait_time(&occupancy, UNIX_EPOCH);
+
+        assert_eq!(estimate.wait_time_minutes, Some(15.0));
+        assert_eq!(estimate.status, WaitTimeStatus::Degraded);
+        assert_eq!(estimate.error_code, None);
+    }
+
+    #[test]
+    fn wait_time_clamps_out_of_range_inputs() {
+        let high = occupancy_reading(Some(150.0), OccupancyStatus::Ok);
+        let low = occupancy_reading(Some(-10.0), OccupancyStatus::Ok);
+
+        let high_estimate = compute_wait_time(&high, UNIX_EPOCH);
+        let low_estimate = compute_wait_time(&low, UNIX_EPOCH);
+
+        assert_eq!(high_estimate.wait_time_minutes, Some(20.0));
+        assert_eq!(low_estimate.wait_time_minutes, Some(0.0));
     }
 }
