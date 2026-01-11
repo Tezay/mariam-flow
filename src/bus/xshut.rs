@@ -333,7 +333,10 @@ mod tests {
             },
         ];
 
-        let behaviors = vec![MockSensorBehavior::ok(), MockSensorBehavior::fail_set_address()];
+        let behaviors = vec![
+            MockSensorBehavior::ok(),
+            MockSensorBehavior::fail_set_address(),
+        ];
         let mut factory = MockSensorFactory::new(behaviors);
         let mut xshut = MockXshut::default();
 

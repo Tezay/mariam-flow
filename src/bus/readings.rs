@@ -1,8 +1,8 @@
 use crate::error::AppError;
 use crate::sensor::{SensorDriver, SensorDriverFactory, SensorRangeStatus, SensorStatus};
 use crate::state::{AppState, ReadingStatus, SensorReading};
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 use tracing::{debug, warn};
 
@@ -208,10 +208,12 @@ mod tests {
 
         let guard = state.read().map_err(|_| AppError::StateLock)?;
         assert_eq!(guard.readings().len(), 3);
-        assert!(guard
-            .readings()
-            .iter()
-            .all(|reading| reading.timestamp >= UNIX_EPOCH));
+        assert!(
+            guard
+                .readings()
+                .iter()
+                .all(|reading| reading.timestamp >= UNIX_EPOCH)
+        );
 
         Ok(())
     }

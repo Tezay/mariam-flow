@@ -15,11 +15,15 @@ fn pipeline_mock_updates_state_for_all_sensors() -> Result<(), mariam_flow::erro
 
     let state = Arc::new(RwLock::new(AppState::new()));
     let _sensor_rx = {
-        let guard = state.read().map_err(|_| mariam_flow::error::AppError::StateLock)?;
+        let guard = state
+            .read()
+            .map_err(|_| mariam_flow::error::AppError::StateLock)?;
         guard.subscribe_sensors()
     };
     let _reading_rx = {
-        let guard = state.read().map_err(|_| mariam_flow::error::AppError::StateLock)?;
+        let guard = state
+            .read()
+            .map_err(|_| mariam_flow::error::AppError::StateLock)?;
         guard.subscribe_readings()
     };
     {
@@ -55,7 +59,9 @@ fn pipeline_mock_updates_state_for_all_sensors() -> Result<(), mariam_flow::erro
     assert!(matches!(readings[1].status, ReadingStatus::Error { .. }));
     assert!(matches!(readings[2].status, ReadingStatus::Error { .. }));
 
-    let guard = state.read().map_err(|_| mariam_flow::error::AppError::StateLock)?;
+    let guard = state
+        .read()
+        .map_err(|_| mariam_flow::error::AppError::StateLock)?;
     assert_eq!(guard.readings().len(), 3);
     Ok(())
 }

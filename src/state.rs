@@ -39,6 +39,14 @@ pub enum WaitTimeErrorCode {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct CalibrationParams {
+    pub slope: f64,
+    pub intercept: f64,
+    pub min_wait_minutes: Option<u32>,
+    pub max_wait_minutes: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct OccupancyReading {
     pub occupancy_percent: Option<f64>,
     pub timestamp: SystemTime,
@@ -63,6 +71,7 @@ pub struct AppState {
     occupancy_tx: watch::Sender<Option<OccupancyReading>>,
     wait_time: Option<WaitTimeEstimate>,
     wait_time_tx: watch::Sender<Option<WaitTimeEstimate>>,
+    calibration: Option<CalibrationParams>,
 }
 
 impl AppState {
@@ -80,6 +89,7 @@ impl AppState {
             occupancy_tx,
             wait_time: None,
             wait_time_tx,
+            calibration: None,
         }
     }
 
@@ -141,6 +151,14 @@ impl AppState {
         self.wait_time_tx
             .send(Some(wait_time))
             .map_err(|_| AppError::WatchSend)
+    }
+
+    pub fn calibration(&self) -> Option<&CalibrationParams> {
+        self.calibration.as_ref()
+    }
+
+    pub fn set_calibration(&mut self, calibration: Option<CalibrationParams>) {
+        self.calibration = calibration;
     }
 }
 

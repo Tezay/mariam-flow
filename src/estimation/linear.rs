@@ -1,6 +1,6 @@
 use crate::state::{
-    OccupancyReading, OccupancyStatus, SensorReading, WaitTimeErrorCode, WaitTimeEstimate,
-    WaitTimeStatus,
+    CalibrationParams, OccupancyReading, OccupancyStatus, SensorReading, WaitTimeErrorCode,
+    WaitTimeEstimate, WaitTimeStatus,
 };
 use std::time::SystemTime;
 
@@ -9,7 +9,11 @@ pub const OCCUPANCY_DISTANCE_MM: u16 = 1200;
 pub const DEFAULT_WAIT_TIME_MINUTES_AT_EMPTY: f64 = 0.0;
 pub const DEFAULT_WAIT_TIME_MINUTES_AT_FULL: f64 = 20.0;
 
-pub fn compute_wait_time(occupancy: &OccupancyReading, timestamp: SystemTime) -> WaitTimeEstimate {
+pub fn compute_wait_time(
+    occupancy: &OccupancyReading,
+    timestamp: SystemTime,
+    calibration: Option<&CalibrationParams>,
+) -> WaitTimeEstimate {
     if occupancy.occupancy_percent.is_none() || matches!(occupancy.status, OccupancyStatus::NoData)
     {
         return WaitTimeEstimate {
@@ -21,9 +25,14 @@ pub fn compute_wait_time(occupancy: &OccupancyReading, timestamp: SystemTime) ->
     }
 
     let occupancy_percent = occupancy.occupancy_percent.unwrap_or(0.0).clamp(0.0, 100.0);
-    let wait_time_minutes = DEFAULT_WAIT_TIME_MINUTES_AT_EMPTY
-        + (occupancy_percent / 100.0)
-            * (DEFAULT_WAIT_TIME_MINUTES_AT_FULL - DEFAULT_WAIT_TIME_MINUTES_AT_EMPTY);
+    let wait_time_minutes = match calibration {
+        Some(calibration) => calibrated_wait_time(occupancy_percent, calibration),
+        None => {
+            DEFAULT_WAIT_TIME_MINUTES_AT_EMPTY
+                + (occupancy_percent / 100.0)
+                    * (DEFAULT_WAIT_TIME_MINUTES_AT_FULL - DEFAULT_WAIT_TIME_MINUTES_AT_EMPTY)
+        }
+    };
     let status = if matches!(occupancy.status, OccupancyStatus::Degraded) {
         WaitTimeStatus::Degraded
     } else {
@@ -36,6 +45,17 @@ pub fn compute_wait_time(occupancy: &OccupancyReading, timestamp: SystemTime) ->
         status,
         error_code: None,
     }
+}
+
+fn calibrated_wait_time(occupancy_percent: f64, calibration: &CalibrationParams) -> f64 {
+    let mut wait_time = calibration.intercept + calibration.slope * occupancy_percent;
+    if let Some(min_wait_minutes) = calibration.min_wait_minutes {
+        wait_time = wait_time.max(min_wait_minutes as f64);
+    }
+    if let Some(max_wait_minutes) = calibration.max_wait_minutes {
+        wait_time = wait_time.min(max_wait_minutes as f64);
+    }
+    wait_time
 }
 
 pub fn compute_occupancy(readings: &[SensorReading], timestamp: SystemTime) -> OccupancyReading {
@@ -83,8 +103,8 @@ pub fn compute_occupancy(readings: &[SensorReading], timestamp: SystemTime) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::ReadingStatus;
     use crate::sensor::SensorRangeStatus;
+    use crate::state::ReadingStatus;
     use std::time::UNIX_EPOCH;
 
     fn ok_reading(sensor_id: u32, distance_mm: u16) -> SensorReading {
@@ -119,11 +139,7 @@ mod tests {
 
     #[test]
     fn occupancy_mixed_valid_and_error_is_degraded() {
-        let readings = vec![
-            ok_reading(1, 800),
-            ok_reading(2, 1500),
-            error_reading(3),
-        ];
+        let readings = vec![ok_reading(1, 800), ok_reading(2, 1500), error_reading(3)];
 
         let occupancy = compute_occupancy(&readings, UNIX_EPOCH);
 
@@ -165,7 +181,7 @@ mod tests {
     fn wait_time_linear_conversion_uses_defaults() {
         let occupancy = occupancy_reading(Some(50.0), OccupancyStatus::Ok);
 
-        let estimate = compute_wait_time(&occupancy, UNIX_EPOCH);
+        let estimate = compute_wait_time(&occupancy, UNIX_EPOCH, None);
 
         assert_eq!(estimate.wait_time_minutes, Some(10.0));
         assert_eq!(estimate.status, WaitTimeStatus::Ok);
@@ -177,8 +193,8 @@ mod tests {
         let empty = occupancy_reading(Some(0.0), OccupancyStatus::Ok);
         let full = occupancy_reading(Some(100.0), OccupancyStatus::Ok);
 
-        let empty_estimate = compute_wait_time(&empty, UNIX_EPOCH);
-        let full_estimate = compute_wait_time(&full, UNIX_EPOCH);
+        let empty_estimate = compute_wait_time(&empty, UNIX_EPOCH, None);
+        let full_estimate = compute_wait_time(&full, UNIX_EPOCH, None);
 
         assert_eq!(empty_estimate.wait_time_minutes, Some(0.0));
         assert_eq!(full_estimate.wait_time_minutes, Some(20.0));
@@ -188,7 +204,7 @@ mod tests {
     fn wait_time_no_data_returns_degraded_no_data() {
         let occupancy = occupancy_reading(None, OccupancyStatus::NoData);
 
-        let estimate = compute_wait_time(&occupancy, UNIX_EPOCH);
+        let estimate = compute_wait_time(&occupancy, UNIX_EPOCH, None);
 
         assert_eq!(estimate.wait_time_minutes, None);
         assert_eq!(estimate.status, WaitTimeStatus::Degraded);
@@ -199,7 +215,7 @@ mod tests {
     fn wait_time_degraded_without_no_data_keeps_degraded_status() {
         let occupancy = occupancy_reading(Some(75.0), OccupancyStatus::Degraded);
 
-        let estimate = compute_wait_time(&occupancy, UNIX_EPOCH);
+        let estimate = compute_wait_time(&occupancy, UNIX_EPOCH, None);
 
         assert_eq!(estimate.wait_time_minutes, Some(15.0));
         assert_eq!(estimate.status, WaitTimeStatus::Degraded);
@@ -211,10 +227,40 @@ mod tests {
         let high = occupancy_reading(Some(150.0), OccupancyStatus::Ok);
         let low = occupancy_reading(Some(-10.0), OccupancyStatus::Ok);
 
-        let high_estimate = compute_wait_time(&high, UNIX_EPOCH);
-        let low_estimate = compute_wait_time(&low, UNIX_EPOCH);
+        let high_estimate = compute_wait_time(&high, UNIX_EPOCH, None);
+        let low_estimate = compute_wait_time(&low, UNIX_EPOCH, None);
 
         assert_eq!(high_estimate.wait_time_minutes, Some(20.0));
         assert_eq!(low_estimate.wait_time_minutes, Some(0.0));
+    }
+
+    #[test]
+    fn wait_time_uses_calibration_parameters() {
+        let occupancy = occupancy_reading(Some(50.0), OccupancyStatus::Ok);
+        let calibration = CalibrationParams {
+            slope: 1.5,
+            intercept: 2.0,
+            min_wait_minutes: None,
+            max_wait_minutes: None,
+        };
+
+        let estimate = compute_wait_time(&occupancy, UNIX_EPOCH, Some(&calibration));
+
+        assert_eq!(estimate.wait_time_minutes, Some(77.0));
+    }
+
+    #[test]
+    fn wait_time_calibration_clamps_to_bounds() {
+        let occupancy = occupancy_reading(Some(100.0), OccupancyStatus::Ok);
+        let calibration = CalibrationParams {
+            slope: 1.0,
+            intercept: 0.0,
+            min_wait_minutes: Some(0),
+            max_wait_minutes: Some(60),
+        };
+
+        let estimate = compute_wait_time(&occupancy, UNIX_EPOCH, Some(&calibration));
+
+        assert_eq!(estimate.wait_time_minutes, Some(60.0));
     }
 }

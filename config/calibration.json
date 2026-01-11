@@ -1,0 +1,7 @@
+{
+  "model": "linear_v1",
+  "slope": 1.8,
+  "intercept": 0.0,
+  "min_wait_minutes": 0,
+  "max_wait_minutes": 60
+}

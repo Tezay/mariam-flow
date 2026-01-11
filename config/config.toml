@@ -5,3 +5,6 @@ name = "mariam-flow"
 
 [logging]
 level = "info"
+
+[calibration]
+path = "config/calibration.json"

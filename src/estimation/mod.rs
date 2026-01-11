@@ -2,11 +2,15 @@ use crate::bus::readings::read_and_store_distances;
 use crate::error::AppError;
 use crate::sensor::SensorDriverFactory;
 use crate::state::{
-    AppState, OccupancyReading, OccupancyStatus, WaitTimeErrorCode, WaitTimeEstimate, WaitTimeStatus,
+    AppState, CalibrationParams, OccupancyReading, OccupancyStatus, WaitTimeErrorCode,
+    WaitTimeEstimate, WaitTimeStatus,
 };
+use serde::Deserialize;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime};
+use thiserror::Error;
 use tracing::warn;
 
 pub mod linear;
@@ -61,7 +65,11 @@ fn update_wait_time_from_occupancy_at(
         timestamp,
         status: OccupancyStatus::NoData,
     });
-    let wait_time = linear::compute_wait_time(&occupancy, timestamp);
+    let calibration = {
+        let guard = state.read().map_err(|_| AppError::StateLock)?;
+        guard.calibration().cloned()
+    };
+    let wait_time = linear::compute_wait_time(&occupancy, timestamp, calibration.as_ref());
 
     if matches!(wait_time.status, WaitTimeStatus::Degraded) {
         if matches!(wait_time.error_code, Some(WaitTimeErrorCode::NoData)) {
@@ -75,6 +83,114 @@ fn update_wait_time_from_occupancy_at(
     guard.set_wait_time(wait_time.clone())?;
 
     Ok(wait_time)
+}
+
+#[derive(Debug, Deserialize)]
+struct CalibrationFile {
+    model: String,
+    slope: f64,
+    intercept: f64,
+    min_wait_minutes: Option<u32>,
+    max_wait_minutes: Option<u32>,
+}
+
+#[derive(Debug, Error)]
+pub enum CalibrationError {
+    #[error("failed to read calibration file: {0}")]
+    Read(#[from] std::io::Error),
+    #[error("failed to parse calibration file: {0}")]
+    Parse(#[from] serde_json::Error),
+    #[error("invalid calibration: {0}")]
+    Invalid(String),
+}
+
+#[derive(Debug)]
+pub struct CalibrationLoad {
+    pub calibration: Option<CalibrationParams>,
+    pub inactive_reason: Option<String>,
+}
+
+impl CalibrationLoad {
+    fn active(calibration: CalibrationParams) -> Self {
+        Self {
+            calibration: Some(calibration),
+            inactive_reason: None,
+        }
+    }
+
+    pub fn inactive(reason: impl Into<String>) -> Self {
+        Self {
+            calibration: None,
+            inactive_reason: Some(reason.into()),
+        }
+    }
+}
+
+pub fn load_calibration_from_path(path: &Path) -> CalibrationLoad {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => match parse_calibration(&contents) {
+            Ok(calibration) => CalibrationLoad::active(calibration),
+            Err(err) => CalibrationLoad::inactive(err.to_string()),
+        },
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            CalibrationLoad::inactive(format!("calibration file missing at {}", path.display()))
+        }
+        Err(err) => CalibrationLoad::inactive(format!("failed to read calibration file: {err}")),
+    }
+}
+
+fn parse_calibration(contents: &str) -> Result<CalibrationParams, CalibrationError> {
+    let file = CalibrationFile::deserialize(&mut serde_json::Deserializer::from_str(contents))?;
+    if file.model != "linear_v1" {
+        return Err(CalibrationError::Invalid(format!(
+            "unsupported model: {}",
+            file.model
+        )));
+    }
+    if !(0.1..=10.0).contains(&file.slope) {
+        return Err(CalibrationError::Invalid(format!(
+            "slope out of range: {}",
+            file.slope
+        )));
+    }
+    if !(-30.0..=30.0).contains(&file.intercept) {
+        return Err(CalibrationError::Invalid(format!(
+            "intercept out of range: {}",
+            file.intercept
+        )));
+    }
+    if let Some(min_wait_minutes) = file.min_wait_minutes {
+        if min_wait_minutes > 240 {
+            return Err(CalibrationError::Invalid(format!(
+                "min_wait_minutes out of range: {}",
+                min_wait_minutes
+            )));
+        }
+    }
+    if let Some(max_wait_minutes) = file.max_wait_minutes {
+        if max_wait_minutes > 240 {
+            return Err(CalibrationError::Invalid(format!(
+                "max_wait_minutes out of range: {}",
+                max_wait_minutes
+            )));
+        }
+    }
+    if let (Some(min_wait_minutes), Some(max_wait_minutes)) =
+        (file.min_wait_minutes, file.max_wait_minutes)
+    {
+        if min_wait_minutes > max_wait_minutes {
+            return Err(CalibrationError::Invalid(format!(
+                "min_wait_minutes {min_wait_minutes} exceeds max_wait_minutes {max_wait_minutes}"
+            )));
+        }
+    }
+
+    Ok(CalibrationParams {
+        slope: file.slope,
+        intercept: file.intercept,
+        min_wait_minutes: file.min_wait_minutes,
+        max_wait_minutes: file.max_wait_minutes,
+    })
 }
 
 pub fn run_refresh_cycle<F>(
@@ -222,5 +338,84 @@ mod tests {
     #[test]
     fn default_refresh_interval_is_five_seconds() {
         assert_eq!(DEFAULT_REFRESH_INTERVAL, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn load_calibration_reads_valid_file() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = std::env::temp_dir();
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = dir.join(format!("calibration-valid-{unique}.json"));
+        let contents = r#"
+{
+  "model": "linear_v1",
+  "slope": 1.8,
+  "intercept": 0.0,
+  "min_wait_minutes": 0,
+  "max_wait_minutes": 60
+}
+"#;
+        std::fs::write(&path, contents)?;
+
+        let load = load_calibration_from_path(&path);
+        let _ = std::fs::remove_file(&path);
+
+        let calibration = load.calibration.expect("expected calibration");
+        assert_eq!(calibration.slope, 1.8);
+        assert_eq!(calibration.intercept, 0.0);
+        assert_eq!(calibration.min_wait_minutes, Some(0));
+        assert_eq!(calibration.max_wait_minutes, Some(60));
+        assert!(load.inactive_reason.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn load_calibration_missing_file_is_inactive() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("calibration-missing-file.json");
+
+        let load = load_calibration_from_path(&path);
+
+        assert!(load.calibration.is_none());
+        let reason = load.inactive_reason.unwrap_or_default();
+        assert!(reason.contains("missing"));
+    }
+
+    #[test]
+    fn load_calibration_invalid_json_is_inactive() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = std::env::temp_dir();
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = dir.join(format!("calibration-invalid-json-{unique}.json"));
+        std::fs::write(&path, "{ invalid")?;
+
+        let load = load_calibration_from_path(&path);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(load.calibration.is_none());
+        let reason = load.inactive_reason.unwrap_or_default();
+        assert!(reason.contains("parse"));
+        Ok(())
+    }
+
+    #[test]
+    fn load_calibration_invalid_values_are_inactive() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = std::env::temp_dir();
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = dir.join(format!("calibration-invalid-values-{unique}.json"));
+        let contents = r#"
+{
+  "model": "linear_v1",
+  "slope": 0.0,
+  "intercept": 0.0
+}
+"#;
+        std::fs::write(&path, contents)?;
+
+        let load = load_calibration_from_path(&path);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(load.calibration.is_none());
+        let reason = load.inactive_reason.unwrap_or_default();
+        assert!(reason.contains("invalid calibration"));
+        Ok(())
     }
 }
