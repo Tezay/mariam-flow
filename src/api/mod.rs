@@ -9,5 +9,6 @@ pub mod responses;
 pub fn router(state: Arc<RwLock<AppState>>) -> Router {
     Router::new()
         .route("/api/queue", get(handlers::get_queue))
+        .route("/api/health", get(handlers::get_health))
         .with_state(state)
 }

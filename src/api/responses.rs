@@ -18,6 +18,35 @@ pub struct QueueErrorResponse {
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum HealthStatus {
+    Ok,
+    Degraded,
+    Ko,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct HealthSuccessResponse {
+    pub status: HealthStatus,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct HealthErrorResponse {
+    pub error_code: HealthErrorCode,
+    pub error_message: String,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq, Clone, Copy)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum HealthErrorCode {
+    InternalError,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum QueueErrorCode {
     NoData,
@@ -81,6 +110,42 @@ mod tests {
                 "error_code": "NO_DATA",
                 "error_message": "no estimate available",
                 "timestamp": "2026-01-11T12:32:00Z"
+            })
+        );
+    }
+
+    #[test]
+    fn health_success_response_serializes_status() {
+        let response = HealthSuccessResponse {
+            status: HealthStatus::Ok,
+            timestamp: "2026-01-11T12:33:00Z".to_string(),
+        };
+
+        let value = serde_json::to_value(response).expect("serialize health success response");
+        assert_eq!(
+            value,
+            json!({
+                "status": "ok",
+                "timestamp": "2026-01-11T12:33:00Z"
+            })
+        );
+    }
+
+    #[test]
+    fn health_error_response_uses_screaming_snake_case_code() {
+        let response = HealthErrorResponse {
+            error_code: HealthErrorCode::InternalError,
+            error_message: "boom".to_string(),
+            timestamp: "2026-01-11T12:34:00Z".to_string(),
+        };
+
+        let value = serde_json::to_value(response).expect("serialize health error response");
+        assert_eq!(
+            value,
+            json!({
+                "error_code": "INTERNAL_ERROR",
+                "error_message": "boom",
+                "timestamp": "2026-01-11T12:34:00Z"
             })
         );
     }
