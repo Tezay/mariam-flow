@@ -159,30 +159,29 @@ fn parse_calibration(contents: &str) -> Result<CalibrationParams, CalibrationErr
             file.intercept
         )));
     }
-    if let Some(min_wait_minutes) = file.min_wait_minutes {
-        if min_wait_minutes > 240 {
-            return Err(CalibrationError::Invalid(format!(
-                "min_wait_minutes out of range: {}",
-                min_wait_minutes
-            )));
-        }
+    if let Some(min_wait_minutes) = file.min_wait_minutes
+        && min_wait_minutes > 240
+    {
+        return Err(CalibrationError::Invalid(format!(
+            "min_wait_minutes out of range: {}",
+            min_wait_minutes
+        )));
     }
-    if let Some(max_wait_minutes) = file.max_wait_minutes {
-        if max_wait_minutes > 240 {
-            return Err(CalibrationError::Invalid(format!(
-                "max_wait_minutes out of range: {}",
-                max_wait_minutes
-            )));
-        }
+    if let Some(max_wait_minutes) = file.max_wait_minutes
+        && max_wait_minutes > 240
+    {
+        return Err(CalibrationError::Invalid(format!(
+            "max_wait_minutes out of range: {}",
+            max_wait_minutes
+        )));
     }
     if let (Some(min_wait_minutes), Some(max_wait_minutes)) =
         (file.min_wait_minutes, file.max_wait_minutes)
+        && min_wait_minutes > max_wait_minutes
     {
-        if min_wait_minutes > max_wait_minutes {
-            return Err(CalibrationError::Invalid(format!(
-                "min_wait_minutes {min_wait_minutes} exceeds max_wait_minutes {max_wait_minutes}"
-            )));
-        }
+        return Err(CalibrationError::Invalid(format!(
+            "min_wait_minutes {min_wait_minutes} exceeds max_wait_minutes {max_wait_minutes}"
+        )));
     }
 
     Ok(CalibrationParams {

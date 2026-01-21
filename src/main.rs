@@ -7,6 +7,7 @@ mod error;
 mod estimation;
 mod sensor;
 mod state;
+use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
 fn init_tracing() {
@@ -58,6 +59,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing::warn!(reason = reason, "Calibration inactive");
         }
     }
+    let app = api::router(Arc::clone(&state));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    tracing::info!(%addr, "API server listening");
+    axum::serve(listener, app).await?;
     Ok(())
 }
 

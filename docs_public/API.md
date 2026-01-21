@@ -19,6 +19,13 @@ Version: 1.0 (Epic 2 target)
 }
 ```
 
+### Error Codes
+
+- `NO_DATA`: estimation unavailable
+- `SENSOR_UNAVAILABLE`: sensor data not available or sensor list missing
+- `INTERNAL_ERROR`: unexpected server error
+- `CONFIG_ERROR`: configuration invalid or missing required fields
+
 ## GET /api/queue
 
 Returns the current wait-time estimate and queue data.
@@ -33,10 +40,19 @@ Returns the current wait-time estimate and queue data.
 }
 ```
 
+### Required vs Optional Fields
+
+- Required: `wait_time_minutes`, `timestamp`
+- Optional: `queue_length` (omitted if not available)
+
 ### Notes
 
-- `queue_length` is optional and may be omitted if not available.
 - If the estimate is not available, the endpoint returns an error response.
+
+### Error Responses
+
+- HTTP 503 with `error_code=NO_DATA` when the estimate is unavailable.
+- HTTP 500 with `error_code=INTERNAL_ERROR` on unexpected errors.
 
 ## GET /api/health
 
@@ -51,15 +67,21 @@ Returns global health status for the device.
 }
 ```
 
+### Required vs Optional Fields
+
+- Required: `status`, `timestamp`
+- Optional: none
+
 ### Status Rules
 
 - `ok`: all sensors healthy
 - `degraded`: some sensors in error, system still functioning
 - `ko`: system not functioning
 
-### Error Response
+### Non-OK Responses
 
-- HTTP 503 for `ko` with an error response payload.
+- HTTP 503 with the same payload shape when `status=ko`.
+- HTTP 500 with `error_code=INTERNAL_ERROR` on unexpected errors.
 
 ## GET /api/sensors
 
@@ -86,7 +108,24 @@ Returns the status of each sensor.
 }
 ```
 
+### Required vs Optional Fields
+
+- Required: `sensors`, `timestamp`
+- Optional: per-sensor `error_code` (present only when status is `error`)
+
 ### Notes
 
 - `sensor_id` must be stable across boots.
 - `i2c_address` uses 7-bit address format in hex.
+
+### Per-Sensor Error Codes
+
+- `NO_RESPONSE`: sensor did not respond on I2C
+- `I2C_ERROR`: bus-level I2C error during read/write
+- `TIMEOUT`: sensor did not return a range within expected time
+- `INVALID_READING`: reading out of range or invalid
+
+### Error Responses
+
+- HTTP 503 with `error_code=SENSOR_UNAVAILABLE` when sensor list is unavailable.
+- HTTP 500 with `error_code=INTERNAL_ERROR` on unexpected errors.
