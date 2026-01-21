@@ -1,8 +1,9 @@
 use crate::api::responses::{
     HealthErrorCode, HealthErrorResponse, HealthStatus, HealthSuccessResponse, QueueErrorCode,
-    QueueErrorResponse, QueueSuccessResponse,
+    QueueErrorResponse, QueueSuccessResponse, SensorErrorCode, SensorStatus,
+    SensorStatusResponse, SensorsErrorCode, SensorsErrorResponse, SensorsSuccessResponse,
 };
-use crate::sensor::SensorStatus;
+use crate::sensor::{SensorStatus as DeviceSensorStatus, I2C_7BIT_MAX};
 use crate::state::{AppState, WaitTimeStatus};
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -19,14 +20,12 @@ const INTERNAL_ERROR_MESSAGE: &str = "Internal server error";
 
 #[derive(Debug)]
 enum TimestampError {
-    Conversion(String),
     Format(time::error::Format),
 }
 
 impl fmt::Display for TimestampError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TimestampError::Conversion(message) => write!(f, "timestamp conversion error: {message}"),
             TimestampError::Format(err) => write!(f, "timestamp format error: {err}"),
         }
     }
@@ -66,6 +65,24 @@ impl IntoResponse for HealthResponse {
 
 pub async fn get_health(State(state): State<Arc<RwLock<AppState>>>) -> impl IntoResponse {
     build_health_response(state, SystemTime::now())
+}
+
+pub enum SensorsResponse {
+    Success(SensorsSuccessResponse),
+    Error { status: StatusCode, body: SensorsErrorResponse },
+}
+
+impl IntoResponse for SensorsResponse {
+    fn into_response(self) -> Response {
+        match self {
+            SensorsResponse::Success(body) => (StatusCode::OK, Json(body)).into_response(),
+            SensorsResponse::Error { status, body } => (status, Json(body)).into_response(),
+        }
+    }
+}
+
+pub async fn get_sensors(State(state): State<Arc<RwLock<AppState>>>) -> impl IntoResponse {
+    build_sensors_response(state, SystemTime::now())
 }
 
 fn build_queue_response(state: Arc<RwLock<AppState>>) -> QueueResponse {
@@ -143,8 +160,7 @@ fn internal_error(message: &str) -> QueueResponse {
 }
 
 fn format_timestamp(timestamp: SystemTime) -> Result<String, TimestampError> {
-    let datetime = OffsetDateTime::try_from(timestamp)
-        .map_err(|err| TimestampError::Conversion(err.to_string()))?;
+    let datetime = OffsetDateTime::from(timestamp);
     datetime.format(&Rfc3339).map_err(TimestampError::Format)
 }
 
@@ -187,8 +203,8 @@ fn derive_health_status(sensors: &[crate::sensor::SensorInfo]) -> HealthStatus {
 
     for sensor in sensors {
         match sensor.status {
-            SensorStatus::Ready => has_ready = true,
-            SensorStatus::Error { .. } => has_error = true,
+            DeviceSensorStatus::Ready => has_ready = true,
+            DeviceSensorStatus::Error { .. } => has_error = true,
         }
     }
 
@@ -212,6 +228,115 @@ fn health_internal_error(message: &str) -> HealthResponse {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         body: HealthErrorResponse {
             error_code: HealthErrorCode::InternalError,
+            error_message: INTERNAL_ERROR_MESSAGE.to_string(),
+            timestamp: formatted,
+        },
+    }
+}
+
+fn build_sensors_response(
+    state: Arc<RwLock<AppState>>,
+    now: SystemTime,
+) -> SensorsResponse {
+    let guard = match state.read() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return sensors_internal_error("state lock poisoned while reading sensors");
+        }
+    };
+
+    let sensors = guard.sensors();
+    if sensors.is_empty() {
+        drop(guard);
+        return sensors_unavailable_response(now);
+    }
+
+    let mut mapped_sensors = Vec::with_capacity(sensors.len());
+    for sensor in sensors {
+        match map_sensor_info(sensor) {
+            Ok(mapped) => mapped_sensors.push(mapped),
+            Err(message) => {
+                drop(guard);
+                return sensors_internal_error(message);
+            }
+        }
+    }
+    drop(guard);
+
+    let timestamp = match format_timestamp(now) {
+        Ok(formatted) => formatted,
+        Err(_) => {
+            return sensors_internal_error("timestamp formatting failure");
+        }
+    };
+
+    SensorsResponse::Success(SensorsSuccessResponse {
+        sensors: mapped_sensors,
+        timestamp,
+    })
+}
+
+fn map_sensor_info(
+    sensor: &crate::sensor::SensorInfo,
+) -> Result<SensorStatusResponse, &'static str> {
+    if sensor.i2c_address > I2C_7BIT_MAX {
+        return Err("invalid i2c address for sensor status response");
+    }
+    let (status, error_code) = match &sensor.status {
+        DeviceSensorStatus::Ready => (SensorStatus::Ok, None),
+        DeviceSensorStatus::Error { message } => {
+            (SensorStatus::Error, Some(map_sensor_error_code(message)))
+        }
+    };
+
+    Ok(SensorStatusResponse {
+        sensor_id: format!("sensor-{}", sensor.sensor_id),
+        i2c_address: format!("0x{:02x}", sensor.i2c_address),
+        status,
+        error_code,
+    })
+}
+
+fn map_sensor_error_code(message: &str) -> SensorErrorCode {
+    let message_lower = message.to_lowercase();
+    if message_lower.contains("i2c") {
+        SensorErrorCode::I2cError
+    } else if message_lower.contains("timeout") {
+        SensorErrorCode::Timeout
+    } else if message_lower.contains("range") || message_lower.contains("invalid") {
+        SensorErrorCode::InvalidReading
+    } else {
+        SensorErrorCode::NoResponse
+    }
+}
+
+fn sensors_unavailable_response(now: SystemTime) -> SensorsResponse {
+    match format_timestamp(now) {
+        Ok(formatted) => SensorsResponse::Error {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            body: SensorsErrorResponse {
+                error_code: SensorsErrorCode::SensorUnavailable,
+                error_message: "Sensor list unavailable".to_string(),
+                timestamp: formatted,
+            },
+        },
+        Err(_) => sensors_internal_error("timestamp formatting failure"),
+    }
+}
+
+fn sensors_internal_error(message: &str) -> SensorsResponse {
+    error!(message = message, "Internal error while handling /api/sensors");
+    let formatted = format_timestamp(SystemTime::now()).unwrap_or_else(|err| {
+        error!(error = %err, "Failed to format sensors error timestamp");
+        OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+    });
+
+    SensorsResponse::Error {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        body: SensorsErrorResponse {
+            error_code: SensorsErrorCode::InternalError,
             error_message: INTERNAL_ERROR_MESSAGE.to_string(),
             timestamp: formatted,
         },
@@ -325,11 +450,15 @@ mod tests {
         }
     }
 
-    fn sensor_info(sensor_id: u32, status: SensorStatus) -> crate::sensor::SensorInfo {
+    fn sensor_info_with_address(
+        sensor_id: u32,
+        status: DeviceSensorStatus,
+        i2c_address: u8,
+    ) -> crate::sensor::SensorInfo {
         crate::sensor::SensorInfo {
             sensor_id,
             xshut_pin: 17,
-            i2c_address: 0x30,
+            i2c_address,
             status,
         }
     }
@@ -340,8 +469,8 @@ mod tests {
         let _receiver = app_state.subscribe_sensors();
         app_state
             .set_sensors(vec![
-                sensor_info(1, SensorStatus::Ready),
-                sensor_info(2, SensorStatus::Ready),
+                sensor_info_with_address(1, DeviceSensorStatus::Ready, 0x30),
+                sensor_info_with_address(2, DeviceSensorStatus::Ready, 0x31),
             ])
             .expect("set sensors");
         let state = Arc::new(RwLock::new(app_state));
@@ -366,12 +495,13 @@ mod tests {
         let _receiver = app_state.subscribe_sensors();
         app_state
             .set_sensors(vec![
-                sensor_info(1, SensorStatus::Ready),
-                sensor_info(
+                sensor_info_with_address(1, DeviceSensorStatus::Ready, 0x30),
+                sensor_info_with_address(
                     2,
-                    SensorStatus::Error {
+                    DeviceSensorStatus::Error {
                         message: "no response".to_string(),
                     },
+                    0x31,
                 ),
             ])
             .expect("set sensors");
@@ -396,11 +526,12 @@ mod tests {
         let mut app_state = AppState::new();
         let _receiver = app_state.subscribe_sensors();
         app_state
-            .set_sensors(vec![sensor_info(
+            .set_sensors(vec![sensor_info_with_address(
                 1,
-                SensorStatus::Error {
+                DeviceSensorStatus::Error {
                     message: "failed".to_string(),
                 },
+                0x30,
             )])
             .expect("set sensors");
         let state = Arc::new(RwLock::new(app_state));
@@ -456,6 +587,165 @@ mod tests {
                 assert_eq!(body.timestamp, "1970-01-01T00:00:06Z");
             }
             HealthResponse::Error { status, .. } => {
+                panic!("expected success response, got error: {status}");
+            }
+        }
+    }
+
+    #[test]
+    fn sensors_handler_returns_success_when_sensors_available() {
+        let mut app_state = AppState::new();
+        let _receiver = app_state.subscribe_sensors();
+        app_state
+            .set_sensors(vec![
+                sensor_info_with_address(1, DeviceSensorStatus::Ready, 0x30),
+                sensor_info_with_address(
+                    2,
+                    DeviceSensorStatus::Error {
+                        message: "i2c failure".to_string(),
+                    },
+                    0x31,
+                ),
+            ])
+            .expect("set sensors");
+        let state = Arc::new(RwLock::new(app_state));
+
+        let response = build_sensors_response(state, UNIX_EPOCH + Duration::from_secs(7));
+
+        match response {
+            SensorsResponse::Success(body) => {
+                assert_eq!(body.sensors.len(), 2);
+                assert_eq!(body.sensors[0].sensor_id, "sensor-1");
+                assert_eq!(body.sensors[0].i2c_address, "0x30");
+                assert_eq!(body.sensors[0].status, SensorStatus::Ok);
+                assert_eq!(body.sensors[0].error_code, None);
+                assert_eq!(body.sensors[1].sensor_id, "sensor-2");
+                assert_eq!(body.sensors[1].i2c_address, "0x31");
+                assert_eq!(body.sensors[1].status, SensorStatus::Error);
+                assert_eq!(body.sensors[1].error_code, Some(SensorErrorCode::I2cError));
+                assert_eq!(body.timestamp, "1970-01-01T00:00:07Z");
+            }
+            SensorsResponse::Error { status, .. } => {
+                panic!("expected success response, got error: {status}");
+            }
+        }
+    }
+
+    #[test]
+    fn sensors_handler_returns_service_unavailable_when_empty() {
+        let state = Arc::new(RwLock::new(AppState::new()));
+
+        let response = build_sensors_response(state, UNIX_EPOCH + Duration::from_secs(8));
+
+        match response {
+            SensorsResponse::Error { status, body } => {
+                assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+                assert_eq!(body.error_code, SensorsErrorCode::SensorUnavailable);
+            }
+            SensorsResponse::Success(_) => {
+                panic!("expected sensor unavailable response");
+            }
+        }
+    }
+
+    #[test]
+    fn sensors_handler_returns_internal_error_when_lock_poisoned() {
+        let state = Arc::new(RwLock::new(AppState::new()));
+        let state_for_thread = Arc::clone(&state);
+        let _ = std::thread::spawn(move || {
+            let _guard = state_for_thread.write().expect("lock for poison");
+            panic!("poison lock");
+        })
+        .join();
+
+        let response = build_sensors_response(state, UNIX_EPOCH + Duration::from_secs(9));
+
+        match response {
+            SensorsResponse::Error { status, body } => {
+                assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(body.error_code, SensorsErrorCode::InternalError);
+                assert_eq!(body.error_message, "Internal server error");
+            }
+            SensorsResponse::Success(_) => {
+                panic!("expected internal error response");
+            }
+        }
+    }
+
+    #[test]
+    fn sensors_handler_validates_i2c_address() {
+        let mut app_state = AppState::new();
+        let _receiver = app_state.subscribe_sensors();
+        app_state
+            .set_sensors(vec![sensor_info_with_address(
+                1,
+                DeviceSensorStatus::Ready,
+                0x80,
+            )])
+            .expect("set sensors");
+        let state = Arc::new(RwLock::new(app_state));
+
+        let response = build_sensors_response(state, UNIX_EPOCH + Duration::from_secs(10));
+
+        match response {
+            SensorsResponse::Error { status, body } => {
+                assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(body.error_code, SensorsErrorCode::InternalError);
+            }
+            SensorsResponse::Success(_) => {
+                panic!("expected internal error response");
+            }
+        }
+    }
+
+    #[test]
+    fn sensors_handler_maps_error_codes_by_message() {
+        let mut app_state = AppState::new();
+        let _receiver = app_state.subscribe_sensors();
+        app_state
+            .set_sensors(vec![
+                sensor_info_with_address(
+                    1,
+                    DeviceSensorStatus::Error {
+                        message: "timeout while reading".to_string(),
+                    },
+                    0x30,
+                ),
+                sensor_info_with_address(
+                    2,
+                    DeviceSensorStatus::Error {
+                        message: "range out of bounds".to_string(),
+                    },
+                    0x31,
+                ),
+                sensor_info_with_address(
+                    3,
+                    DeviceSensorStatus::Error {
+                        message: "invalid reading".to_string(),
+                    },
+                    0x32,
+                ),
+                sensor_info_with_address(
+                    4,
+                    DeviceSensorStatus::Error {
+                        message: "no response".to_string(),
+                    },
+                    0x33,
+                ),
+            ])
+            .expect("set sensors");
+        let state = Arc::new(RwLock::new(app_state));
+
+        let response = build_sensors_response(state, UNIX_EPOCH + Duration::from_secs(11));
+
+        match response {
+            SensorsResponse::Success(body) => {
+                assert_eq!(body.sensors[0].error_code, Some(SensorErrorCode::Timeout));
+                assert_eq!(body.sensors[1].error_code, Some(SensorErrorCode::InvalidReading));
+                assert_eq!(body.sensors[2].error_code, Some(SensorErrorCode::InvalidReading));
+                assert_eq!(body.sensors[3].error_code, Some(SensorErrorCode::NoResponse));
+            }
+            SensorsResponse::Error { status, .. } => {
                 panic!("expected success response, got error: {status}");
             }
         }
