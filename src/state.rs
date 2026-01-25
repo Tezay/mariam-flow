@@ -1,6 +1,9 @@
 use crate::error::AppError;
+use crate::estimation::linear_v1::LinearV1Model;
+use crate::estimation::model::EstimationModel;
 use crate::sensor::{SensorId, SensorInfo, SensorRangeStatus};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::watch;
 
@@ -72,6 +75,7 @@ pub struct AppState {
     wait_time: Option<WaitTimeEstimate>,
     wait_time_tx: watch::Sender<Option<WaitTimeEstimate>>,
     calibration: Option<CalibrationParams>,
+    model: Arc<dyn EstimationModel>,
 }
 
 impl AppState {
@@ -80,6 +84,7 @@ impl AppState {
         let (readings_tx, _readings_rx) = watch::channel(Vec::new());
         let (occupancy_tx, _occupancy_rx) = watch::channel(None);
         let (wait_time_tx, _wait_time_rx) = watch::channel(None);
+        let model = Arc::new(LinearV1Model::with_defaults());
         Self {
             sensors: Vec::new(),
             sensors_tx,
@@ -90,6 +95,7 @@ impl AppState {
             wait_time: None,
             wait_time_tx,
             calibration: None,
+            model,
         }
     }
 
@@ -103,9 +109,9 @@ impl AppState {
 
     pub fn set_sensors(&mut self, sensors: Vec<SensorInfo>) -> Result<(), AppError> {
         self.sensors = sensors.clone();
-        self.sensors_tx
-            .send(sensors)
-            .map_err(|_| AppError::WatchSend)
+        // Send is best-effort - no subscribers is OK, local state is still updated
+        let _ = self.sensors_tx.send(sensors);
+        Ok(())
     }
 
     pub fn readings(&self) -> &[SensorReading] {
@@ -118,9 +124,9 @@ impl AppState {
 
     pub fn set_readings(&mut self, readings: Vec<SensorReading>) -> Result<(), AppError> {
         self.readings = readings.clone();
-        self.readings_tx
-            .send(readings)
-            .map_err(|_| AppError::WatchSend)
+        // Send is best-effort - no subscribers is OK, local state is still updated
+        let _ = self.readings_tx.send(readings);
+        Ok(())
     }
 
     pub fn occupancy(&self) -> Option<&OccupancyReading> {
@@ -133,9 +139,9 @@ impl AppState {
 
     pub fn set_occupancy(&mut self, occupancy: OccupancyReading) -> Result<(), AppError> {
         self.occupancy = Some(occupancy.clone());
-        self.occupancy_tx
-            .send(Some(occupancy))
-            .map_err(|_| AppError::WatchSend)
+        // Send is best-effort - no subscribers is OK, local state is still updated
+        let _ = self.occupancy_tx.send(Some(occupancy));
+        Ok(())
     }
 
     pub fn wait_time(&self) -> Option<&WaitTimeEstimate> {
@@ -148,9 +154,9 @@ impl AppState {
 
     pub fn set_wait_time(&mut self, wait_time: WaitTimeEstimate) -> Result<(), AppError> {
         self.wait_time = Some(wait_time.clone());
-        self.wait_time_tx
-            .send(Some(wait_time))
-            .map_err(|_| AppError::WatchSend)
+        // Send is best-effort - no subscribers is OK, local state is still updated
+        let _ = self.wait_time_tx.send(Some(wait_time));
+        Ok(())
     }
 
     pub fn calibration(&self) -> Option<&CalibrationParams> {
@@ -159,6 +165,14 @@ impl AppState {
 
     pub fn set_calibration(&mut self, calibration: Option<CalibrationParams>) {
         self.calibration = calibration;
+    }
+
+    pub fn set_model(&mut self, model: Arc<dyn EstimationModel>) {
+        self.model = model;
+    }
+
+    pub fn model(&self) -> &Arc<dyn EstimationModel> {
+        &self.model
     }
 }
 
@@ -171,6 +185,7 @@ impl Default for AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sensor::SensorStatus; // Added for SensorStatus
     use std::time::{Duration, UNIX_EPOCH};
 
     #[test]

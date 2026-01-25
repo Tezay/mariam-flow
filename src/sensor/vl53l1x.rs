@@ -94,18 +94,46 @@ impl SensorDriver for Vl53l1xDriver {
         }
     }
 
-    fn read_distance(&mut self) -> Result<DistanceMeasurement, AppError> {
-        let result = match &mut self.inner {
+    fn start_ranging(&mut self) -> Result<(), AppError> {
+        match &mut self.inner {
             Vl53l1xInner::Owned(driver) => driver
-                .get_result()
-                .map_err(|err| AppError::Sensor(format!("{err:?}")))?,
+                .start_ranging()
+                .map_err(|err| AppError::Sensor(format!("{err:?}"))),
             Vl53l1xInner::Shared(driver) => {
                 let mut guard = driver
                     .lock()
                     .map_err(|_| AppError::Sensor("sensor driver lock poisoned".to_string()))?;
                 guard
+                    .start_ranging()
+                    .map_err(|err| AppError::Sensor(format!("{err:?}")))
+            }
+        }
+    }
+
+    fn read_distance(&mut self) -> Result<DistanceMeasurement, AppError> {
+        let result = match &mut self.inner {
+            Vl53l1xInner::Owned(driver) => {
+                let result = driver
                     .get_result()
-                    .map_err(|err| AppError::Sensor(format!("{err:?}")))?
+                    .map_err(|err| AppError::Sensor(format!("{err:?}")))?;
+                // Clear interrupt to trigger next measurement
+                driver
+                    .clear_interrupt()
+                    .map_err(|err| AppError::Sensor(format!("clear_interrupt: {err:?}")))?;
+                result
+            }
+            Vl53l1xInner::Shared(driver) => {
+                let mut guard = driver
+                    .lock()
+                    .map_err(|_| AppError::Sensor("sensor driver lock poisoned".to_string()))?;
+                let result = guard
+                    .get_result()
+                    .map_err(|err| AppError::Sensor(format!("{err:?}")))?;
+                // Clear interrupt to trigger next measurement
+                guard
+                    .clear_interrupt()
+                    .map_err(|err| AppError::Sensor(format!("clear_interrupt: {err:?}")))?;
+                result
             }
         };
         Ok(DistanceMeasurement {
@@ -187,6 +215,12 @@ impl SensorDriver for Vl53l1xDriver {
     }
 
     fn verify(&mut self) -> Result<(), AppError> {
+        Err(AppError::Sensor(
+            "VL53L1X driver requires Linux/Raspberry Pi".to_string(),
+        ))
+    }
+
+    fn start_ranging(&mut self) -> Result<(), AppError> {
         Err(AppError::Sensor(
             "VL53L1X driver requires Linux/Raspberry Pi".to_string(),
         ))

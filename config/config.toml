@@ -12,3 +12,9 @@ path = "config/calibration.json"
 [sensors]
 # GPIO pins connected to XSHUT of each VL53L1X sensor (in order)
 xshut_pins = [17, 27, 22]
+
+[server]
+# Port for the API server (default: 8080)
+port = 8080
+# Refresh interval in seconds for the estimation pipeline (default: 5)
+refresh_interval_secs = 5

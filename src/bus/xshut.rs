@@ -127,6 +127,18 @@ where
             continue;
         }
 
+        // Start continuous ranging mode
+        if let Err(err) = driver.start_ranging() {
+            warn!(
+                sensor_id = sensor.sensor_id,
+                address = format_args!("{:#04x}", sensor.i2c_address),
+                error = %err,
+                "Failed to start ranging on sensor"
+            );
+            results.push(error_info(&sensor, err));
+            continue;
+        }
+
         results.push(SensorInfo {
             sensor_id: sensor.sensor_id,
             xshut_pin: sensor.xshut_pin,

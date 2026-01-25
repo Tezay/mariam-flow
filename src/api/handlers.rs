@@ -1,19 +1,19 @@
 use crate::api::responses::{
     HealthErrorCode, HealthErrorResponse, HealthStatus, HealthSuccessResponse, QueueErrorCode,
-    QueueErrorResponse, QueueSuccessResponse, SensorErrorCode, SensorStatus,
-    SensorStatusResponse, SensorsErrorCode, SensorsErrorResponse, SensorsSuccessResponse,
+    QueueErrorResponse, QueueSuccessResponse, SensorErrorCode, SensorStatus, SensorStatusResponse,
+    SensorsErrorCode, SensorsErrorResponse, SensorsSuccessResponse,
 };
-use crate::sensor::{SensorStatus as DeviceSensorStatus, I2C_7BIT_MAX};
+use crate::sensor::{I2C_7BIT_MAX, SensorStatus as DeviceSensorStatus};
 use crate::state::{AppState, WaitTimeStatus};
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use std::fmt;
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use tracing::error;
 
 const INTERNAL_ERROR_MESSAGE: &str = "Internal server error";
@@ -33,7 +33,10 @@ impl fmt::Display for TimestampError {
 
 pub enum QueueResponse {
     Success(QueueSuccessResponse),
-    Error { status: StatusCode, body: QueueErrorResponse },
+    Error {
+        status: StatusCode,
+        body: QueueErrorResponse,
+    },
 }
 
 impl IntoResponse for QueueResponse {
@@ -50,8 +53,14 @@ pub async fn get_queue(State(state): State<Arc<RwLock<AppState>>>) -> impl IntoR
 }
 
 pub enum HealthResponse {
-    Success { status: StatusCode, body: HealthSuccessResponse },
-    Error { status: StatusCode, body: HealthErrorResponse },
+    Success {
+        status: StatusCode,
+        body: HealthSuccessResponse,
+    },
+    Error {
+        status: StatusCode,
+        body: HealthErrorResponse,
+    },
 }
 
 impl IntoResponse for HealthResponse {
@@ -69,7 +78,10 @@ pub async fn get_health(State(state): State<Arc<RwLock<AppState>>>) -> impl Into
 
 pub enum SensorsResponse {
     Success(SensorsSuccessResponse),
-    Error { status: StatusCode, body: SensorsErrorResponse },
+    Error {
+        status: StatusCode,
+        body: SensorsErrorResponse,
+    },
 }
 
 impl IntoResponse for SensorsResponse {
@@ -119,9 +131,7 @@ fn success_response(wait_time_minutes: f64, timestamp: SystemTime) -> QueueRespo
             queue_length: None,
             timestamp: formatted,
         }),
-        Err(_err) => {
-            internal_error("timestamp formatting failure")
-        }
+        Err(_err) => internal_error("timestamp formatting failure"),
     }
 }
 
@@ -135,14 +145,15 @@ fn no_data_response(timestamp: SystemTime) -> QueueResponse {
                 timestamp: formatted,
             },
         },
-        Err(_err) => {
-            internal_error("timestamp formatting failure")
-        }
+        Err(_err) => internal_error("timestamp formatting failure"),
     }
 }
 
 fn internal_error(message: &str) -> QueueResponse {
-    error!(message = message, "Internal error while handling /api/queue");
+    error!(
+        message = message,
+        "Internal error while handling /api/queue"
+    );
     let formatted = format_timestamp(SystemTime::now()).unwrap_or_else(|err| {
         error!(error = %err, "Failed to format internal error timestamp");
         OffsetDateTime::now_utc()
@@ -216,7 +227,10 @@ fn derive_health_status(sensors: &[crate::sensor::SensorInfo]) -> HealthStatus {
 }
 
 fn health_internal_error(message: &str) -> HealthResponse {
-    error!(message = message, "Internal error while handling /api/health");
+    error!(
+        message = message,
+        "Internal error while handling /api/health"
+    );
     let formatted = format_timestamp(SystemTime::now()).unwrap_or_else(|err| {
         error!(error = %err, "Failed to format health error timestamp");
         OffsetDateTime::now_utc()
@@ -234,10 +248,7 @@ fn health_internal_error(message: &str) -> HealthResponse {
     }
 }
 
-fn build_sensors_response(
-    state: Arc<RwLock<AppState>>,
-    now: SystemTime,
-) -> SensorsResponse {
+fn build_sensors_response(state: Arc<RwLock<AppState>>, now: SystemTime) -> SensorsResponse {
     let guard = match state.read() {
         Ok(guard) => guard,
         Err(_) => {
@@ -325,7 +336,10 @@ fn sensors_unavailable_response(now: SystemTime) -> SensorsResponse {
 }
 
 fn sensors_internal_error(message: &str) -> SensorsResponse {
-    error!(message = message, "Internal error while handling /api/sensors");
+    error!(
+        message = message,
+        "Internal error while handling /api/sensors"
+    );
     let formatted = format_timestamp(SystemTime::now()).unwrap_or_else(|err| {
         error!(error = %err, "Failed to format sensors error timestamp");
         OffsetDateTime::now_utc()
@@ -341,6 +355,101 @@ fn sensors_internal_error(message: &str) -> SensorsResponse {
             timestamp: formatted,
         },
     }
+}
+
+// Debug Readings Handler
+
+use crate::state::ReadingStatus;
+use serde::Serialize;
+
+#[derive(Debug, Serialize)]
+pub struct DebugReadingsResponse {
+    pub occupancy_threshold_mm: u16,
+    pub sensors: Vec<DebugSensorReading>,
+    pub occupancy_percent: Option<f64>,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DebugSensorReading {
+    pub sensor_id: u32,
+    pub distance_mm: u16,
+    pub obstructed: bool,
+    pub status: String,
+}
+
+pub async fn get_debug_readings(State(state): State<Arc<RwLock<AppState>>>) -> impl IntoResponse {
+    build_debug_readings_response(state, SystemTime::now())
+}
+
+fn build_debug_readings_response(
+    state: Arc<RwLock<AppState>>,
+    now: SystemTime,
+) -> impl IntoResponse {
+    let guard = match state.read() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "state lock poisoned"
+                })),
+            );
+        }
+    };
+
+    let model = state.read().map(|s| s.model().clone()).ok();
+    // Default fallback if we can't get model (shouldn't happen)
+    let threshold_mm = model
+        .map(|m| m.occupancy_config().threshold_mm)
+        .unwrap_or(1200);
+
+    let readings = guard.readings();
+    let mut sensors = Vec::with_capacity(readings.len());
+    let mut valid_count = 0u32;
+    let mut occupied_count = 0u32;
+
+    for reading in readings {
+        let (status_str, is_valid) = match &reading.status {
+            ReadingStatus::Ok { range_status } => (format!("ok ({:?})", range_status), true),
+            ReadingStatus::Error { reason } => (format!("error: {}", reason), false),
+        };
+
+        let obstructed = is_valid && reading.distance_mm <= threshold_mm;
+
+        if is_valid {
+            valid_count += 1;
+            if obstructed {
+                occupied_count += 1;
+            }
+        }
+
+        sensors.push(DebugSensorReading {
+            sensor_id: reading.sensor_id,
+            distance_mm: reading.distance_mm,
+            obstructed,
+            status: status_str,
+        });
+    }
+    drop(guard);
+
+    let occupancy_percent = if valid_count > 0 {
+        Some(((occupied_count as f64 / valid_count as f64) * 100.0).round())
+    } else {
+        None
+    };
+
+    let timestamp = format_timestamp(now).unwrap_or_else(|_| "unknown".to_string());
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!(DebugReadingsResponse {
+            occupancy_threshold_mm: threshold_mm,
+            sensors,
+            occupancy_percent,
+            timestamp,
+        })),
+    )
 }
 
 #[cfg(test)]
@@ -361,9 +470,7 @@ mod tests {
             status: WaitTimeStatus::Ok,
             error_code: None,
         };
-        app_state
-            .set_wait_time(estimate)
-            .expect("set wait time");
+        app_state.set_wait_time(estimate).expect("set wait time");
         let state = Arc::new(RwLock::new(app_state));
 
         let response = build_queue_response(state);
@@ -431,9 +538,7 @@ mod tests {
             status: WaitTimeStatus::Ok,
             error_code: None,
         };
-        app_state
-            .set_wait_time(estimate)
-            .expect("set wait time");
+        app_state.set_wait_time(estimate).expect("set wait time");
         let state = Arc::new(RwLock::new(app_state));
 
         let response = build_queue_response(state);
@@ -741,9 +846,18 @@ mod tests {
         match response {
             SensorsResponse::Success(body) => {
                 assert_eq!(body.sensors[0].error_code, Some(SensorErrorCode::Timeout));
-                assert_eq!(body.sensors[1].error_code, Some(SensorErrorCode::InvalidReading));
-                assert_eq!(body.sensors[2].error_code, Some(SensorErrorCode::InvalidReading));
-                assert_eq!(body.sensors[3].error_code, Some(SensorErrorCode::NoResponse));
+                assert_eq!(
+                    body.sensors[1].error_code,
+                    Some(SensorErrorCode::InvalidReading)
+                );
+                assert_eq!(
+                    body.sensors[2].error_code,
+                    Some(SensorErrorCode::InvalidReading)
+                );
+                assert_eq!(
+                    body.sensors[3].error_code,
+                    Some(SensorErrorCode::NoResponse)
+                );
             }
             SensorsResponse::Error { status, .. } => {
                 panic!("expected success response, got error: {status}");

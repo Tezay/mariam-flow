@@ -1,7 +1,12 @@
 {
   "model": "linear_v1",
-  "slope": 1.8,
-  "intercept": 0.0,
-  "min_wait_minutes": 0,
-  "max_wait_minutes": 60
+  "occupancy_threshold_mm": 1200,
+  "sensor_min_mm": 10,
+  "sensor_max_mm": 4000,
+  "params": {
+    "slope": 1.5,
+    "intercept": 0.0,
+    "min_wait_minutes": 0,
+    "max_wait_minutes": 30
+  }
 }

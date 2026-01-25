@@ -151,6 +151,11 @@ impl SensorDriver for MockSensorDriver {
         }
     }
 
+    fn start_ranging(&mut self) -> Result<(), AppError> {
+        // Mock always succeeds for start_ranging
+        Ok(())
+    }
+
     fn read_distance(&mut self) -> Result<DistanceMeasurement, AppError> {
         if self.behavior.read_distance_ok {
             Ok(DistanceMeasurement {

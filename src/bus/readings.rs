@@ -1,27 +1,22 @@
 use crate::error::AppError;
+use crate::estimation::model::EstimationModel;
 use crate::sensor::{SensorDriver, SensorDriverFactory, SensorRangeStatus, SensorStatus};
 use crate::state::{AppState, ReadingStatus, SensorReading};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use tracing::{debug, warn};
-
-const MIN_DISTANCE_MM: u16 = 40;
-const MAX_DISTANCE_MM: u16 = 4000;
 
 /// Read distances for ready sensors using a dedicated sync cycle and persist into shared state.
 pub fn read_and_store_distances<F>(
     factory: &mut F,
+    sensors: &mut [crate::sensor::SensorInfo],
     state: &Arc<RwLock<AppState>>,
+    model: &dyn EstimationModel,
 ) -> Result<Vec<SensorReading>, AppError>
 where
     F: SensorDriverFactory,
 {
-    let sensors = {
-        let guard = state.read().map_err(|_| AppError::StateLock)?;
-        guard.sensors().to_vec()
-    };
-
     let mut readings = Vec::new();
     for sensor in sensors {
         if !matches!(sensor.status, SensorStatus::Ready) {
@@ -71,7 +66,7 @@ where
             }
         };
 
-        let status = validate_measurement(measurement.distance_mm, measurement.range_status);
+        let status = validate_measurement(measurement.distance_mm, measurement.range_status, model);
         if let ReadingStatus::Error { ref reason } = status {
             warn!(
                 sensor_id = sensor.sensor_id,
@@ -96,37 +91,23 @@ where
     Ok(readings)
 }
 
-/// Spawn a dedicated sync thread that continuously refreshes distance readings.
-pub fn spawn_reading_thread<F>(
-    mut factory: F,
-    state: Arc<RwLock<AppState>>,
-    interval: Duration,
-    stop: Arc<AtomicBool>,
-) -> std::thread::JoinHandle<()>
-where
-    F: SensorDriverFactory + Send + 'static,
-{
-    std::thread::spawn(move || {
-        while !stop.load(Ordering::Relaxed) {
-            if let Err(err) = read_and_store_distances(&mut factory, &state) {
-                warn!(error = %err, "Distance read cycle failed");
-            }
-            std::thread::sleep(interval);
-        }
-    })
-}
-
-fn validate_measurement(distance_mm: u16, range_status: SensorRangeStatus) -> ReadingStatus {
+fn validate_measurement(
+    distance_mm: u16,
+    range_status: SensorRangeStatus,
+    model: &dyn EstimationModel,
+) -> ReadingStatus {
     if !range_status.is_valid() {
         return ReadingStatus::Error {
             reason: format!("range status not valid: {range_status:?}"),
         };
     }
 
-    if !(MIN_DISTANCE_MM..=MAX_DISTANCE_MM).contains(&distance_mm) {
+    let config = model.occupancy_config();
+    if !(config.sensor_min_mm..=config.sensor_max_mm).contains(&distance_mm) {
         return ReadingStatus::Error {
             reason: format!(
-                "distance out of range: {distance_mm}mm (expected {MIN_DISTANCE_MM}-{MAX_DISTANCE_MM})"
+                "distance out of range: {distance_mm}mm (expected {}-{})",
+                config.sensor_min_mm, config.sensor_max_mm
             ),
         };
     }
@@ -137,6 +118,8 @@ fn validate_measurement(distance_mm: u16, range_status: SensorRangeStatus) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::estimation::linear_v1::{LinearV1Model, LinearV1Params};
+    use crate::estimation::model::OccupancyConfig;
     use crate::sensor::mock::{MockSensorBehavior, MockSensorFactory};
     use crate::sensor::{SensorInfo, SensorStatus};
     use std::time::UNIX_EPOCH;
@@ -149,6 +132,14 @@ mod tests {
             MockSensorBehavior::with_reading(200, SensorRangeStatus::SignalFailure),
         ];
         let mut factory = MockSensorFactory::new(behaviors);
+        let model = LinearV1Model::new(
+            LinearV1Params::default(),
+            OccupancyConfig {
+                threshold_mm: 1000,
+                sensor_min_mm: 40,
+                sensor_max_mm: 4000,
+            },
+        );
 
         let state = Arc::new(RwLock::new(AppState::new()));
         let _sensor_rx = {
@@ -159,31 +150,34 @@ mod tests {
             let guard = state.read().map_err(|_| AppError::StateLock)?;
             guard.subscribe_readings()
         };
+
+        let mut sensors = vec![
+            SensorInfo {
+                sensor_id: 1,
+                xshut_pin: 17,
+                i2c_address: 0x30,
+                status: SensorStatus::Ready,
+            },
+            SensorInfo {
+                sensor_id: 2,
+                xshut_pin: 27,
+                i2c_address: 0x31,
+                status: SensorStatus::Ready,
+            },
+            SensorInfo {
+                sensor_id: 3,
+                xshut_pin: 22,
+                i2c_address: 0x32,
+                status: SensorStatus::Ready,
+            },
+        ];
+
         {
             let mut guard = state.write().map_err(|_| AppError::StateLock)?;
-            guard.set_sensors(vec![
-                SensorInfo {
-                    sensor_id: 1,
-                    xshut_pin: 17,
-                    i2c_address: 0x30,
-                    status: SensorStatus::Ready,
-                },
-                SensorInfo {
-                    sensor_id: 2,
-                    xshut_pin: 27,
-                    i2c_address: 0x31,
-                    status: SensorStatus::Ready,
-                },
-                SensorInfo {
-                    sensor_id: 3,
-                    xshut_pin: 22,
-                    i2c_address: 0x32,
-                    status: SensorStatus::Ready,
-                },
-            ])?;
+            guard.set_sensors(sensors.clone())?;
         }
 
-        let readings = read_and_store_distances(&mut factory, &state)?;
+        let readings = read_and_store_distances(&mut factory, &mut sensors, &state, &model)?;
 
         assert_eq!(readings.len(), 3);
         assert_eq!(readings[0].sensor_id, 1);
@@ -226,6 +220,7 @@ mod tests {
             MockSensorBehavior::fail_read_distance(),
         ];
         let mut factory = MockSensorFactory::new(behaviors);
+        let model = LinearV1Model::with_defaults();
 
         let state = Arc::new(RwLock::new(AppState::new()));
         let _sensor_rx = {
@@ -236,31 +231,34 @@ mod tests {
             let guard = state.read().map_err(|_| AppError::StateLock)?;
             guard.subscribe_readings()
         };
+
+        let mut sensors = vec![
+            SensorInfo {
+                sensor_id: 1,
+                xshut_pin: 17,
+                i2c_address: 0x30,
+                status: SensorStatus::Ready,
+            },
+            SensorInfo {
+                sensor_id: 2,
+                xshut_pin: 27,
+                i2c_address: 0x31,
+                status: SensorStatus::Ready,
+            },
+            SensorInfo {
+                sensor_id: 3,
+                xshut_pin: 22,
+                i2c_address: 0x32,
+                status: SensorStatus::Ready,
+            },
+        ];
+
         {
             let mut guard = state.write().map_err(|_| AppError::StateLock)?;
-            guard.set_sensors(vec![
-                SensorInfo {
-                    sensor_id: 1,
-                    xshut_pin: 17,
-                    i2c_address: 0x30,
-                    status: SensorStatus::Ready,
-                },
-                SensorInfo {
-                    sensor_id: 2,
-                    xshut_pin: 27,
-                    i2c_address: 0x31,
-                    status: SensorStatus::Ready,
-                },
-                SensorInfo {
-                    sensor_id: 3,
-                    xshut_pin: 22,
-                    i2c_address: 0x32,
-                    status: SensorStatus::Ready,
-                },
-            ])?;
+            guard.set_sensors(sensors.clone())?;
         }
 
-        let readings = read_and_store_distances(&mut factory, &state)?;
+        let readings = read_and_store_distances(&mut factory, &mut sensors, &state, &model)?;
 
         assert_eq!(readings.len(), 3);
         match &readings[0].status {

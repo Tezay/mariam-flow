@@ -1,9 +1,12 @@
 use crate::sensor::{SensorConfig, build_sensor_configs};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use thiserror::Error;
 
 pub const DEFAULT_CONFIG_PATH: &str = "config/config.toml";
+pub const DEFAULT_SERVER_PORT: u16 = 8080;
+pub const DEFAULT_REFRESH_INTERVAL_SECS: u64 = 5;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
@@ -13,6 +16,8 @@ pub struct Config {
     pub calibration: Option<CalibrationSettings>,
     #[serde(default)]
     pub sensors: Option<SensorsSection>,
+    #[serde(default)]
+    pub server: Option<ServerSection>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -34,6 +39,14 @@ pub struct CalibrationSettings {
 pub struct SensorsSection {
     /// GPIO pin numbers for XSHUT control, in sensor order
     pub xshut_pins: Vec<u8>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ServerSection {
+    /// Port to listen on (default: 8080)
+    pub port: Option<u16>,
+    /// Refresh interval in seconds for the estimation pipeline (default: 5)
+    pub refresh_interval_secs: Option<u64>,
 }
 
 #[derive(Debug, Error)]
@@ -80,6 +93,24 @@ impl Config {
             .as_ref()
             .map(|s| s.xshut_pins.as_slice())
             .unwrap_or(&[])
+    }
+
+    /// Returns the server port (default: 8080)
+    pub fn server_port(&self) -> u16 {
+        self.server
+            .as_ref()
+            .and_then(|s| s.port)
+            .unwrap_or(DEFAULT_SERVER_PORT)
+    }
+
+    /// Returns the refresh interval as Duration (default: 5 seconds)
+    pub fn refresh_interval(&self) -> Duration {
+        let secs = self
+            .server
+            .as_ref()
+            .and_then(|s| s.refresh_interval_secs)
+            .unwrap_or(DEFAULT_REFRESH_INTERVAL_SECS);
+        Duration::from_secs(secs)
     }
 }
 

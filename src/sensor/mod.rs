@@ -66,6 +66,8 @@ pub trait SensorDriver {
     fn init_default(&mut self) -> Result<(), AppError>;
     fn set_address(&mut self, new_address: u8) -> Result<(), AppError>;
     fn verify(&mut self) -> Result<(), AppError>;
+    /// Start continuous ranging mode. Must be called after init before reading distances.
+    fn start_ranging(&mut self) -> Result<(), AppError>;
     fn read_distance(&mut self) -> Result<DistanceMeasurement, AppError>;
 }
 

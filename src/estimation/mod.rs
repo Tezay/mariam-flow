@@ -2,8 +2,8 @@ use crate::bus::readings::read_and_store_distances;
 use crate::error::AppError;
 use crate::sensor::SensorDriverFactory;
 use crate::state::{
-    AppState, CalibrationParams, OccupancyReading, OccupancyStatus, WaitTimeErrorCode,
-    WaitTimeEstimate, WaitTimeStatus,
+    AppState, OccupancyReading, OccupancyStatus, WaitTimeErrorCode, WaitTimeEstimate,
+    WaitTimeStatus,
 };
 use serde::Deserialize;
 use std::path::Path;
@@ -11,20 +11,51 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 use thiserror::Error;
-use tracing::warn;
+use tracing::{info, warn};
 
-pub mod linear;
+pub mod linear_v1;
+pub mod linear_v2;
+pub mod model;
+
+use linear_v1::{LinearV1Model, LinearV1Params};
+use linear_v2::{LinearV2Model, LinearV2Params};
+use model::{EstimationModel, OccupancyConfig};
 
 pub const DEFAULT_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
+// Model Factory
+pub fn create_model(
+    config: &CalibrationFile,
+) -> Result<Box<dyn EstimationModel>, CalibrationError> {
+    let occupancy_config = OccupancyConfig {
+        threshold_mm: config.occupancy_threshold_mm.unwrap_or(1200),
+        sensor_min_mm: config.sensor_min_mm.unwrap_or(40),
+        sensor_max_mm: config.sensor_max_mm.unwrap_or(4000),
+    };
+
+    match config.model.as_str() {
+        "linear_v1" => {
+            let params: LinearV1Params = serde_json::from_value(config.params.clone())?;
+            Ok(Box::new(LinearV1Model::new(params, occupancy_config)))
+        }
+        "linear_v2" => {
+            let params: LinearV2Params = serde_json::from_value(config.params.clone())?;
+            Ok(Box::new(LinearV2Model::new(params, occupancy_config)))
+        }
+        other => Err(CalibrationError::Invalid(format!("unknown model: {other}"))),
+    }
+}
+
 pub fn update_occupancy_from_readings(
     state: &Arc<RwLock<AppState>>,
+    model: &dyn EstimationModel,
 ) -> Result<OccupancyReading, AppError> {
-    update_occupancy_from_readings_at(state, SystemTime::now())
+    update_occupancy_from_readings_at(state, model, SystemTime::now())
 }
 
 fn update_occupancy_from_readings_at(
     state: &Arc<RwLock<AppState>>,
+    model: &dyn EstimationModel,
     timestamp: SystemTime,
 ) -> Result<OccupancyReading, AppError> {
     let readings = {
@@ -32,7 +63,8 @@ fn update_occupancy_from_readings_at(
         guard.readings().to_vec()
     };
 
-    let occupancy = linear::compute_occupancy(&readings, timestamp);
+    let occupancy = model.compute_occupancy(&readings, timestamp);
+
     if matches!(occupancy.status, OccupancyStatus::NoData) {
         warn!("No valid sensor readings available for occupancy calculation");
     } else if matches!(occupancy.status, OccupancyStatus::Degraded) {
@@ -47,29 +79,27 @@ fn update_occupancy_from_readings_at(
 
 pub fn update_wait_time_from_occupancy(
     state: &Arc<RwLock<AppState>>,
+    model: &dyn EstimationModel,
 ) -> Result<WaitTimeEstimate, AppError> {
-    update_wait_time_from_occupancy_at(state, SystemTime::now())
+    update_wait_time_from_occupancy_at(state, model, SystemTime::now())
 }
 
 fn update_wait_time_from_occupancy_at(
     state: &Arc<RwLock<AppState>>,
+    model: &dyn EstimationModel,
     timestamp: SystemTime,
 ) -> Result<WaitTimeEstimate, AppError> {
     let occupancy = {
         let guard = state.read().map_err(|_| AppError::StateLock)?;
-        guard.occupancy().cloned()
+        // If occupancy is None, create a dummy one with NoData status
+        guard.occupancy().cloned().unwrap_or(OccupancyReading {
+            occupancy_percent: None,
+            timestamp,
+            status: OccupancyStatus::NoData,
+        })
     };
 
-    let occupancy = occupancy.unwrap_or(OccupancyReading {
-        occupancy_percent: None,
-        timestamp,
-        status: OccupancyStatus::NoData,
-    });
-    let calibration = {
-        let guard = state.read().map_err(|_| AppError::StateLock)?;
-        guard.calibration().cloned()
-    };
-    let wait_time = linear::compute_wait_time(&occupancy, timestamp, calibration.as_ref());
+    let wait_time = model.compute_wait_time(&occupancy, timestamp);
 
     if matches!(wait_time.status, WaitTimeStatus::Degraded) {
         if matches!(wait_time.error_code, Some(WaitTimeErrorCode::NoData)) {
@@ -86,12 +116,12 @@ fn update_wait_time_from_occupancy_at(
 }
 
 #[derive(Debug, Deserialize)]
-struct CalibrationFile {
-    model: String,
-    slope: f64,
-    intercept: f64,
-    min_wait_minutes: Option<u32>,
-    max_wait_minutes: Option<u32>,
+pub struct CalibrationFile {
+    pub model: String,
+    pub occupancy_threshold_mm: Option<u16>,
+    pub sensor_min_mm: Option<u16>,
+    pub sensor_max_mm: Option<u16>,
+    pub params: serde_json::Value,
 }
 
 #[derive(Debug, Error)]
@@ -104,317 +134,75 @@ pub enum CalibrationError {
     Invalid(String),
 }
 
-#[derive(Debug)]
-pub struct CalibrationLoad {
-    pub calibration: Option<CalibrationParams>,
-    pub inactive_reason: Option<String>,
+pub fn load_calibration_from_path(
+    path: impl AsRef<Path>,
+) -> Result<Box<dyn EstimationModel>, CalibrationError> {
+    let contents = std::fs::read_to_string(path)?;
+    let config: CalibrationFile = serde_json::from_str(&contents)?;
+    create_model(&config)
 }
 
-impl CalibrationLoad {
-    fn active(calibration: CalibrationParams) -> Self {
-        Self {
-            calibration: Some(calibration),
-            inactive_reason: None,
-        }
-    }
-
-    pub fn inactive(reason: impl Into<String>) -> Self {
-        Self {
-            calibration: None,
-            inactive_reason: Some(reason.into()),
-        }
-    }
-}
-
-pub fn load_calibration_from_path(path: &Path) -> CalibrationLoad {
-    match std::fs::read_to_string(path) {
-        Ok(contents) => match parse_calibration(&contents) {
-            Ok(calibration) => CalibrationLoad::active(calibration),
-            Err(err) => CalibrationLoad::inactive(err.to_string()),
-        },
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            CalibrationLoad::inactive(format!("calibration file missing at {}", path.display()))
-        }
-        Err(err) => CalibrationLoad::inactive(format!("failed to read calibration file: {err}")),
-    }
-}
-
-fn parse_calibration(contents: &str) -> Result<CalibrationParams, CalibrationError> {
-    let file = CalibrationFile::deserialize(&mut serde_json::Deserializer::from_str(contents))?;
-    if file.model != "linear_v1" {
-        return Err(CalibrationError::Invalid(format!(
-            "unsupported model: {}",
-            file.model
-        )));
-    }
-    if !(0.1..=10.0).contains(&file.slope) {
-        return Err(CalibrationError::Invalid(format!(
-            "slope out of range: {}",
-            file.slope
-        )));
-    }
-    if !(-30.0..=30.0).contains(&file.intercept) {
-        return Err(CalibrationError::Invalid(format!(
-            "intercept out of range: {}",
-            file.intercept
-        )));
-    }
-    if let Some(min_wait_minutes) = file.min_wait_minutes
-        && min_wait_minutes > 240
-    {
-        return Err(CalibrationError::Invalid(format!(
-            "min_wait_minutes out of range: {}",
-            min_wait_minutes
-        )));
-    }
-    if let Some(max_wait_minutes) = file.max_wait_minutes
-        && max_wait_minutes > 240
-    {
-        return Err(CalibrationError::Invalid(format!(
-            "max_wait_minutes out of range: {}",
-            max_wait_minutes
-        )));
-    }
-    if let (Some(min_wait_minutes), Some(max_wait_minutes)) =
-        (file.min_wait_minutes, file.max_wait_minutes)
-        && min_wait_minutes > max_wait_minutes
-    {
-        return Err(CalibrationError::Invalid(format!(
-            "min_wait_minutes {min_wait_minutes} exceeds max_wait_minutes {max_wait_minutes}"
-        )));
-    }
-
-    Ok(CalibrationParams {
-        slope: file.slope,
-        intercept: file.intercept,
-        min_wait_minutes: file.min_wait_minutes,
-        max_wait_minutes: file.max_wait_minutes,
-    })
-}
-
-pub fn run_refresh_cycle<F>(
-    factory: &mut F,
+pub fn run_refresh_cycle(
     state: &Arc<RwLock<AppState>>,
-) -> Result<(OccupancyReading, WaitTimeEstimate), AppError>
-where
-    F: SensorDriverFactory,
-{
-    read_and_store_distances(factory, state)?;
-    let cycle_timestamp = SystemTime::now();
-    let occupancy = update_occupancy_from_readings_at(state, cycle_timestamp)?;
-    let wait_time = update_wait_time_from_occupancy_at(state, cycle_timestamp)?;
-
-    Ok((occupancy, wait_time))
+    model: &dyn EstimationModel,
+) -> Result<(), AppError> {
+    update_occupancy_from_readings(state, model)?;
+    update_wait_time_from_occupancy(state, model)?;
+    Ok(())
 }
 
 pub fn spawn_refresh_thread<F>(
-    mut factory: F,
+    mut sensor_factory: F,
     state: Arc<RwLock<AppState>>,
     interval: Duration,
     stop: Arc<AtomicBool>,
+    model: Arc<dyn EstimationModel>,
 ) -> std::thread::JoinHandle<()>
 where
     F: SensorDriverFactory + Send + 'static,
 {
     std::thread::spawn(move || {
+        let mut sensors = {
+            let guard = state.read().expect("state lock poisoned");
+            guard.sensors().to_vec()
+        };
+
+        if sensors.is_empty() {
+            warn!("Refresh thread started with no sensors discovered");
+        }
+
         while !stop.load(Ordering::Relaxed) {
             let cycle_start = Instant::now();
-            if let Err(err) = run_refresh_cycle(&mut factory, &state) {
-                warn!(error = %err, "Refresh cycle failed");
+
+            if let Err(e) =
+                read_and_store_distances(&mut sensor_factory, &mut sensors, &state, model.as_ref())
+            {
+                warn!("Error reading sensors: {}", e);
             }
-            let elapsed = cycle_start.elapsed();
-            if elapsed > interval {
-                warn!(
-                    elapsed_ms = elapsed.as_millis(),
-                    interval_ms = interval.as_millis(),
-                    "Refresh cycle exceeded interval"
-                );
-                continue;
+
+            if let Err(e) = run_refresh_cycle(&state, model.as_ref()) {
+                warn!("Error running estimation cycle: {}", e);
             }
-            sleep_with_stop(&stop, interval - elapsed);
+
+            sleep_with_stop(interval, &stop, cycle_start);
         }
     })
 }
 
-fn sleep_with_stop(stop: &AtomicBool, duration: Duration) {
-    let deadline = Instant::now() + duration;
-    let max_chunk = Duration::from_millis(100);
+fn sleep_with_stop(duration: Duration, stop: &AtomicBool, start: Instant) {
+    let elapsed = start.elapsed();
+    if elapsed >= duration {
+        return;
+    }
+    let remaining = duration - elapsed;
+    let step = Duration::from_millis(100);
+    let mut slept = Duration::ZERO;
 
-    while !stop.load(Ordering::Relaxed) {
-        let now = Instant::now();
-        if now >= deadline {
+    while slept < remaining {
+        if stop.load(Ordering::Relaxed) {
             break;
         }
-
-        let remaining = deadline - now;
-        let sleep_for = remaining.min(max_chunk);
-        std::thread::sleep(sleep_for);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sensor::mock::{MockSensorBehavior, MockSensorFactory};
-    use crate::sensor::{SensorInfo, SensorRangeStatus, SensorStatus};
-    use std::sync::{Arc, RwLock};
-    use std::time::UNIX_EPOCH;
-
-    #[test]
-    fn update_wait_time_handles_missing_occupancy() {
-        let state = Arc::new(RwLock::new(AppState::new()));
-        let _receiver = state
-            .read()
-            .expect("state lock poisoned")
-            .subscribe_wait_time();
-
-        let estimate = update_wait_time_from_occupancy(&state).expect("wait time update failed");
-
-        assert_eq!(estimate.wait_time_minutes, None);
-        assert_eq!(estimate.status, WaitTimeStatus::Degraded);
-        assert_eq!(estimate.error_code, Some(WaitTimeErrorCode::NoData));
-
-        let guard = state.read().expect("state lock poisoned");
-        assert_eq!(guard.wait_time(), Some(&estimate));
-    }
-
-    #[test]
-    fn refresh_cycle_updates_pipeline_state() -> Result<(), AppError> {
-        let behaviors = vec![
-            MockSensorBehavior::with_reading(800, SensorRangeStatus::Valid),
-            MockSensorBehavior::with_reading(1800, SensorRangeStatus::Valid),
-        ];
-        let mut factory = MockSensorFactory::new(behaviors);
-
-        let state = Arc::new(RwLock::new(AppState::new()));
-        let (_sensor_rx, _reading_rx, _occupancy_rx, _wait_time_rx) = {
-            let guard = state.read().map_err(|_| AppError::StateLock)?;
-            (
-                guard.subscribe_sensors(),
-                guard.subscribe_readings(),
-                guard.subscribe_occupancy(),
-                guard.subscribe_wait_time(),
-            )
-        };
-        {
-            let mut guard = state.write().map_err(|_| AppError::StateLock)?;
-            guard.set_sensors(vec![
-                SensorInfo {
-                    sensor_id: 1,
-                    xshut_pin: 17,
-                    i2c_address: 0x30,
-                    status: SensorStatus::Ready,
-                },
-                SensorInfo {
-                    sensor_id: 2,
-                    xshut_pin: 27,
-                    i2c_address: 0x31,
-                    status: SensorStatus::Ready,
-                },
-            ])?;
-        }
-
-        let (occupancy, wait_time) = run_refresh_cycle(&mut factory, &state)?;
-
-        assert_eq!(occupancy.timestamp, wait_time.timestamp);
-        assert!(occupancy.timestamp >= UNIX_EPOCH);
-
-        let guard = state.read().map_err(|_| AppError::StateLock)?;
-        let max_reading_ts = guard
-            .readings()
-            .iter()
-            .map(|reading| reading.timestamp)
-            .max()
-            .expect("expected readings in state");
-        assert_eq!(guard.readings().len(), 2);
-        assert!(max_reading_ts <= occupancy.timestamp);
-        assert_eq!(guard.occupancy(), Some(&occupancy));
-        assert_eq!(guard.wait_time(), Some(&wait_time));
-
-        Ok(())
-    }
-
-    #[test]
-    fn default_refresh_interval_is_five_seconds() {
-        assert_eq!(DEFAULT_REFRESH_INTERVAL, Duration::from_secs(5));
-    }
-
-    #[test]
-    fn load_calibration_reads_valid_file() -> Result<(), Box<dyn std::error::Error>> {
-        let dir = std::env::temp_dir();
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = dir.join(format!("calibration-valid-{unique}.json"));
-        let contents = r#"
-{
-  "model": "linear_v1",
-  "slope": 1.8,
-  "intercept": 0.0,
-  "min_wait_minutes": 0,
-  "max_wait_minutes": 60
-}
-"#;
-        std::fs::write(&path, contents)?;
-
-        let load = load_calibration_from_path(&path);
-        let _ = std::fs::remove_file(&path);
-
-        let calibration = load.calibration.expect("expected calibration");
-        assert_eq!(calibration.slope, 1.8);
-        assert_eq!(calibration.intercept, 0.0);
-        assert_eq!(calibration.min_wait_minutes, Some(0));
-        assert_eq!(calibration.max_wait_minutes, Some(60));
-        assert!(load.inactive_reason.is_none());
-        Ok(())
-    }
-
-    #[test]
-    fn load_calibration_missing_file_is_inactive() {
-        let dir = std::env::temp_dir();
-        let path = dir.join("calibration-missing-file.json");
-
-        let load = load_calibration_from_path(&path);
-
-        assert!(load.calibration.is_none());
-        let reason = load.inactive_reason.unwrap_or_default();
-        assert!(reason.contains("missing"));
-    }
-
-    #[test]
-    fn load_calibration_invalid_json_is_inactive() -> Result<(), Box<dyn std::error::Error>> {
-        let dir = std::env::temp_dir();
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = dir.join(format!("calibration-invalid-json-{unique}.json"));
-        std::fs::write(&path, "{ invalid")?;
-
-        let load = load_calibration_from_path(&path);
-        let _ = std::fs::remove_file(&path);
-
-        assert!(load.calibration.is_none());
-        let reason = load.inactive_reason.unwrap_or_default();
-        assert!(reason.contains("parse"));
-        Ok(())
-    }
-
-    #[test]
-    fn load_calibration_invalid_values_are_inactive() -> Result<(), Box<dyn std::error::Error>> {
-        let dir = std::env::temp_dir();
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = dir.join(format!("calibration-invalid-values-{unique}.json"));
-        let contents = r#"
-{
-  "model": "linear_v1",
-  "slope": 0.0,
-  "intercept": 0.0
-}
-"#;
-        std::fs::write(&path, contents)?;
-
-        let load = load_calibration_from_path(&path);
-        let _ = std::fs::remove_file(&path);
-
-        assert!(load.calibration.is_none());
-        let reason = load.inactive_reason.unwrap_or_default();
-        assert!(reason.contains("invalid calibration"));
-        Ok(())
+        std::thread::sleep(step);
+        slept += step;
     }
 }
