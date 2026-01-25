@@ -1,3 +1,4 @@
+use crate::sensor::{SensorConfig, build_sensor_configs};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -10,6 +11,8 @@ pub struct Config {
     pub logging: LoggingSection,
     #[serde(default)]
     pub calibration: Option<CalibrationSettings>,
+    #[serde(default)]
+    pub sensors: Option<SensorsSection>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -25,6 +28,12 @@ pub struct LoggingSection {
 #[derive(Debug, Deserialize, Clone)]
 pub struct CalibrationSettings {
     pub path: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SensorsSection {
+    /// GPIO pin numbers for XSHUT control, in sensor order
+    pub xshut_pins: Vec<u8>,
 }
 
 #[derive(Debug, Error)]
@@ -53,6 +62,24 @@ impl Config {
         } else {
             Some(path)
         }
+    }
+
+    /// Returns sensor configurations built from xshut_pins, or empty vec if not configured.
+    pub fn sensor_configs(&self) -> Vec<SensorConfig> {
+        match &self.sensors {
+            Some(section) if !section.xshut_pins.is_empty() => {
+                build_sensor_configs(&section.xshut_pins)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Returns the XSHUT pin numbers, or empty slice if not configured.
+    pub fn xshut_pins(&self) -> &[u8] {
+        self.sensors
+            .as_ref()
+            .map(|s| s.xshut_pins.as_slice())
+            .unwrap_or(&[])
     }
 }
 

@@ -74,6 +74,8 @@ where
     let mut results = Vec::with_capacity(addressed.len());
     for sensor in addressed {
         xshut.set_high(sensor.xshut_pin)?;
+        // Allow sensor boot time after XSHUT release (2ms per VL53L1X datasheet)
+        std::thread::sleep(std::time::Duration::from_millis(2));
         debug!(
             sensor_id = sensor.sensor_id,
             xshut_pin = sensor.xshut_pin,

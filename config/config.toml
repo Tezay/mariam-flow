@@ -1,4 +1,4 @@
-# Minimal placeholder configuration (no business logic yet)
+# Mariam Flow configuration
 
 [app]
 name = "mariam-flow"
@@ -8,3 +8,7 @@ level = "info"
 
 [calibration]
 path = "config/calibration.json"
+
+[sensors]
+# GPIO pins connected to XSHUT of each VL53L1X sensor (in order)
+xshut_pins = [17, 27, 22]
