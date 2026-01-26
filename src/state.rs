@@ -22,6 +22,13 @@ pub struct SensorReading {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SensorObstruction {
+    pub sensor_id: SensorId,
+    pub obstructed: Option<bool>,
+    pub timestamp: SystemTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OccupancyStatus {
     Ok,
     NoData,
@@ -70,8 +77,8 @@ pub struct AppState {
     sensors_tx: watch::Sender<Vec<SensorInfo>>,
     readings: Vec<SensorReading>,
     readings_tx: watch::Sender<Vec<SensorReading>>,
-    occupancy: Option<OccupancyReading>,
-    occupancy_tx: watch::Sender<Option<OccupancyReading>>,
+    obstructions: Vec<SensorObstruction>,
+    obstructions_tx: watch::Sender<Vec<SensorObstruction>>,
     wait_time: Option<WaitTimeEstimate>,
     wait_time_tx: watch::Sender<Option<WaitTimeEstimate>>,
     calibration: Option<CalibrationParams>,
@@ -82,7 +89,7 @@ impl AppState {
     pub fn new() -> Self {
         let (sensors_tx, _sensors_rx) = watch::channel(Vec::new());
         let (readings_tx, _readings_rx) = watch::channel(Vec::new());
-        let (occupancy_tx, _occupancy_rx) = watch::channel(None);
+        let (obstructions_tx, _obstructions_rx) = watch::channel(Vec::new());
         let (wait_time_tx, _wait_time_rx) = watch::channel(None);
         let model = Arc::new(LinearV1Model::with_defaults());
         Self {
@@ -90,8 +97,8 @@ impl AppState {
             sensors_tx,
             readings: Vec::new(),
             readings_tx,
-            occupancy: None,
-            occupancy_tx,
+            obstructions: Vec::new(),
+            obstructions_tx,
             wait_time: None,
             wait_time_tx,
             calibration: None,
@@ -129,18 +136,21 @@ impl AppState {
         Ok(())
     }
 
-    pub fn occupancy(&self) -> Option<&OccupancyReading> {
-        self.occupancy.as_ref()
+    pub fn obstructions(&self) -> &[SensorObstruction] {
+        &self.obstructions
     }
 
-    pub fn subscribe_occupancy(&self) -> watch::Receiver<Option<OccupancyReading>> {
-        self.occupancy_tx.subscribe()
+    pub fn subscribe_obstructions(&self) -> watch::Receiver<Vec<SensorObstruction>> {
+        self.obstructions_tx.subscribe()
     }
 
-    pub fn set_occupancy(&mut self, occupancy: OccupancyReading) -> Result<(), AppError> {
-        self.occupancy = Some(occupancy.clone());
+    pub fn set_obstructions(
+        &mut self,
+        obstructions: Vec<SensorObstruction>,
+    ) -> Result<(), AppError> {
+        self.obstructions = obstructions.clone();
         // Send is best-effort - no subscribers is OK, local state is still updated
-        let _ = self.occupancy_tx.send(Some(occupancy));
+        let _ = self.obstructions_tx.send(obstructions);
         Ok(())
     }
 
@@ -185,7 +195,6 @@ impl Default for AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sensor::SensorStatus; // Added for SensorStatus
     use std::time::{Duration, UNIX_EPOCH};
 
     #[test]

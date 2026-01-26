@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_sensor_discovery(&config, &state)
     };
 
-    // Start periodic refresh thread (readings → occupancy → wait time)
+    // Start periodic refresh thread (readings → obstructions → wait time)
     let stop_flag = Arc::new(AtomicBool::new(false));
     let refresh_interval = config.refresh_interval();
     let _refresh_handle = if has_sensors {

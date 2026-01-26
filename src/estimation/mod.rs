@@ -2,8 +2,8 @@ use crate::bus::readings::read_and_store_distances;
 use crate::error::AppError;
 use crate::sensor::SensorDriverFactory;
 use crate::state::{
-    AppState, OccupancyReading, OccupancyStatus, WaitTimeErrorCode, WaitTimeEstimate,
-    WaitTimeStatus,
+    AppState, ReadingStatus, SensorObstruction, SensorReading, WaitTimeErrorCode,
+    WaitTimeEstimate, WaitTimeStatus,
 };
 use serde::Deserialize;
 use std::path::Path;
@@ -11,14 +11,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::warn;
 
 pub mod linear_v1;
 pub mod linear_v2;
 pub mod model;
+pub mod obstruction_count_v1;
 
 use linear_v1::{LinearV1Model, LinearV1Params};
 use linear_v2::{LinearV2Model, LinearV2Params};
+use obstruction_count_v1::{ObstructionCountModel, ObstructionCountParams};
 use model::{EstimationModel, OccupancyConfig};
 
 pub const DEFAULT_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
@@ -42,70 +44,74 @@ pub fn create_model(
             let params: LinearV2Params = serde_json::from_value(config.params.clone())?;
             Ok(Box::new(LinearV2Model::new(params, occupancy_config)))
         }
+        "obstruction_count_v1" => {
+            let params: ObstructionCountParams = serde_json::from_value(config.params.clone())?;
+            Ok(Box::new(ObstructionCountModel::new(
+                params,
+                occupancy_config,
+            )))
+        }
         other => Err(CalibrationError::Invalid(format!("unknown model: {other}"))),
     }
 }
 
-pub fn update_occupancy_from_readings(
+pub fn update_obstructions_from_readings(
     state: &Arc<RwLock<AppState>>,
     model: &dyn EstimationModel,
-) -> Result<OccupancyReading, AppError> {
-    update_occupancy_from_readings_at(state, model, SystemTime::now())
+) -> Result<Vec<SensorObstruction>, AppError> {
+    update_obstructions_from_readings_at(state, model, SystemTime::now())
 }
 
-fn update_occupancy_from_readings_at(
+fn update_obstructions_from_readings_at(
     state: &Arc<RwLock<AppState>>,
     model: &dyn EstimationModel,
-    timestamp: SystemTime,
-) -> Result<OccupancyReading, AppError> {
+    _timestamp: SystemTime,
+) -> Result<Vec<SensorObstruction>, AppError> {
     let readings = {
         let guard = state.read().map_err(|_| AppError::StateLock)?;
         guard.readings().to_vec()
     };
 
-    let occupancy = model.compute_occupancy(&readings, timestamp);
+    let threshold_mm = model.occupancy_config().threshold_mm;
+    let (obstructions, valid_count, error_count) =
+        obstructions_from_readings(&readings, threshold_mm);
 
-    if matches!(occupancy.status, OccupancyStatus::NoData) {
-        warn!("No valid sensor readings available for occupancy calculation");
-    } else if matches!(occupancy.status, OccupancyStatus::Degraded) {
-        warn!("Occupancy calculation degraded due to sensor errors");
+    if valid_count == 0 {
+        warn!("No valid sensor readings available for obstruction calculation");
+    } else if error_count > 0 {
+        warn!("Obstruction calculation degraded due to sensor errors");
     }
 
     let mut guard = state.write().map_err(|_| AppError::StateLock)?;
-    guard.set_occupancy(occupancy.clone())?;
+    guard.set_obstructions(obstructions.clone())?;
 
-    Ok(occupancy)
+    Ok(obstructions)
 }
 
-pub fn update_wait_time_from_occupancy(
+pub fn update_wait_time_from_obstructions(
     state: &Arc<RwLock<AppState>>,
     model: &dyn EstimationModel,
 ) -> Result<WaitTimeEstimate, AppError> {
-    update_wait_time_from_occupancy_at(state, model, SystemTime::now())
+    update_wait_time_from_obstructions_at(state, model, SystemTime::now())
 }
 
-fn update_wait_time_from_occupancy_at(
+fn update_wait_time_from_obstructions_at(
     state: &Arc<RwLock<AppState>>,
     model: &dyn EstimationModel,
     timestamp: SystemTime,
 ) -> Result<WaitTimeEstimate, AppError> {
-    let occupancy = {
+    let obstructions = {
         let guard = state.read().map_err(|_| AppError::StateLock)?;
-        // If occupancy is None, create a dummy one with NoData status
-        guard.occupancy().cloned().unwrap_or(OccupancyReading {
-            occupancy_percent: None,
-            timestamp,
-            status: OccupancyStatus::NoData,
-        })
+        guard.obstructions().to_vec()
     };
 
-    let wait_time = model.compute_wait_time(&occupancy, timestamp);
+    let wait_time = model.compute_wait_time(&obstructions, timestamp);
 
     if matches!(wait_time.status, WaitTimeStatus::Degraded) {
         if matches!(wait_time.error_code, Some(WaitTimeErrorCode::NoData)) {
-            warn!("No occupancy data available for wait time estimation");
+            warn!("No obstruction data available for wait time estimation");
         } else {
-            warn!("Wait time estimation degraded due to occupancy errors");
+            warn!("Wait time estimation degraded due to obstruction errors");
         }
     }
 
@@ -146,9 +152,90 @@ pub fn run_refresh_cycle(
     state: &Arc<RwLock<AppState>>,
     model: &dyn EstimationModel,
 ) -> Result<(), AppError> {
-    update_occupancy_from_readings(state, model)?;
-    update_wait_time_from_occupancy(state, model)?;
+    update_obstructions_from_readings(state, model)?;
+    update_wait_time_from_obstructions(state, model)?;
     Ok(())
+}
+
+fn obstructions_from_readings(
+    readings: &[SensorReading],
+    threshold_mm: u16,
+) -> (Vec<SensorObstruction>, u32, u32) {
+    let mut valid_count = 0u32;
+    let mut error_count = 0u32;
+    let mut obstructions = Vec::with_capacity(readings.len());
+
+    for reading in readings {
+        let obstructed = match &reading.status {
+            ReadingStatus::Ok { .. } => {
+                valid_count += 1;
+                Some(reading.distance_mm <= threshold_mm)
+            }
+            ReadingStatus::Error { .. } => {
+                error_count += 1;
+                None
+            }
+        };
+
+        obstructions.push(SensorObstruction {
+            sensor_id: reading.sensor_id,
+            obstructed,
+            timestamp: reading.timestamp,
+        });
+    }
+
+    (obstructions, valid_count, error_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sensor::SensorRangeStatus;
+    use std::time::UNIX_EPOCH;
+
+    fn ok_reading(sensor_id: u32, distance_mm: u16) -> SensorReading {
+        SensorReading {
+            sensor_id,
+            distance_mm,
+            timestamp: UNIX_EPOCH,
+            status: ReadingStatus::Ok {
+                range_status: SensorRangeStatus::Valid,
+            },
+        }
+    }
+
+    fn error_reading(sensor_id: u32) -> SensorReading {
+        SensorReading {
+            sensor_id,
+            distance_mm: 0,
+            timestamp: UNIX_EPOCH,
+            status: ReadingStatus::Error {
+                reason: "read failed".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn obstructions_use_threshold_and_track_errors() {
+        let readings = vec![
+            ok_reading(1, 999),
+            ok_reading(2, 1001),
+            error_reading(3),
+        ];
+
+        let (obstructions, valid_count, error_count) =
+            obstructions_from_readings(&readings, 1000);
+
+        assert_eq!(valid_count, 2);
+        assert_eq!(error_count, 1);
+        assert_eq!(obstructions.len(), 3);
+        assert_eq!(obstructions[0].sensor_id, 1);
+        assert_eq!(obstructions[0].obstructed, Some(true));
+        assert_eq!(obstructions[1].sensor_id, 2);
+        assert_eq!(obstructions[1].obstructed, Some(false));
+        assert_eq!(obstructions[2].sensor_id, 3);
+        assert_eq!(obstructions[2].obstructed, None);
+    }
 }
 
 pub fn spawn_refresh_thread<F>(

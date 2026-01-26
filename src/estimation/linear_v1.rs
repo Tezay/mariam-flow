@@ -2,10 +2,9 @@
 //!
 //! Formula: wait_time = intercept + slope * occupancy_percent
 
-use crate::estimation::model::{EstimationModel, OccupancyConfig};
+use crate::estimation::model::{occupancy_from_obstructions, EstimationModel, OccupancyConfig};
 use crate::state::{
-    OccupancyReading, OccupancyStatus, ReadingStatus, SensorReading, WaitTimeErrorCode,
-    WaitTimeEstimate, WaitTimeStatus,
+    OccupancyStatus, SensorObstruction, WaitTimeErrorCode, WaitTimeEstimate, WaitTimeStatus,
 };
 use std::time::SystemTime;
 
@@ -54,57 +53,12 @@ impl LinearV1Model {
 }
 
 impl EstimationModel for LinearV1Model {
-    fn compute_occupancy(
-        &self,
-        readings: &[SensorReading],
-        timestamp: SystemTime,
-    ) -> OccupancyReading {
-        let mut valid_count = 0u32;
-        let mut occupied_count = 0u32;
-        let mut error_count = 0u32;
-
-        for reading in readings {
-            match &reading.status {
-                ReadingStatus::Ok { .. } => {
-                    valid_count += 1;
-                    if reading.distance_mm <= self.occupancy_config.threshold_mm {
-                        occupied_count += 1;
-                    }
-                }
-                ReadingStatus::Error { .. } => {
-                    error_count += 1;
-                }
-            }
-        }
-
-        if valid_count == 0 {
-            return OccupancyReading {
-                occupancy_percent: None,
-                timestamp,
-                status: OccupancyStatus::NoData,
-            };
-        }
-
-        let occupancy_percent =
-            ((occupied_count as f64 / valid_count as f64) * 100.0).clamp(0.0, 100.0);
-        let status = if error_count == 0 {
-            OccupancyStatus::Ok
-        } else {
-            OccupancyStatus::Degraded
-        };
-
-        OccupancyReading {
-            occupancy_percent: Some(occupancy_percent),
-            timestamp,
-            status,
-        }
-    }
-
     fn compute_wait_time(
         &self,
-        occupancy: &OccupancyReading,
+        obstructions: &[SensorObstruction],
         timestamp: SystemTime,
     ) -> WaitTimeEstimate {
+        let occupancy = occupancy_from_obstructions(obstructions, timestamp);
         if occupancy.occupancy_percent.is_none()
             || matches!(occupancy.status, OccupancyStatus::NoData)
         {
@@ -149,45 +103,14 @@ impl EstimationModel for LinearV1Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sensor::SensorRangeStatus;
     use std::time::UNIX_EPOCH;
 
-    fn ok_reading(sensor_id: u32, distance_mm: u16) -> SensorReading {
-        SensorReading {
+    fn obstruction(sensor_id: u32, obstructed: Option<bool>) -> SensorObstruction {
+        SensorObstruction {
             sensor_id,
-            distance_mm,
+            obstructed,
             timestamp: UNIX_EPOCH,
-            status: ReadingStatus::Ok {
-                range_status: SensorRangeStatus::Valid,
-            },
         }
-    }
-
-    fn error_reading(sensor_id: u32) -> SensorReading {
-        SensorReading {
-            sensor_id,
-            distance_mm: 0,
-            timestamp: UNIX_EPOCH,
-            status: ReadingStatus::Error {
-                reason: "read failed".to_string(),
-            },
-        }
-    }
-
-    #[test]
-    fn occupancy_uses_configured_threshold() {
-        let model = LinearV1Model::new(
-            LinearV1Params::default(),
-            OccupancyConfig {
-                threshold_mm: 1000,
-                ..OccupancyConfig::default()
-            },
-        );
-        let readings = vec![ok_reading(1, 999), ok_reading(2, 1001)];
-
-        let occupancy = model.compute_occupancy(&readings, UNIX_EPOCH);
-
-        assert_eq!(occupancy.occupancy_percent, Some(50.0));
     }
 
     #[test]
@@ -200,13 +123,9 @@ mod tests {
             },
             OccupancyConfig::default(),
         );
-        let occupancy = OccupancyReading {
-            occupancy_percent: Some(50.0),
-            timestamp: UNIX_EPOCH,
-            status: OccupancyStatus::Ok,
-        };
+        let obstructions = vec![obstruction(1, Some(true)), obstruction(2, Some(false))];
 
-        let estimate = model.compute_wait_time(&occupancy, UNIX_EPOCH);
+        let estimate = model.compute_wait_time(&obstructions, UNIX_EPOCH);
 
         // 5.0 + 0.5 * 50 = 30.0
         assert_eq!(estimate.wait_time_minutes, Some(30.0));
@@ -224,16 +143,8 @@ mod tests {
             OccupancyConfig::default(),
         );
 
-        let low = OccupancyReading {
-            occupancy_percent: Some(0.0),
-            timestamp: UNIX_EPOCH,
-            status: OccupancyStatus::Ok,
-        };
-        let high = OccupancyReading {
-            occupancy_percent: Some(100.0),
-            timestamp: UNIX_EPOCH,
-            status: OccupancyStatus::Ok,
-        };
+        let low = vec![obstruction(1, Some(false)), obstruction(2, Some(false))];
+        let high = vec![obstruction(1, Some(true)), obstruction(2, Some(true))];
 
         let low_est = model.compute_wait_time(&low, UNIX_EPOCH);
         let high_est = model.compute_wait_time(&high, UNIX_EPOCH);
@@ -245,12 +156,9 @@ mod tests {
     #[test]
     fn no_data_returns_degraded() {
         let model = LinearV1Model::with_defaults();
-        let readings = vec![error_reading(1), error_reading(2)];
+        let obstructions = vec![obstruction(1, None), obstruction(2, None)];
+        let estimate = model.compute_wait_time(&obstructions, UNIX_EPOCH);
 
-        let occupancy = model.compute_occupancy(&readings, UNIX_EPOCH);
-        let estimate = model.compute_wait_time(&occupancy, UNIX_EPOCH);
-
-        assert_eq!(occupancy.status, OccupancyStatus::NoData);
         assert_eq!(estimate.status, WaitTimeStatus::Degraded);
         assert_eq!(estimate.error_code, Some(WaitTimeErrorCode::NoData));
     }

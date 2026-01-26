@@ -366,7 +366,6 @@ use serde::Serialize;
 pub struct DebugReadingsResponse {
     pub occupancy_threshold_mm: u16,
     pub sensors: Vec<DebugSensorReading>,
-    pub occupancy_percent: Option<f64>,
     pub timestamp: String,
 }
 
@@ -374,7 +373,7 @@ pub struct DebugReadingsResponse {
 pub struct DebugSensorReading {
     pub sensor_id: u32,
     pub distance_mm: u16,
-    pub obstructed: bool,
+    pub obstructed: Option<bool>,
     pub status: String,
 }
 
@@ -406,23 +405,17 @@ fn build_debug_readings_response(
 
     let readings = guard.readings();
     let mut sensors = Vec::with_capacity(readings.len());
-    let mut valid_count = 0u32;
-    let mut occupied_count = 0u32;
-
     for reading in readings {
         let (status_str, is_valid) = match &reading.status {
             ReadingStatus::Ok { range_status } => (format!("ok ({:?})", range_status), true),
             ReadingStatus::Error { reason } => (format!("error: {}", reason), false),
         };
 
-        let obstructed = is_valid && reading.distance_mm <= threshold_mm;
-
-        if is_valid {
-            valid_count += 1;
-            if obstructed {
-                occupied_count += 1;
-            }
-        }
+        let obstructed = if is_valid {
+            Some(reading.distance_mm <= threshold_mm)
+        } else {
+            None
+        };
 
         sensors.push(DebugSensorReading {
             sensor_id: reading.sensor_id,
@@ -433,12 +426,6 @@ fn build_debug_readings_response(
     }
     drop(guard);
 
-    let occupancy_percent = if valid_count > 0 {
-        Some(((occupied_count as f64 / valid_count as f64) * 100.0).round())
-    } else {
-        None
-    };
-
     let timestamp = format_timestamp(now).unwrap_or_else(|_| "unknown".to_string());
 
     (
@@ -446,7 +433,6 @@ fn build_debug_readings_response(
         Json(serde_json::json!(DebugReadingsResponse {
             occupancy_threshold_mm: threshold_mm,
             sensors,
-            occupancy_percent,
             timestamp,
         })),
     )

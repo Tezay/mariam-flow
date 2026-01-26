@@ -3,10 +3,9 @@
 //! Formula: Interpolate between wait_time_at_empty and wait_time_at_full
 //! based on occupancy percentage.
 
-use crate::estimation::model::{EstimationModel, OccupancyConfig};
+use crate::estimation::model::{occupancy_from_obstructions, EstimationModel, OccupancyConfig};
 use crate::state::{
-    OccupancyReading, OccupancyStatus, ReadingStatus, SensorReading, WaitTimeErrorCode,
-    WaitTimeEstimate, WaitTimeStatus,
+    OccupancyStatus, SensorObstruction, WaitTimeErrorCode, WaitTimeEstimate, WaitTimeStatus,
 };
 use std::time::SystemTime;
 
@@ -49,57 +48,12 @@ impl LinearV2Model {
 }
 
 impl EstimationModel for LinearV2Model {
-    fn compute_occupancy(
-        &self,
-        readings: &[SensorReading],
-        timestamp: SystemTime,
-    ) -> OccupancyReading {
-        let mut valid_count = 0u32;
-        let mut occupied_count = 0u32;
-        let mut error_count = 0u32;
-
-        for reading in readings {
-            match &reading.status {
-                ReadingStatus::Ok { .. } => {
-                    valid_count += 1;
-                    if reading.distance_mm <= self.occupancy_config.threshold_mm {
-                        occupied_count += 1;
-                    }
-                }
-                ReadingStatus::Error { .. } => {
-                    error_count += 1;
-                }
-            }
-        }
-
-        if valid_count == 0 {
-            return OccupancyReading {
-                occupancy_percent: None,
-                timestamp,
-                status: OccupancyStatus::NoData,
-            };
-        }
-
-        let occupancy_percent =
-            ((occupied_count as f64 / valid_count as f64) * 100.0).clamp(0.0, 100.0);
-        let status = if error_count == 0 {
-            OccupancyStatus::Ok
-        } else {
-            OccupancyStatus::Degraded
-        };
-
-        OccupancyReading {
-            occupancy_percent: Some(occupancy_percent),
-            timestamp,
-            status,
-        }
-    }
-
     fn compute_wait_time(
         &self,
-        occupancy: &OccupancyReading,
+        obstructions: &[SensorObstruction],
         timestamp: SystemTime,
     ) -> WaitTimeEstimate {
+        let occupancy = occupancy_from_obstructions(obstructions, timestamp);
         if occupancy.occupancy_percent.is_none()
             || matches!(occupancy.status, OccupancyStatus::NoData)
         {
@@ -142,6 +96,14 @@ mod tests {
     use super::*;
     use std::time::UNIX_EPOCH;
 
+    fn obstruction(sensor_id: u32, obstructed: Option<bool>) -> SensorObstruction {
+        SensorObstruction {
+            sensor_id,
+            obstructed,
+            timestamp: UNIX_EPOCH,
+        }
+    }
+
     #[test]
     fn wait_time_interpolates_correctly() {
         let model = LinearV2Model::new(
@@ -153,35 +115,21 @@ mod tests {
         );
 
         // 0% -> 5.0
-        let empty = OccupancyReading {
-            occupancy_percent: Some(0.0),
-            timestamp: UNIX_EPOCH,
-            status: OccupancyStatus::Ok,
-        };
+        let empty = vec![obstruction(1, Some(false)), obstruction(2, Some(false))];
         assert_eq!(
-            model
-                .compute_wait_time(&empty, UNIX_EPOCH)
-                .wait_time_minutes,
+            model.compute_wait_time(&empty, UNIX_EPOCH).wait_time_minutes,
             Some(5.0)
         );
 
         // 50% -> 10.0
-        let half = OccupancyReading {
-            occupancy_percent: Some(50.0),
-            timestamp: UNIX_EPOCH,
-            status: OccupancyStatus::Ok,
-        };
+        let half = vec![obstruction(1, Some(true)), obstruction(2, Some(false))];
         assert_eq!(
             model.compute_wait_time(&half, UNIX_EPOCH).wait_time_minutes,
             Some(10.0)
         );
 
         // 100% -> 15.0
-        let full = OccupancyReading {
-            occupancy_percent: Some(100.0),
-            timestamp: UNIX_EPOCH,
-            status: OccupancyStatus::Ok,
-        };
+        let full = vec![obstruction(1, Some(true)), obstruction(2, Some(true))];
         assert_eq!(
             model.compute_wait_time(&full, UNIX_EPOCH).wait_time_minutes,
             Some(15.0)
