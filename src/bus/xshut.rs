@@ -10,6 +10,19 @@ use tracing::{debug, info, warn};
 pub trait XshutController {
     fn set_all_low(&mut self) -> Result<(), AppError>;
     fn set_high(&mut self, pin: u8) -> Result<(), AppError>;
+    fn power_cycle_sensor(&mut self, pin: u8) -> Result<(), AppError>;
+}
+
+impl XshutController for Box<dyn XshutController + Send> {
+    fn set_all_low(&mut self) -> Result<(), AppError> {
+        (**self).set_all_low()
+    }
+    fn set_high(&mut self, pin: u8) -> Result<(), AppError> {
+        (**self).set_high(pin)
+    }
+    fn power_cycle_sensor(&mut self, pin: u8) -> Result<(), AppError> {
+        (**self).power_cycle_sensor(pin)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -150,6 +163,45 @@ where
     Ok(results)
 }
 
+/// Reinitialize a specific sensor (Power cycle -> Re-address).
+pub fn reinitialize_sensor<X, F>(
+    xshut: &mut X,
+    factory: &mut F,
+    sensor: &SensorInfo,
+) -> Result<(), AppError>
+where
+    X: XshutController + ?Sized,
+    F: SensorDriverFactory,
+{
+    // 1. Power cycle (Hard Reset)
+    info!(sensor_id = sensor.sensor_id, "Resetting sensor hardware");
+    xshut.power_cycle_sensor(sensor.xshut_pin)?;
+
+    // 2. Initialize driver on default address
+    let mut driver = factory.create_default()?;
+    if let Err(e) = driver.init_default() {
+        warn!(sensor_id = sensor.sensor_id, error = %e, "Failed to init default during reset");
+        return Err(e);
+    }
+
+    // 3. Re-assign address
+    if let Err(e) = driver.set_address(sensor.i2c_address) {
+        warn!(sensor_id = sensor.sensor_id, error = %e, "Failed to set address during reset");
+        return Err(e);
+    }
+
+    // 4. Verify & Start
+    driver.verify()?;
+    driver.start_ranging()?;
+
+    info!(
+        sensor_id = sensor.sensor_id,
+        address = format_args!("{:#04x}", sensor.i2c_address),
+        "Sensor re-initialized successfully"
+    );
+    Ok(())
+}
+
 /// Discover sensors and persist results in shared state for the rest of the pipeline.
 pub fn discover_and_store_sensors<X, F>(
     xshut: &mut X,
@@ -232,6 +284,21 @@ impl XshutController for RppalXshutController {
         output.set_high();
         Ok(())
     }
+
+    fn power_cycle_sensor(&mut self, pin: u8) -> Result<(), AppError> {
+        let output = self
+            .pins
+            .get_mut(&pin)
+            .ok_or_else(|| AppError::Xshut(format!("missing XSHUT pin {pin}")))?;
+
+        // Cycle: Low (OFF) -> Wait -> High (ON)
+        output.set_low();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        output.set_high();
+        std::thread::sleep(std::time::Duration::from_millis(10)); // Boot time
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -252,6 +319,11 @@ mod tests {
 
         fn set_high(&mut self, pin: u8) -> Result<(), AppError> {
             self.actions.push(format!("high:{pin}"));
+            Ok(())
+        }
+
+        fn power_cycle_sensor(&mut self, pin: u8) -> Result<(), AppError> {
+            self.actions.push(format!("cycle:{pin}"));
             Ok(())
         }
     }

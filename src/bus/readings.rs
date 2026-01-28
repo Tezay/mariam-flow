@@ -2,7 +2,6 @@ use crate::error::AppError;
 use crate::estimation::model::EstimationModel;
 use crate::sensor::{SensorDriver, SensorDriverFactory, SensorRangeStatus, SensorStatus};
 use crate::state::{AppState, ReadingStatus, SensorReading};
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 use tracing::{debug, warn};

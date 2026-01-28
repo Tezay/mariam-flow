@@ -1,9 +1,10 @@
 use crate::bus::readings::read_and_store_distances;
+use crate::bus::xshut::{XshutController, reinitialize_sensor};
 use crate::error::AppError;
 use crate::sensor::SensorDriverFactory;
 use crate::state::{
-    AppState, ReadingStatus, SensorObstruction, SensorReading, WaitTimeErrorCode,
-    WaitTimeEstimate, WaitTimeStatus,
+    AppState, ReadingStatus, SensorObstruction, SensorReading, WaitTimeErrorCode, WaitTimeEstimate,
+    WaitTimeStatus,
 };
 use serde::Deserialize;
 use std::path::Path;
@@ -20,8 +21,8 @@ pub mod obstruction_count_v1;
 
 use linear_v1::{LinearV1Model, LinearV1Params};
 use linear_v2::{LinearV2Model, LinearV2Params};
-use obstruction_count_v1::{ObstructionCountModel, ObstructionCountParams};
 use model::{EstimationModel, OccupancyConfig};
+use obstruction_count_v1::{ObstructionCountModel, ObstructionCountParams};
 
 pub const DEFAULT_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -217,14 +218,9 @@ mod tests {
 
     #[test]
     fn obstructions_use_threshold_and_track_errors() {
-        let readings = vec![
-            ok_reading(1, 999),
-            ok_reading(2, 1001),
-            error_reading(3),
-        ];
+        let readings = vec![ok_reading(1, 999), ok_reading(2, 1001), error_reading(3)];
 
-        let (obstructions, valid_count, error_count) =
-            obstructions_from_readings(&readings, 1000);
+        let (obstructions, valid_count, error_count) = obstructions_from_readings(&readings, 1000);
 
         assert_eq!(valid_count, 2);
         assert_eq!(error_count, 1);
@@ -238,8 +234,9 @@ mod tests {
     }
 }
 
-pub fn spawn_refresh_thread<F>(
+pub fn spawn_refresh_thread<F, X>(
     mut sensor_factory: F,
+    mut xshut_controller: Option<X>,
     state: Arc<RwLock<AppState>>,
     interval: Duration,
     stop: Arc<AtomicBool>,
@@ -247,6 +244,7 @@ pub fn spawn_refresh_thread<F>(
 ) -> std::thread::JoinHandle<()>
 where
     F: SensorDriverFactory + Send + 'static,
+    X: XshutController + Send + 'static,
 {
     std::thread::spawn(move || {
         let mut sensors = {
@@ -258,13 +256,73 @@ where
             warn!("Refresh thread started with no sensors discovered");
         }
 
+        // Track consecutive errors per sensor
+        let mut error_counts = std::collections::HashMap::new();
+        const MAX_CONSECUTIVE_ERRORS: u32 = 5;
+
         while !stop.load(Ordering::Relaxed) {
             let cycle_start = Instant::now();
 
-            if let Err(e) =
-                read_and_store_distances(&mut sensor_factory, &mut sensors, &state, model.as_ref())
-            {
-                warn!("Error reading sensors: {}", e);
+            let readings_result =
+                read_and_store_distances(&mut sensor_factory, &mut sensors, &state, model.as_ref());
+
+            match readings_result {
+                Ok(readings) => {
+                    for reading in readings {
+                        match reading.status {
+                            ReadingStatus::Ok { .. } => {
+                                error_counts.insert(reading.sensor_id, 0);
+                            }
+                            ReadingStatus::Error { .. } => {
+                                let count = error_counts.entry(reading.sensor_id).or_insert(0);
+                                *count += 1;
+
+                                if *count >= MAX_CONSECUTIVE_ERRORS {
+                                    if let Some(ref mut xshut) = xshut_controller {
+                                        warn!(
+                                            sensor_id = reading.sensor_id,
+                                            count = *count,
+                                            "Sensor exceeded error limit - triggering reset"
+                                        );
+                                        // Find sensor info to get pins/address
+                                        if let Some(sensor_info) = sensors
+                                            .iter()
+                                            .find(|s| s.sensor_id == reading.sensor_id)
+                                        {
+                                            match reinitialize_sensor(
+                                                xshut,
+                                                &mut sensor_factory,
+                                                sensor_info,
+                                            ) {
+                                                Ok(_) => {
+                                                    *count = 0; // Reset error counter on success
+                                                }
+                                                Err(e) => {
+                                                    warn!(
+                                                        sensor_id = reading.sensor_id,
+                                                        error = %e,
+                                                        "Failed to reset sensor"
+                                                    );
+                                                    // Loop will retry next cycle
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        if *count == MAX_CONSECUTIVE_ERRORS {
+                                            warn!(
+                                                sensor_id = reading.sensor_id,
+                                                "Consecutive errors detected but no XSHUT controller available"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Error reading sensors: {}", e);
+                }
             }
 
             if let Err(e) = run_refresh_cycle(&state, model.as_ref()) {

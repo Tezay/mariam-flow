@@ -53,9 +53,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Discover sensors at startup
     let sensor_configs = config.sensor_configs();
-    let has_sensors = if sensor_configs.is_empty() {
+    let xshut_controller = if sensor_configs.is_empty() {
         tracing::warn!("No sensors configured in [sensors].xshut_pins");
-        false
+        None
     } else {
         tracing::info!(
             count = sensor_configs.len(),
@@ -65,11 +65,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_sensor_discovery(&config, &state)
     };
 
+    let has_sensors = xshut_controller.is_some();
+
     // Start periodic refresh thread (readings → obstructions → wait time)
     let stop_flag = Arc::new(AtomicBool::new(false));
     let refresh_interval = config.refresh_interval();
     let _refresh_handle = if has_sensors {
         Some(spawn_refresh_thread(
+            xshut_controller,
             &state,
             Arc::clone(&stop_flag),
             refresh_interval,
@@ -92,8 +95,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Run sensor discovery and return true if at least one sensor is ready
-fn run_sensor_discovery(config: &config::Config, state: &Arc<RwLock<state::AppState>>) -> bool {
+/// Run sensor discovery and return controller if successful
+fn run_sensor_discovery(
+    config: &config::Config,
+    state: &Arc<RwLock<state::AppState>>,
+) -> Option<Box<dyn bus::xshut::XshutController + Send>> {
     #[cfg(target_os = "linux")]
     {
         use bus::xshut::{RppalXshutController, discover_and_store_sensors};
@@ -106,7 +112,7 @@ fn run_sensor_discovery(config: &config::Config, state: &Arc<RwLock<state::AppSt
             Ok(xshut) => xshut,
             Err(err) => {
                 tracing::error!(error = %err, "Failed to initialize GPIO for XSHUT");
-                return false;
+                return None;
             }
         };
 
@@ -125,11 +131,16 @@ fn run_sensor_discovery(config: &config::Config, state: &Arc<RwLock<state::AppSt
                     errors = errors,
                     "Sensor discovery complete"
                 );
-                ready > 0
+
+                if ready > 0 {
+                    Some(Box::new(xshut))
+                } else {
+                    None
+                }
             }
             Err(err) => {
                 tracing::error!(error = %err, "Sensor discovery failed");
-                false
+                None
             }
         }
     }
@@ -138,12 +149,13 @@ fn run_sensor_discovery(config: &config::Config, state: &Arc<RwLock<state::AppSt
     {
         let _ = (config, state);
         tracing::warn!("Sensor discovery requires Linux/Raspberry Pi - skipping");
-        false
+        None
     }
 }
 
 /// Spawn the periodic refresh thread for the estimation pipeline
 fn spawn_refresh_thread(
+    xshut_controller: Option<Box<dyn bus::xshut::XshutController + Send>>,
     state: &Arc<RwLock<state::AppState>>,
     stop: Arc<AtomicBool>,
     interval: Duration,
@@ -163,12 +175,19 @@ fn spawn_refresh_thread(
             interval_ms = interval.as_millis(),
             "Starting estimation refresh thread"
         );
-        spawn_thread(factory, Arc::clone(state), interval, stop, model)
+        spawn_thread(
+            factory,
+            xshut_controller,
+            Arc::clone(state),
+            interval,
+            stop,
+            model,
+        )
     }
 
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (state, stop, interval, model);
+        let _ = (state, stop, interval, model, xshut_controller);
         tracing::warn!("Refresh thread requires Linux/Raspberry Pi - starting dummy thread");
         std::thread::spawn(|| {})
     }
