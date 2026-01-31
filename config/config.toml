@@ -18,3 +18,9 @@ xshut_pins = [17, 27, 22]
 port = 8080
 # Refresh interval in seconds for the estimation pipeline (default: 5)
 refresh_interval_secs = 5
+
+[model]
+# Model service endpoint (Python)
+remote_url = "http://127.0.0.1:5001/predict"
+# HTTP timeout to the model service
+timeout_ms = 800

@@ -1,6 +1,5 @@
 use crate::error::AppError;
-use crate::estimation::linear_v1::LinearV1Model;
-use crate::estimation::model::EstimationModel;
+use crate::estimation::model::{EstimationModel, OccupancyConfig};
 use crate::sensor::{SensorId, SensorInfo, SensorRangeStatus};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -91,7 +90,7 @@ impl AppState {
         let (readings_tx, _readings_rx) = watch::channel(Vec::new());
         let (obstructions_tx, _obstructions_rx) = watch::channel(Vec::new());
         let (wait_time_tx, _wait_time_rx) = watch::channel(None);
-        let model = Arc::new(LinearV1Model::with_defaults());
+        let model = Arc::new(DefaultModel::new());
         Self {
             sensors: Vec::new(),
             sensors_tx,
@@ -183,6 +182,38 @@ impl AppState {
 
     pub fn model(&self) -> &Arc<dyn EstimationModel> {
         &self.model
+    }
+}
+
+#[derive(Debug)]
+struct DefaultModel {
+    occupancy_config: OccupancyConfig,
+}
+
+impl DefaultModel {
+    fn new() -> Self {
+        Self {
+            occupancy_config: OccupancyConfig::default(),
+        }
+    }
+}
+
+impl EstimationModel for DefaultModel {
+    fn compute_wait_time(
+        &self,
+        _obstructions: &[SensorObstruction],
+        timestamp: SystemTime,
+    ) -> WaitTimeEstimate {
+        WaitTimeEstimate {
+            wait_time_minutes: None,
+            timestamp,
+            status: WaitTimeStatus::Degraded,
+            error_code: Some(WaitTimeErrorCode::NoData),
+        }
+    }
+
+    fn occupancy_config(&self) -> &OccupancyConfig {
+        &self.occupancy_config
     }
 }
 

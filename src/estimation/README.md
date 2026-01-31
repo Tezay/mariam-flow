@@ -1,10 +1,9 @@
 # Estimation Models
 
-This folder contains the time estimation models available in Mariam Flow. Each model receives
-per-sensor obstruction states (true/false/unknown) derived from raw distance readings and outputs
-a wait time estimate.
+This folder contains the estimation pipeline and calibration schema. The actual model
+implementations now live in the Python model service (`model_service/models/`).
 
-## Common calibration fields
+## Common calibration fields (required)
 
 All models share these top-level fields in `config/calibration.json`:
 
@@ -25,7 +24,7 @@ Example skeleton:
 }
 ```
 
-## Models
+## Python models
 
 ### linear_v1
 
@@ -106,3 +105,22 @@ Example `config/calibration.json`:
   }
 }
 ```
+
+## Service Python (modèles)
+
+Mariam Flow délègue le calcul du modèle à un service local Python.
+`calibration.json` reste la source de vérité pour `model` et `params`,
+mais le calcul est effectué par le service Python.
+
+Configuration dans `config/config.toml` :
+
+```toml
+[model]
+remote_url = "http://127.0.0.1:5001/predict"
+timeout_ms = 800
+```
+
+Le service Python reçoit les obstructions et renvoie `wait_time_minutes`.
+
+Les modèles Python sont dans `model_service/models/` et utilisent le même `model` dans
+`config/calibration.json`.

@@ -1,7 +1,8 @@
 use mariam_flow::bus::readings::read_and_store_distances;
 use mariam_flow::sensor::mock::{MockSensorBehavior, MockSensorFactory};
 use mariam_flow::sensor::{SensorInfo, SensorRangeStatus, SensorStatus};
-use mariam_flow::state::{AppState, ReadingStatus};
+use mariam_flow::estimation::model::{EstimationModel, OccupancyConfig};
+use mariam_flow::state::{AppState, ReadingStatus, SensorObstruction, WaitTimeErrorCode, WaitTimeEstimate, WaitTimeStatus};
 use std::sync::{Arc, RwLock};
 
 #[test]
@@ -12,7 +13,7 @@ fn pipeline_mock_updates_state_for_all_sensors() -> Result<(), mariam_flow::erro
         MockSensorBehavior::fail_read_distance(),
     ];
     let mut factory = MockSensorFactory::new(behaviors);
-    let model = mariam_flow::estimation::linear_v1::LinearV1Model::with_defaults();
+    let model = TestModel::new(OccupancyConfig::default());
 
     let state = Arc::new(RwLock::new(AppState::new()));
     let _sensor_rx = {
@@ -68,4 +69,34 @@ fn pipeline_mock_updates_state_for_all_sensors() -> Result<(), mariam_flow::erro
         .map_err(|_| mariam_flow::error::AppError::StateLock)?;
     assert_eq!(guard.readings().len(), 3);
     Ok(())
+}
+
+#[derive(Debug)]
+struct TestModel {
+    occupancy_config: OccupancyConfig,
+}
+
+impl TestModel {
+    fn new(occupancy_config: OccupancyConfig) -> Self {
+        Self { occupancy_config }
+    }
+}
+
+impl EstimationModel for TestModel {
+    fn compute_wait_time(
+        &self,
+        _obstructions: &[SensorObstruction],
+        timestamp: std::time::SystemTime,
+    ) -> WaitTimeEstimate {
+        WaitTimeEstimate {
+            wait_time_minutes: None,
+            timestamp,
+            status: WaitTimeStatus::Degraded,
+            error_code: Some(WaitTimeErrorCode::NoData),
+        }
+    }
+
+    fn occupancy_config(&self) -> &OccupancyConfig {
+        &self.occupancy_config
+    }
 }

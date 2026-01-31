@@ -1,5 +1,5 @@
 use crate::bus::readings::read_and_store_distances;
-use crate::bus::xshut::{XshutController, reinitialize_sensor};
+use crate::bus::xshut::{reinitialize_sensor, XshutController};
 use crate::error::AppError;
 use crate::sensor::SensorDriverFactory;
 use crate::state::{
@@ -14,45 +14,18 @@ use std::time::{Duration, Instant, SystemTime};
 use thiserror::Error;
 use tracing::warn;
 
-pub mod linear_v1;
-pub mod linear_v2;
 pub mod model;
-pub mod obstruction_count_v1;
+pub mod remote;
 
-use linear_v1::{LinearV1Model, LinearV1Params};
-use linear_v2::{LinearV2Model, LinearV2Params};
 use model::{EstimationModel, OccupancyConfig};
-use obstruction_count_v1::{ObstructionCountModel, ObstructionCountParams};
 
 pub const DEFAULT_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
-// Model Factory
-pub fn create_model(
-    config: &CalibrationFile,
-) -> Result<Box<dyn EstimationModel>, CalibrationError> {
-    let occupancy_config = OccupancyConfig {
+pub fn occupancy_config_from_calibration(config: &CalibrationFile) -> OccupancyConfig {
+    OccupancyConfig {
         threshold_mm: config.occupancy_threshold_mm.unwrap_or(1200),
         sensor_min_mm: config.sensor_min_mm.unwrap_or(40),
         sensor_max_mm: config.sensor_max_mm.unwrap_or(4000),
-    };
-
-    match config.model.as_str() {
-        "linear_v1" => {
-            let params: LinearV1Params = serde_json::from_value(config.params.clone())?;
-            Ok(Box::new(LinearV1Model::new(params, occupancy_config)))
-        }
-        "linear_v2" => {
-            let params: LinearV2Params = serde_json::from_value(config.params.clone())?;
-            Ok(Box::new(LinearV2Model::new(params, occupancy_config)))
-        }
-        "obstruction_count_v1" => {
-            let params: ObstructionCountParams = serde_json::from_value(config.params.clone())?;
-            Ok(Box::new(ObstructionCountModel::new(
-                params,
-                occupancy_config,
-            )))
-        }
-        other => Err(CalibrationError::Invalid(format!("unknown model: {other}"))),
     }
 }
 
@@ -122,7 +95,7 @@ fn update_wait_time_from_obstructions_at(
     Ok(wait_time)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct CalibrationFile {
     pub model: String,
     pub occupancy_threshold_mm: Option<u16>,
@@ -130,6 +103,7 @@ pub struct CalibrationFile {
     pub sensor_max_mm: Option<u16>,
     pub params: serde_json::Value,
 }
+
 
 #[derive(Debug, Error)]
 pub enum CalibrationError {
@@ -141,12 +115,10 @@ pub enum CalibrationError {
     Invalid(String),
 }
 
-pub fn load_calibration_from_path(
-    path: impl AsRef<Path>,
-) -> Result<Box<dyn EstimationModel>, CalibrationError> {
+pub fn load_calibration_config(path: impl AsRef<Path>) -> Result<CalibrationFile, CalibrationError> {
     let contents = std::fs::read_to_string(path)?;
     let config: CalibrationFile = serde_json::from_str(&contents)?;
-    create_model(&config)
+    Ok(config)
 }
 
 pub fn run_refresh_cycle(

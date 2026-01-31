@@ -1,0 +1,17 @@
+[Unit]
+Description=Mariam Flow Service
+After=network.target mariam-model.service
+Wants=mariam-model.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mariam-flow
+ExecStartPre=/usr/bin/curl --retry 10 --retry-delay 1 --retry-connrefused http://127.0.0.1:5001/health
+ExecStart=/opt/mariam-flow/mariam-flow --config /opt/mariam-flow/config/config.toml
+Restart=on-failure
+RestartSec=2
+User=pi
+Group=pi
+
+[Install]
+WantedBy=multi-user.target

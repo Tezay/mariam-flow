@@ -7,6 +7,8 @@ use thiserror::Error;
 pub const DEFAULT_CONFIG_PATH: &str = "config/config.toml";
 pub const DEFAULT_SERVER_PORT: u16 = 8080;
 pub const DEFAULT_REFRESH_INTERVAL_SECS: u64 = 5;
+pub const DEFAULT_MODEL_REMOTE_URL: &str = "http://127.0.0.1:5001/predict";
+pub const DEFAULT_MODEL_TIMEOUT_MS: u64 = 800;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
@@ -18,6 +20,8 @@ pub struct Config {
     pub sensors: Option<SensorsSection>,
     #[serde(default)]
     pub server: Option<ServerSection>,
+    #[serde(default)]
+    pub model: Option<ModelSection>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -49,6 +53,14 @@ pub struct ServerSection {
     pub refresh_interval_secs: Option<u64>,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct ModelSection {
+    /// Remote model service endpoint
+    pub remote_url: Option<String>,
+    /// HTTP timeout in milliseconds
+    pub timeout_ms: Option<u64>,
+}
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("failed to read config: {0}")]
@@ -65,6 +77,32 @@ pub fn load_from_path(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
     let contents = std::fs::read_to_string(path)?;
     let config: Config = toml::from_str(&contents)?;
     Ok(config)
+}
+
+pub fn resolve_config_path() -> PathBuf {
+    if let Ok(path) = std::env::var("MARIAM_FLOW_CONFIG") {
+        if !path.is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--config=") {
+            if !value.is_empty() {
+                return PathBuf::from(value);
+            }
+        }
+        if arg == "--config" {
+            if let Some(path) = args.next() {
+                if !path.is_empty() {
+                    return PathBuf::from(path);
+                }
+            }
+        }
+    }
+
+    PathBuf::from(DEFAULT_CONFIG_PATH)
 }
 
 impl Config {
@@ -111,6 +149,24 @@ impl Config {
             .and_then(|s| s.refresh_interval_secs)
             .unwrap_or(DEFAULT_REFRESH_INTERVAL_SECS);
         Duration::from_secs(secs)
+    }
+
+    /// Returns the remote model service URL (default: localhost)
+    pub fn model_remote_url(&self) -> String {
+        self.model
+            .as_ref()
+            .and_then(|m| m.remote_url.clone())
+            .unwrap_or_else(|| DEFAULT_MODEL_REMOTE_URL.to_string())
+    }
+
+    /// Returns the model service timeout (default: 800 ms)
+    pub fn model_timeout(&self) -> Duration {
+        let ms = self
+            .model
+            .as_ref()
+            .and_then(|m| m.timeout_ms)
+            .unwrap_or(DEFAULT_MODEL_TIMEOUT_MS);
+        Duration::from_millis(ms)
     }
 }
 

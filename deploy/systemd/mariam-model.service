@@ -1,0 +1,17 @@
+[Unit]
+Description=Mariam Flow Model Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mariam-flow/model_service
+ExecStart=/opt/mariam-flow/model_service/venv/bin/python /opt/mariam-flow/model_service/app.py --host 127.0.0.1 --port 5001
+Restart=on-failure
+RestartSec=2
+User=pi
+Group=pi
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

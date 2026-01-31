@@ -1,8 +1,25 @@
+# Build / artifacts
 /target
-/docs/
+/release
+/mariam-flow-*.tar.gz
+/model_service/wheelhouse
+
+# Virtual environments
+/.venv
+/model_service/.venv
+/model_service/venv
+
+# Tooling / IDE helpers
 /.codex
 /.claude
 /.agent
 /_bmad
 /_bmad-output
+/docs/
+
+# Python caches
+__pycache__/
+.pytest_cache/
+
+# OS files
 .DS_Store

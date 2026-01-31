@@ -12,9 +12,34 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  build-wheelhouse:
+    name: Build Python wheelhouse (ARM)
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build wheelhouse
+        run: |
+          python -m pip install --upgrade pip
+          mkdir -p wheelhouse
+          pip wheel -r model_service/requirements.txt -w wheelhouse
+
+      - name: Upload wheelhouse artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-wheelhouse
+          path: wheelhouse
+
   build-pi:
     name: Build for Raspberry Pi
     runs-on: ubuntu-latest
+    needs: build-wheelhouse
 
     steps:
       - uses: actions/checkout@v4
@@ -40,12 +65,20 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target aarch64-unknown-linux-gnu
 
+      - name: Download wheelhouse artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: model-wheelhouse
+          path: wheelhouse
+
       - name: Prepare release assets
         run: |
           mkdir -p release
           cp target/aarch64-unknown-linux-gnu/release/mariam-flow release/
-          cp -r config/ release/
-          cd release && tar -czvf mariam-flow-${{ github.ref_name }}-aarch64.tar.gz mariam-flow config/
+          cp -r config/ model_service/ deploy/ release/
+          mkdir -p release/model_service/wheelhouse
+          cp -r wheelhouse/* release/model_service/wheelhouse/
+          cd release && tar -czvf mariam-flow-${{ github.ref_name }}-aarch64.tar.gz mariam-flow config/ model_service/ deploy/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1

@@ -20,30 +20,43 @@ fn init_tracing() {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing();
-    tracing::info!(
-        config_path = config::DEFAULT_CONFIG_PATH,
-        "mariam-flow starting"
-    );
-    let config = config::load_default()?;
+    let config_path = config::resolve_config_path();
+    tracing::info!(config_path = %config_path.display(), "mariam-flow starting");
+    let config = config::load_from_path(&config_path)?;
     let state = Arc::new(RwLock::new(state::AppState::new()));
 
-    // Load calibration/model
-    let model = match config.calibration_path() {
-        Some(path) => match estimation::load_calibration_from_path(path) {
-            Ok(model) => {
-                tracing::info!(path = %path.display(), "Estimation model loaded");
-                model
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to load calibration, using default");
-                Box::new(estimation::linear_v1::LinearV1Model::with_defaults())
-            }
-        },
-        None => {
-            tracing::info!("No calibration path configured, using default model");
-            Box::new(estimation::linear_v1::LinearV1Model::with_defaults())
+    // Load calibration file (required)
+    let calibration_path = config
+        .calibration_path()
+        .ok_or_else(|| "calibration.path is required in config.toml")?;
+    let calibration = match estimation::load_calibration_config(calibration_path) {
+        Ok(config) => {
+            tracing::info!(path = %calibration_path.display(), "Calibration loaded");
+            config
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to load calibration");
+            return Err(e.into());
         }
     };
+
+    let occupancy_config = estimation::occupancy_config_from_calibration(&calibration);
+
+    tracing::info!(
+        endpoint = %config.model_remote_url(),
+        model_id = %calibration.model,
+        "Using Python model service"
+    );
+
+    let model: Box<dyn estimation::model::EstimationModel> =
+        Box::new(estimation::remote::RemoteModel::new(
+        config.model_remote_url(),
+        config.model_timeout(),
+        calibration.model.clone(),
+        calibration.params.clone(),
+        occupancy_config,
+        None,
+    ));
 
     if let Ok(mut guard) = state.write() {
         guard.set_model(Arc::from(model));

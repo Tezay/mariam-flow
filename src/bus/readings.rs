@@ -117,8 +117,7 @@ fn validate_measurement(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::estimation::linear_v1::{LinearV1Model, LinearV1Params};
-    use crate::estimation::model::OccupancyConfig;
+    use crate::estimation::model::{EstimationModel, OccupancyConfig};
     use crate::sensor::mock::{MockSensorBehavior, MockSensorFactory};
     use crate::sensor::{SensorInfo, SensorStatus};
     use std::time::UNIX_EPOCH;
@@ -131,14 +130,11 @@ mod tests {
             MockSensorBehavior::with_reading(200, SensorRangeStatus::SignalFailure),
         ];
         let mut factory = MockSensorFactory::new(behaviors);
-        let model = LinearV1Model::new(
-            LinearV1Params::default(),
-            OccupancyConfig {
-                threshold_mm: 1000,
-                sensor_min_mm: 40,
-                sensor_max_mm: 4000,
-            },
-        );
+        let model = TestModel::new(OccupancyConfig {
+            threshold_mm: 1000,
+            sensor_min_mm: 40,
+            sensor_max_mm: 4000,
+        });
 
         let state = Arc::new(RwLock::new(AppState::new()));
         let _sensor_rx = {
@@ -219,7 +215,7 @@ mod tests {
             MockSensorBehavior::fail_read_distance(),
         ];
         let mut factory = MockSensorFactory::new(behaviors);
-        let model = LinearV1Model::with_defaults();
+        let model = TestModel::new(OccupancyConfig::default());
 
         let state = Arc::new(RwLock::new(AppState::new()));
         let _sensor_rx = {
@@ -275,5 +271,35 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[derive(Debug)]
+    struct TestModel {
+        occupancy_config: OccupancyConfig,
+    }
+
+    impl TestModel {
+        fn new(occupancy_config: OccupancyConfig) -> Self {
+            Self { occupancy_config }
+        }
+    }
+
+    impl EstimationModel for TestModel {
+        fn compute_wait_time(
+            &self,
+            _obstructions: &[crate::state::SensorObstruction],
+            timestamp: std::time::SystemTime,
+        ) -> crate::state::WaitTimeEstimate {
+            crate::state::WaitTimeEstimate {
+                wait_time_minutes: None,
+                timestamp,
+                status: crate::state::WaitTimeStatus::Degraded,
+                error_code: Some(crate::state::WaitTimeErrorCode::NoData),
+            }
+        }
+
+        fn occupancy_config(&self) -> &OccupancyConfig {
+            &self.occupancy_config
+        }
     }
 }
