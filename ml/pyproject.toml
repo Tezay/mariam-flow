@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Feature engineering, model training, and ONNX export for Mariam Flow"
 license = "PolyForm-Noncommercial-1.0.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "numpy>=2.0",
+]
 
 [dependency-groups]
 dev = [

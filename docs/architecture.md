@@ -43,7 +43,7 @@ upstream.
 | `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` capture tool, UDP intake | Parser, stream reader, session writer and replay tool implemented; UDP intake planned |
 | `crates/flow-infer` | Sliding-window features, ONNX inference (`tract`), Little's Law, output smoothing | Placeholder |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Placeholder |
-| `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Scaffold |
+| `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Loading, windowing and v1 features implemented; training and export planned |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi` | Placeholder |
 | `tools/labeler` | Web app for live ground-truth labeling during calibration | Not created yet |
 
@@ -153,6 +153,23 @@ must produce identical outputs within a 1e-5 tolerance.
 Evaluation uses cross-validation grouped by session — a single session is
 never split between train and test, as adjacent windows of the same capture
 are too similar and would leak.
+
+### Feature extraction (v1)
+
+`flow_ml` loads sessions with the same validations as the Rust side (the
+two implementations are pinned by tests on the same canonical examples),
+cuts them into time-based sliding windows (default 5 s, hop 1 s — time, not
+frame counts, since the frame rate varies with losses), and computes
+per-RX-node statistics per window: mean amplitude, temporal amplitude
+deviation, motion energy (frame-to-frame change), mean inter-subcarrier
+correlation, RSSI summary, and observed frame rate. Phase is not used in
+v1: raw phase from unsynchronized commodity radios needs a dedicated
+sanitization step first.
+
+Ground truth is a step function over label timestamps; a window takes the
+state at its center. Windows without ground truth, or incomplete for any
+declared RX node, are dropped rather than imputed. The result is the
+supervised dataset `(X, y)` consumed by training.
 
 ## Wait-time estimation (design)
 
