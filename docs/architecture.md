@@ -40,7 +40,7 @@ upstream.
 | Path | Role | Status |
 |---|---|---|
 | `crates/flow-core` | Canonical domain types: CSI frames, density classes, labels, session metadata | Implemented |
-| `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, UDP intake, ring buffering, immutable on-disk session storage | Parser and stream reader implemented; intake and storage planned |
+| `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, UDP intake | Parser, stream reader and session writer implemented; UDP intake planned |
 | `crates/flow-infer` | Sliding-window features, ONNX inference (`tract`), Little's Law, output smoothing | Placeholder |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Placeholder |
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Scaffold |
@@ -72,6 +72,12 @@ Format rules:
 - Timestamps are microsecond-resolution Unix timestamps (`ts_us`), assigned
   by the edge at frame reception — node clocks are not trusted.
 - One session is one continuous capture; recorded sessions are immutable.
+  While a capture is running, the directory carries a `.recording` suffix;
+  it is atomically renamed on finalization, so a truncated capture is
+  always distinguishable from a clean one.
+- `csi.ndjson` and `labels.ndjson` are append-ordered by `ts_us`; the
+  writer rejects out-of-order timestamps, structurally invalid frames, and
+  frames from nodes not declared in `meta.json`.
 - `count` is the exact people count measured by a reference sensor during
   supervised calibration; when present, `class` is derived from it using the
   site-specific thresholds recorded in `meta.json`. Manually produced labels
