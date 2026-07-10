@@ -1,0 +1,9 @@
+[package]
+name = "flow-ingest"
+description = "CSI frame ingestion for the Mariam Flow edge: UDP intake, buffering, session storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]

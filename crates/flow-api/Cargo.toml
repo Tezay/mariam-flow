@@ -1,0 +1,9 @@
+[package]
+name = "flow-api"
+description = "Local REST API for the Mariam Flow edge: live state, sessions, control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]

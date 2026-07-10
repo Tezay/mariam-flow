@@ -1,0 +1,17 @@
+# Internal
+.local/
+CLAUDE.md
+.claude/
+
+# Local capture data (published separately on Hugging Face)
+data/
+
+# Build artifacts
+target/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
