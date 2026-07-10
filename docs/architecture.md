@@ -40,7 +40,7 @@ upstream.
 | Path | Role | Status |
 |---|---|---|
 | `crates/flow-core` | Canonical domain types: CSI frames, density classes, labels, session metadata | Implemented |
-| `crates/flow-ingest` | UDP intake of CSI frames, ring buffering, immutable on-disk session storage | Placeholder |
+| `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), UDP intake, ring buffering, immutable on-disk session storage | Parser implemented; intake and storage planned |
 | `crates/flow-infer` | Sliding-window features, ONNX inference (`tract`), Little's Law, output smoothing | Placeholder |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Placeholder |
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Scaffold |
@@ -82,6 +82,18 @@ Format rules:
   invariants.
 - `csi.ndjson` is the v0 human-readable format; migration to Parquet is
   planned once volumes require it.
+
+### Node-to-edge frame format
+
+Sensing nodes emit one `CSI_DATA` text line per measurement, in the format
+of the stock `esp-csi` examples (ADR 0005). `flow-ingest` parses these
+lines regardless of transport (serial capture, recorded file, UDP
+datagram), supports both esp-csi column layouts (ESP32-C6 family and
+classic ESP32, detected from the column count), and converts raw
+interleaved I/Q values into per-sub-carrier amplitude and phase — a
+bijective mapping, so nothing is lost. Edge rules are applied at
+conversion: timestamps are assigned by the edge, and node MAC addresses
+are mapped to logical `node_id`s from configuration.
 
 ### Density classes
 
