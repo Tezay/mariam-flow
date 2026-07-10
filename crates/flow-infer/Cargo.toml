@@ -1,0 +1,9 @@
+[package]
+name = "flow-infer"
+description = "Density inference for the Mariam Flow edge: ONNX runtime, Little's Law, smoothing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
