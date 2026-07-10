@@ -16,7 +16,9 @@ mod convert;
 pub mod esp_csi;
 mod reader;
 pub mod session;
+mod timeline;
 
 pub use esp_csi::{LineFormat, MacAddr, ParseError, RawCsiFrame, parse_line};
 pub use reader::{CsiReader, StreamStats};
 pub use session::{SessionError, SessionSummary, SessionWriter};
+pub use timeline::Timeline;

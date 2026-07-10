@@ -40,7 +40,7 @@ upstream.
 | Path | Role | Status |
 |---|---|---|
 | `crates/flow-core` | Canonical domain types: CSI frames, density classes, labels, session metadata | Implemented |
-| `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, UDP intake | Parser, stream reader and session writer implemented; UDP intake planned |
+| `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` capture tool, UDP intake | Parser, stream reader, session writer and replay tool implemented; UDP intake planned |
 | `crates/flow-infer` | Sliding-window features, ONNX inference (`tract`), Little's Law, output smoothing | Placeholder |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Placeholder |
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Scaffold |
@@ -105,6 +105,19 @@ Ingestion is resilient by policy: non-frame lines and malformed frames are
 counted and skipped, never fatal to a capture. Frame loss is inferred from
 gaps in per-transmitter sequence numbers and exposed as stream statistics,
 which back the frame-loss quality metric of recorded sessions.
+
+The `csi-replay` binary (in `flow-ingest`) turns any stream of `CSI_DATA`
+lines — a recorded capture file, or stdin piped from a serial port — into a
+canonical session directory: it filters frames by transmitter MAC (ambient
+traffic exclusion), reconstructs monotonic edge timestamps from the node's
+wrapping 32-bit local clock while preserving real inter-frame timing, and
+writes through the session writer's invariant checks:
+
+```sh
+csi-replay --input capture.txt --meta meta.json --node-id rx-1 \
+           --tx-mac aa:bb:cc:dd:ee:ff
+cat /dev/ttyUSB0 | csi-replay --input - --meta meta.json --node-id rx-1
+```
 
 ### Density classes
 
