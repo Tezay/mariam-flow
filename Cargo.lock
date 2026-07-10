@@ -22,6 +22,10 @@ version = "0.1.0"
 [[package]]
 name = "flow-ingest"
 version = "0.1.0"
+dependencies = [
+ "flow-core",
+ "thiserror",
+]
 
 [[package]]
 name = "itoa"
