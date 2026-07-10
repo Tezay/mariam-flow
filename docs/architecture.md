@@ -40,7 +40,7 @@ upstream.
 | Path | Role | Status |
 |---|---|---|
 | `crates/flow-core` | Canonical domain types: CSI frames, density classes, labels, session metadata | Implemented |
-| `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), UDP intake, ring buffering, immutable on-disk session storage | Parser implemented; intake and storage planned |
+| `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, UDP intake, ring buffering, immutable on-disk session storage | Parser and stream reader implemented; intake and storage planned |
 | `crates/flow-infer` | Sliding-window features, ONNX inference (`tract`), Little's Law, output smoothing | Placeholder |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Placeholder |
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Scaffold |
@@ -94,6 +94,11 @@ interleaved I/Q values into per-sub-carrier amplitude and phase — a
 bijective mapping, so nothing is lost. Edge rules are applied at
 conversion: timestamps are assigned by the edge, and node MAC addresses
 are mapped to logical `node_id`s from configuration.
+
+Ingestion is resilient by policy: non-frame lines and malformed frames are
+counted and skipped, never fatal to a capture. Frame loss is inferred from
+gaps in per-transmitter sequence numbers and exposed as stream statistics,
+which back the frame-loss quality metric of recorded sessions.
 
 ### Density classes
 
