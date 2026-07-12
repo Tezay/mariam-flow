@@ -1,0 +1,262 @@
+<!doctype html>
+<!-- csi-capture labeling page. Single file, no framework, no build step:
+     served embedded by the csi-capture binary. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>csi-capture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: system-ui, sans-serif;
+    background: #111417; color: #e8eaed;
+    display: flex; flex-direction: column;
+  }
+  #bar {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.55rem 0.8rem; font-size: 0.85rem;
+    background: #1b1f24; color: #9aa0a6;
+    flex-wrap: wrap;
+  }
+  #dot { width: 0.65rem; height: 0.65rem; border-radius: 50%; background: #555; }
+  #dot.on  { background: #34a853; animation: pulse 1.6s infinite; }
+  #dot.off { background: #ea4335; }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { #dot.on { animation: none; } }
+  .bar-btn {
+    background: none; color: #9aa0a6;
+    border: 1px solid #3c4043; border-radius: 4px;
+    padding: 0.15rem 0.5rem; font-size: 0.8rem; cursor: pointer;
+    font-variant-numeric: tabular-nums;
+  }
+  #hours { margin-left: auto; }
+  #banner {
+    display: none; padding: 0.5rem 0.8rem; text-align: center;
+    background: #b05a00; color: #fff; font-size: 0.9rem;
+  }
+  #banner.show { display: block; }
+  #buttons { flex: 1; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem; }
+  .class-btn {
+    flex: 1; border: 0.25rem solid transparent; border-radius: 0.8rem;
+    color: #fff; font-size: 1.5rem; font-weight: 700;
+    display: flex; flex-direction: column; justify-content: center; gap: 0.3rem;
+    cursor: pointer;
+  }
+  .class-btn small { font-size: 0.95rem; font-weight: 400; opacity: 0.9; }
+  .class-btn .since {
+    font-size: 0.85rem; font-weight: 400; opacity: 0.85; display: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .class-btn .elapsed { font-weight: 700; }
+  .class-btn.active { border-color: #fff; }
+  .class-btn.active .since { display: block; }
+  .class-btn:disabled { opacity: 0.45; cursor: default; }
+  #b0 { background: #1e7e34; }
+  #b1 { background: #b8860b; }
+  #b2 { background: #cc5500; }
+  #b3 { background: #b02a37; }
+</style>
+</head>
+<body>
+  <div id="bar">
+    <span id="dot"></span>
+    <span id="state">…</span>
+    <span id="frames"></span>
+    <span id="clock"></span>
+    <button id="hours" class="bar-btn" type="button"></button>
+    <button id="lang" class="bar-btn" type="button"></button>
+  </div>
+  <div id="banner"></div>
+  <div id="buttons">
+    <button class="class-btn" id="b0" data-class="0"></button>
+    <button class="class-btn" id="b1" data-class="1"></button>
+    <button class="class-btn" id="b2" data-class="2"></button>
+    <button class="class-btn" id="b3" data-class="3"></button>
+  </div>
+<script>
+"use strict";
+
+// Adding a language: add one entry here — the toggle, detection and
+// rendering derive everything from this object. `name` is the language's
+// own display name, shown on the toggle for the NEXT language.
+const STRINGS = {
+  en: {
+    name: "EN",
+    classes: ["Empty", "Low", "Medium", "Saturated"],
+    recording: "recording",
+    ended: "capture ended",
+    streamLost: "Stream interrupted — check the capture device",
+    finished: "Capture ended — labels are closed",
+    unreachable: "Server unreachable",
+    frames: "frames",
+    since: "since",
+  },
+  fr: {
+    name: "FR",
+    classes: ["Vide", "Faible", "Moyenne", "Saturée"],
+    recording: "enregistrement",
+    ended: "capture terminée",
+    streamLost: "Flux interrompu — vérifier le capteur",
+    finished: "Capture terminée — labels fermés",
+    unreachable: "Serveur injoignable",
+    frames: "trames",
+    since: "depuis",
+  },
+};
+
+const LANGS = Object.keys(STRINGS);
+const detected = (navigator.language || "en").slice(0, 2);
+let lang = localStorage.getItem("lang")
+  || (LANGS.includes(detected) ? detected : LANGS[0]);
+if (!LANGS.includes(lang)) lang = LANGS[0];
+
+// Clock format: 24 h by default for French, 12 h for English; the toggle
+// (persisted) always wins over the language default.
+const storedHour12 = localStorage.getItem("hour12");
+let hour12 = storedHour12 === null ? lang === "en" : storedHour12 === "1";
+
+let mapping = null;
+let currentClass = null;
+let currentSinceUs = null;
+// Phone-vs-edge clock offset (µs), estimated at each poll from the
+// server's now_us: the elapsed timer must not trust the phone's clock.
+let skewUs = 0;
+
+const $ = (id) => document.getElementById(id);
+const t = () => STRINGS[lang];
+const nextLang = () => LANGS[(LANGS.indexOf(lang) + 1) % LANGS.length];
+const serverNowUs = () => Date.now() * 1000 - skewUs;
+
+$("lang").addEventListener("click", () => {
+  lang = nextLang();
+  localStorage.setItem("lang", lang);
+  render();
+});
+
+$("hours").addEventListener("click", () => {
+  hour12 = !hour12;
+  localStorage.setItem("hour12", hour12 ? "1" : "0");
+  render();
+});
+
+for (const button of document.querySelectorAll(".class-btn")) {
+  button.addEventListener("click", async () => {
+    const value = Number(button.dataset.class);
+    try {
+      const response = await fetch("/label", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ class: value }),
+      });
+      if (response.ok) {
+        currentClass = value;
+        currentSinceUs = serverNowUs();
+        render();
+      } else {
+        await poll();
+      }
+    } catch {
+      showBanner(t().unreachable);
+    }
+  });
+}
+
+function showBanner(text) {
+  const banner = $("banner");
+  banner.textContent = text;
+  banner.classList.add("show");
+}
+
+function hideBanner() {
+  $("banner").classList.remove("show");
+}
+
+function formatTime(epochUs) {
+  return new Date(epochUs / 1000).toLocaleTimeString([], {
+    hour12,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function elapsedText() {
+  if (currentSinceUs === null) return "";
+  const total = Math.max(0, Math.floor((serverNowUs() - currentSinceUs) / 1e6));
+  const hours = Math.floor(total / 3600);
+  const minutes = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+  const seconds = String(total % 60).padStart(2, "0");
+  return hours > 0 ? `${hours}:${minutes}:${seconds}` : `${minutes}:${seconds}`;
+}
+
+function render(status) {
+  $("lang").textContent = STRINGS[nextLang()].name;
+  $("hours").textContent = hour12 ? "24h" : "12h";
+  document.documentElement.lang = lang;
+  for (let value = 0; value < 4; value += 1) {
+    const button = $("b" + value);
+    const description = mapping
+      ? [mapping.empty, mapping.low, mapping.medium, mapping.saturated][value]
+      : "";
+    const active = currentClass === value;
+    button.classList.toggle("active", active);
+    let since = "";
+    if (active && currentSinceUs) {
+      since = `<span class="since">${t().since} ${formatTime(currentSinceUs)}`
+        + ` · <span class="elapsed">${elapsedText()}</span></span>`;
+    }
+    button.innerHTML =
+      `${t().classes[value]}<small>${description}</small>${since}`;
+  }
+  if (status) {
+    $("dot").className = status.recording && status.stream_alive ? "on" : "off";
+    $("state").textContent = status.recording ? t().recording : t().ended;
+    $("frames").textContent = `${status.frames} ${t().frames}`;
+    const minutes = String(Math.floor(status.duration_s / 60)).padStart(2, "0");
+    const seconds = String(status.duration_s % 60).padStart(2, "0");
+    $("clock").textContent = `${minutes}:${seconds}`;
+    const disabled = !status.recording;
+    for (const button of document.querySelectorAll(".class-btn")) {
+      button.disabled = disabled;
+    }
+    if (!status.recording) {
+      showBanner(t().finished);
+    } else if (!status.stream_alive) {
+      showBanner(t().streamLost);
+    } else {
+      hideBanner();
+    }
+  }
+}
+
+async function poll() {
+  try {
+    const response = await fetch("/status");
+    const status = await response.json();
+    skewUs = Date.now() * 1000 - status.now_us;
+    mapping = status.class_mapping;
+    if (status.current_class !== null) {
+      currentClass = status.current_class;
+      currentSinceUs = status.current_since_us;
+    }
+    render(status);
+  } catch {
+    $("dot").className = "off";
+    showBanner(t().unreachable);
+  }
+}
+
+// Light 1 s tick: only the elapsed counter is touched, never the buttons.
+setInterval(() => {
+  const span = document.querySelector(".class-btn.active .elapsed");
+  if (span) span.textContent = elapsedText();
+}, 1000);
+
+render();
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>

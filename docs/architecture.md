@@ -45,7 +45,7 @@ upstream.
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Live-estimate surface and edge daemon implemented; sessions/control/push planned |
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Loading, windowing, v1 features, training and grouped evaluation implemented; ONNX export planned |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi` | Placeholder |
-| `tools/labeler` | Web app for live ground-truth labeling during calibration | Not created yet |
+| `crates/flow-capture` | Labeled capture: session recording plus the phone labeling page (`csi-capture`) | Implemented |
 
 The edge components are plain Rust binaries with no board-specific
 dependency; any Linux/macOS machine can play the edge role during
@@ -254,6 +254,36 @@ with a site configuration file (calibration parameters, window/hop):
 ```sh
 csi-infer --input capture.txt --model model.onnx --config site.json
 cat /dev/ttyUSB0 | csi-infer --input - --model model.onnx --config site.json --json
+```
+
+## Labeled capture
+
+Supervised calibration runs through the `csi-capture` binary
+(`flow-capture`), which combines session recording and ground-truth
+labeling so both land in one session, stamped by one clock: the installer
+labels from a phone over the LAN, and label timestamps are assigned by
+the edge at HTTP reception — the phone's clock is never trusted, exactly
+like the sensing nodes' clocks.
+
+The labeling page is a single embedded vanilla-HTML file (no framework,
+no build step) with four large color-coded buttons — each showing the
+site-specific class description from the session's `class_mapping` — and
+a status bar (recording state, frame count, duration, active label with a
+live elapsed counter corrected for phone-vs-edge clock skew via the
+server time exposed in `/status`). UI chrome is bilingual (English
+default, French auto-detected) with a persisted 12/24-hour clock toggle;
+class descriptions are site *content*, displayed verbatim — the
+recommended convention is numeric ("6–15", "15+"), which reads in any
+language. A wrong tap is corrected by tapping the right button: labels
+form a step function, so a couple of mislabeled seconds are negligible
+noise.
+
+`Ctrl-C` or the end of the input stream flushes, syncs, and seals the
+session. The tool serves no CSI data and is only run during calibration.
+
+```sh
+cat /dev/ttyUSB0 | csi-capture --input - --meta meta.json --node-id rx-1
+# then open http://<edge-ip>:8088 on a phone
 ```
 
 ## Local REST API
