@@ -92,3 +92,38 @@ def test_probabilities_are_a_distribution() -> None:
     probabilities = forward_numpy(proto, x)
     assert (probabilities >= 0).all()
     assert probabilities.sum(axis=1) == pytest.approx(np.ones(x.shape[0]))
+
+
+def test_feature_fixture_matches_reference_implementation(tmp_path: Path) -> None:
+    from flow_ml import Frame, node_features
+    from flow_ml.export import write_feature_fixture
+
+    write_feature_fixture(tmp_path, cases=4)
+    payload = json.loads((tmp_path / "features.json").read_text(encoding="utf-8"))
+    assert payload["features"][0] == "amp_mean"
+    assert payload["cases"], "expected at least one case"
+
+    for case in payload["cases"]:
+        frames = [
+            Frame(
+                ts_us=obj["ts_us"],
+                node_id=obj["node_id"],
+                rssi=obj["rssi"],
+                mcs=obj["mcs"],
+                amp=tuple(obj["amp"]),
+                phase=tuple(obj["phase"]),
+            )
+            for obj in case["frames"]
+        ]
+        vector = node_features(frames, case["duration_us"])
+        assert np.abs(np.array(case["expected"]) - vector).max() < payload["tolerance"]
+
+
+def test_feature_fixture_is_deterministic(tmp_path: Path) -> None:
+    from flow_ml.export import write_feature_fixture
+
+    write_feature_fixture(tmp_path / "a", cases=4)
+    write_feature_fixture(tmp_path / "b", cases=4)
+    content_a = (tmp_path / "a" / "features.json").read_text()
+    content_b = (tmp_path / "b" / "features.json").read_text()
+    assert content_a == content_b

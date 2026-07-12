@@ -41,7 +41,7 @@ upstream.
 |---|---|---|
 | `crates/flow-core` | Canonical domain types: CSI frames, density classes, labels, session metadata | Implemented |
 | `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` capture tool, UDP intake | Parser, stream reader, session writer and replay tool implemented; UDP intake planned |
-| `crates/flow-infer` | ONNX inference (`tract`), Little's Law, output smoothing | Inference and wait-time layer implemented; daemon integration planned |
+| `crates/flow-infer` | Window feature extraction (mirror of `flow_ml`), ONNX inference (`tract`), Little's Law, output smoothing | Features, inference and wait-time layer implemented; daemon integration planned |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Placeholder |
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Loading, windowing, v1 features, training and grouped evaluation implemented; ONNX export planned |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi` | Placeholder |
@@ -183,6 +183,15 @@ Ground truth is a step function over label timestamps; a window takes the
 state at its center. Windows without ground truth, or incomplete for any
 declared RX node, are dropped rather than imputed. The result is the
 supervised dataset `(X, y)` consumed by training.
+
+Live inference computes the same features in Rust (`flow-infer`), a
+deliberate mirror of `flow_ml.features`: a silent divergence between the
+two would skew every model output with no error anywhere. The mirror is
+pinned by its own parity fixtures (windows of frames plus the
+Python-computed reference vectors, 1e-8 tolerance on float64), generated
+by `flow_ml.export` together with the ONNX fixtures. Reference vectors are
+computed on float32-quantized inputs, since production frames always cross
+the f32 `CsiFrame` representation.
 
 ### Training and evaluation (v1)
 
