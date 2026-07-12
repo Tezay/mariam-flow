@@ -41,7 +41,7 @@ upstream.
 |---|---|---|
 | `crates/flow-core` | Canonical domain types: CSI frames, density classes, labels, session metadata | Implemented |
 | `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` capture tool, UDP intake | Parser, stream reader, session writer and replay tool implemented; UDP intake planned |
-| `crates/flow-infer` | ONNX inference (`tract`), Little's Law, output smoothing | Model loading and probabilistic inference implemented; wait-time layer planned |
+| `crates/flow-infer` | ONNX inference (`tract`), Little's Law, output smoothing | Inference and wait-time layer implemented; daemon integration planned |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Placeholder |
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Loading, windowing, v1 features, training and grouped evaluation implemented; ONNX export planned |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi` | Placeholder |
@@ -201,20 +201,32 @@ Deterministic synthetic sessions with separable classes
 (`flow_ml.synthetic`) validate the pipeline end to end without hardware;
 accuracy on them validates plumbing only, never field performance.
 
-## Wait-time estimation (design)
+## Wait-time estimation
 
-Density is converted to a waiting time with Little's Law, W = L / λ:
+Density is converted to a waiting time with Little's Law, W = L / λ,
+implemented in `flow-infer` (`WaitEstimator`):
 
 - each density class maps to an estimated number of people via a per-site
   calibrated mapping; the expected count E[L] is computed over the
   classifier's probability distribution, so the wait-time estimate evolves
   continuously instead of jumping at class transitions;
 - λ is the service rate (people served per minute), calibrated per time
-  slot;
-- the output is smoothed (exponential moving average) with hysteresis on
-  class transitions to avoid flapping.
+  slot; Little's Law assumes a stable regime, and the displayed range is
+  what absorbs its degradation while the queue is still building up;
+- smoothing is a time-aware exponential moving average — the continuous
+  first-order low-pass `τ·ds/dt = x − s` discretized exactly for the
+  elapsed time between samples (`α = 1 − e^(−Δt/τ)`), so the time constant
+  holds regardless of sampling irregularity;
+- the displayed class is stabilized by hysteresis (a Schmitt trigger on
+  the smoothed 0–3 level): it only changes when the level crosses a class
+  boundary by more than a configured margin, so boundary noise below the
+  margin can never make the display flap;
+- estimates carry the classifier confidence and a `reliable` flag; the
+  publishing layer must not show unreliable estimates.
 
-This layer lives in `flow-infer` and is not implemented yet.
+All parameters (class-to-people mapping, λ, τ, hysteresis margin,
+confidence threshold) are per-site configuration, validated at
+construction.
 
 ## Toolchain and quality gates
 
