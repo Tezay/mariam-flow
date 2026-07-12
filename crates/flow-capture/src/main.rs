@@ -1,14 +1,16 @@
 //! `csi-capture`: records a labeled capture session.
 //!
-//! Combines the capture loop (CSI stream → canonical session on disk)
-//! with the labeling web page served on the LAN, so that frames and
+//! Combines the capture loop (CSI frame source → canonical session on
+//! disk) with the labeling web page served on the LAN, so that frames and
 //! labels land in the same session, stamped by the same edge clock.
+//! Input is a capture file, stdin (live serial pipe), or the production
+//! UDP intake — the latter records both RX nodes into one session.
 //! `Ctrl-C` — or the end of the input stream — flushes, syncs, and seals
 //! the session.
 
+use std::collections::HashMap;
 use std::error::Error;
-use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader};
+use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -16,13 +18,13 @@ use clap::Parser;
 use flow_capture::{CaptureState, now_us, router};
 use flow_core::SessionMeta;
 use flow_ingest::session::SessionWriter;
-use flow_ingest::{CsiReader, MacAddr, Timeline};
+use flow_ingest::{FrameSource, MacAddr, SenderKey, SourceConfig, parse_node_mapping};
 
-/// Record a labeled capture session (CSI stream + phone labeling page).
+/// Record a labeled capture session (CSI source + phone labeling page).
 #[derive(Debug, Parser)]
 #[command(name = "csi-capture", version)]
 struct Args {
-    /// Capture source with CSI_DATA lines, or '-' for stdin (live pipe).
+    /// Capture file, '-' for stdin, or udp://ADDR:PORT.
     #[arg(short, long)]
     input: String,
 
@@ -35,9 +37,13 @@ struct Args {
     #[arg(short, long, default_value = "data/sessions")]
     out: PathBuf,
 
-    /// Receiving node id for every frame of this capture.
+    /// Receiving node id — required for line-based inputs only.
     #[arg(short, long)]
-    node_id: String,
+    node_id: Option<String>,
+
+    /// Sender mapping for UDP inputs: <node-id>=<ip[:port]>, repeatable.
+    #[arg(long = "node")]
+    nodes: Vec<String>,
 
     /// Keep only frames sensed from this transmitter MAC address.
     #[arg(long)]
@@ -62,27 +68,35 @@ fn main() -> ExitCode {
 
 fn run(args: &Args) -> Result<(), Box<dyn Error>> {
     let meta: SessionMeta = serde_json::from_str(&fs::read_to_string(&args.meta)?)?;
-    if !meta.nodes.iter().any(|n| n.node_id == args.node_id) {
-        return Err(format!(
-            "node id {:?} is not declared in the session metadata",
-            args.node_id
-        )
-        .into());
-    }
     let tx_mac: Option<MacAddr> = args.tx_mac.as_deref().map(str::parse).transpose()?;
-    let input: Box<dyn BufRead + Send> = if args.input == "-" {
-        Box::new(BufReader::new(io::stdin()))
-    } else {
-        Box::new(BufReader::new(File::open(&args.input)?))
-    };
+
+    let mut nodes: HashMap<SenderKey, String> = HashMap::new();
+    for spec in &args.nodes {
+        let (name, key) = parse_node_mapping(spec)?;
+        nodes.insert(key, name);
+    }
+    let source = FrameSource::open(SourceConfig {
+        input: args.input.clone(),
+        node_id: args.node_id.clone(),
+        nodes,
+        tx_mac,
+        start_ts_us: None,
+    })?;
+
+    for node_id in source.rx_node_ids() {
+        if !meta.nodes.iter().any(|n| n.node_id == node_id) {
+            return Err(
+                format!("node id {node_id:?} is not declared in the session metadata").into(),
+            );
+        }
+    }
 
     let writer = SessionWriter::create(&args.out, &meta)?;
     let state = CaptureState::new(writer, &meta, now_us());
 
     let capture_state = state.clone();
-    let node_id = args.node_id.clone();
     std::thread::spawn(move || {
-        if let Err(err) = capture_loop(input, &node_id, tx_mac, &capture_state) {
+        if let Err(err) = capture_loop(source, &capture_state) {
             eprintln!("capture stream stopped: {err}");
         }
         capture_state.mark_stream_ended();
@@ -114,29 +128,11 @@ fn run(args: &Args) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn capture_loop(
-    input: Box<dyn BufRead + Send>,
-    node_id: &str,
-    tx_mac: Option<MacAddr>,
-    state: &CaptureState,
-) -> Result<(), Box<dyn Error>> {
-    let mut timeline = Timeline::new(now_us());
-    let mut reader = CsiReader::new(input);
-    for result in reader.by_ref() {
-        let raw = result?;
-        if let Some(wanted) = tx_mac {
-            if raw.mac != wanted {
-                continue;
-            }
-        }
-        let ts_us = timeline.assign(raw.local_timestamp);
-        let frame = raw.to_frame(node_id, ts_us)?;
+fn capture_loop(mut source: FrameSource, state: &CaptureState) -> Result<(), Box<dyn Error>> {
+    while let Some(result) = source.next_frame() {
+        let frame = result?;
         state.record_frame(&frame)?;
     }
-    let stats = reader.stats();
-    eprintln!(
-        "stream ended — frames: {}  skipped: {}  parse errors: {}  lost: {}",
-        stats.frames, stats.skipped_lines, stats.parse_errors, stats.lost_frames
-    );
+    eprintln!("stream ended — {}", source.stats_line());
     Ok(())
 }

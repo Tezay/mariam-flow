@@ -40,7 +40,7 @@ upstream.
 | Path | Role | Status |
 |---|---|---|
 | `crates/flow-core` | Canonical domain types: CSI frames, density classes, labels, session metadata | Implemented |
-| `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` capture tool, UDP intake | Parser, stream reader, session writer and replay tool implemented; UDP intake planned |
+| `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` tool, UDP intake and the unified frame source | Implemented |
 | `crates/flow-infer` | Window feature extraction (mirror of `flow_ml`), ONNX inference (`tract`), Little's Law, output smoothing, live pipeline and `csi-infer` tool | Full inference chain implemented; REST exposure planned |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Live-estimate surface and edge daemon implemented; sessions/control/push planned |
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export, visual reports | Loading, windowing, v1 features, training, grouped evaluation, ONNX export and reporting implemented |
@@ -105,6 +105,23 @@ Ingestion is resilient by policy: non-frame lines and malformed frames are
 counted and skipped, never fatal to a capture. Frame loss is inferred from
 gaps in per-transmitter sequence numbers and exposed as stream statistics,
 which back the frame-loss quality metric of recorded sessions.
+
+In production, nodes stream over UDP — one `CSI_DATA` line per datagram
+(ADR 0007). The receiving node is identified by the datagram's source
+address through an explicit mapping (`--node rx-1=192.168.4.11`,
+repeatable); unknown senders are counted and dropped. Frames are stamped
+by the edge clock at reception with a monotonic clamp, so the merged
+multi-node stream is ordered by construction. The capture and inference
+tools accept every transport through one input specification — a file,
+`-` (stdin pipe), or `udp://ADDR:PORT`:
+
+```sh
+csi-capture --input udp://0.0.0.0:5566 \
+            --node rx-1=192.168.4.11 --node rx-2=192.168.4.12 \
+            --meta meta.json
+flow-api    --input udp://0.0.0.0:5566 --node rx-1=192.168.4.11 \
+            --node rx-2=192.168.4.12 --model model.onnx --config site.json
+```
 
 The `csi-replay` binary (in `flow-ingest`) turns any stream of `CSI_DATA`
 lines — a recorded capture file, or stdin piped from a serial port — into a
