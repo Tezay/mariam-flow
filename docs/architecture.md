@@ -43,7 +43,7 @@ upstream.
 | `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` capture tool, UDP intake | Parser, stream reader, session writer and replay tool implemented; UDP intake planned |
 | `crates/flow-infer` | Window feature extraction (mirror of `flow_ml`), ONNX inference (`tract`), Little's Law, output smoothing, live pipeline and `csi-infer` tool | Full inference chain implemented; REST exposure planned |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Live-estimate surface and edge daemon implemented; sessions/control/push planned |
-| `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Loading, windowing, v1 features, training and grouped evaluation implemented; ONNX export planned |
+| `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export, visual reports | Loading, windowing, v1 features, training, grouped evaluation, ONNX export and reporting implemented |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi` | Placeholder |
 | `crates/flow-capture` | Labeled capture: session recording plus the phone labeling page (`csi-capture`) | Implemented |
 
@@ -209,6 +209,19 @@ majority-class baseline and the full confusion matrix.
 Deterministic synthetic sessions with separable classes
 (`flow_ml.synthetic`) validate the pipeline end to end without hardware;
 accuracy on them validates plumbing only, never field performance.
+
+### Visual reports
+
+`flow_ml.report` renders session portraits — one amplitude heatmap per RX
+node over real frame timestamps (capture gaps stay visible), the
+ground-truth band in the class palette, and the v1 features over time —
+plus the evaluation figure (annotated confusion matrix with accuracy and
+baseline). This is the first tool to run after any capture:
+
+```sh
+uv run python -m flow_ml.report --sessions data/sessions --out report/
+uv run python -m flow_ml.report --demo 6 --out /tmp/report   # synthetic
+```
 
 ## Wait-time estimation
 
