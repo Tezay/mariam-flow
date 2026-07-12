@@ -1,0 +1,143 @@
+# pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false
+# pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false
+"""ONNX export of the v1 classifier, and parity-fixture generation.
+
+The fitted pipeline (standardization + multinomial logistic regression) is
+mathematically ``softmax((x − μ)/σ · Wᵀ + b)``, so the exported model is a
+hand-built graph of five core ONNX operators::
+
+    features ─ Sub(μ) ─ Div(σ) ─ MatMul(Wᵀ) ─ Add(b) ─ Softmax ─ probabilities
+
+Core operators only, by decision (ADR 0006): the sklearn-specific
+converters emit ``ai.onnx.ml`` operators (``Scaler``, ``ZipMap``) that the
+Rust runtime (`tract`) does not register. Building the graph ourselves
+keeps the artifact auditable and the runtime path guaranteed.
+
+The exported model carries the whole pipeline — scaler included — as one
+artifact, so the edge cannot forget or mismatch the normalization.
+
+Parity fixtures (``model.onnx`` + ``parity.json``) feed the mandatory
+Python↔Rust parity test (ADR 0004): the Rust side must reproduce the
+probabilities below a 1e-5 tolerance. Regenerate them with::
+
+    uv run python -m flow_ml.export ../crates/flow-infer/tests/fixtures
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+import numpy.typing as npt
+import onnx
+from onnx import TensorProto, helper, numpy_helper
+from sklearn.pipeline import Pipeline
+
+from flow_ml.session import Session
+from flow_ml.synthetic import synthetic_session
+from flow_ml.training import build_dataset, make_classifier
+
+PARITY_TOLERANCE = 1e-5
+MODEL_FILE = "model.onnx"
+PARITY_FILE = "parity.json"
+
+_OPSET = 13
+_IR_VERSION = 8
+
+
+def export_pipeline(pipeline: Pipeline) -> onnx.ModelProto:
+    """Exports a fitted scaler+logistic-regression pipeline to ONNX.
+
+    Input: ``features`` (float32, shape ``[1, d]``) — one window at a time,
+    matching real-time edge inference. Output: ``probabilities`` (float32,
+    shape ``[1, 4]``), the softmax distribution of ADR 0002.
+    """
+    scaler = pipeline.named_steps["scale"]
+    model = pipeline.named_steps["model"]
+    mean = np.asarray(scaler.mean_, dtype=np.float32)
+    scale = np.asarray(scaler.scale_, dtype=np.float32)
+    weight = np.asarray(model.coef_, dtype=np.float32).T  # (d, 4)
+    bias = np.asarray(model.intercept_, dtype=np.float32)
+    n_features = int(mean.shape[0])
+    n_classes = int(bias.shape[0])
+
+    nodes = [
+        helper.make_node("Sub", ["features", "mean"], ["centered"]),
+        helper.make_node("Div", ["centered", "scale"], ["standardized"]),
+        helper.make_node("MatMul", ["standardized", "weight"], ["scores_raw"]),
+        helper.make_node("Add", ["scores_raw", "bias"], ["scores"]),
+        helper.make_node("Softmax", ["scores"], ["probabilities"], axis=-1),
+    ]
+    graph = helper.make_graph(
+        nodes,
+        "density_classifier_v1",
+        inputs=[helper.make_tensor_value_info("features", TensorProto.FLOAT, [1, n_features])],
+        outputs=[helper.make_tensor_value_info("probabilities", TensorProto.FLOAT, [1, n_classes])],
+        initializer=[
+            numpy_helper.from_array(mean, "mean"),
+            numpy_helper.from_array(scale, "scale"),
+            numpy_helper.from_array(weight, "weight"),
+            numpy_helper.from_array(bias, "bias"),
+        ],
+    )
+    proto = helper.make_model(
+        graph,
+        producer_name="flow-ml",
+        opset_imports=[helper.make_opsetid("", _OPSET)],
+    )
+    proto.ir_version = _IR_VERSION
+    onnx.checker.check_model(proto)
+    return proto
+
+
+def fixture_sessions() -> list[Session]:
+    """The deterministic sessions behind the committed parity fixture."""
+    return [
+        synthetic_session(
+            f"parity-{seed:02}",
+            seed=seed,
+            seconds_per_class=12.0,
+            frame_rate_hz=10.0,
+            subcarriers=8,
+        )
+        for seed in range(4)
+    ]
+
+
+def write_parity_fixture(out_dir: Path, *, rows: int = 24) -> None:
+    """Trains on the fixture sessions and writes ``model.onnx`` +
+    ``parity.json`` (inputs and sklearn-computed expected probabilities)."""
+    x, y, _ = build_dataset(fixture_sessions(), hop_us=2_000_000)
+    pipeline = make_classifier()
+    pipeline.fit(x, y)
+
+    proto = export_pipeline(pipeline)
+
+    # The Rust side receives float32 features; expectations are computed by
+    # sklearn on those exact float32 values (upcast to float64 internally).
+    indices = np.unique(np.linspace(0, x.shape[0] - 1, rows).astype(np.int64))
+    inputs = x[indices].astype(np.float32)
+    expected: npt.NDArray[np.float64] = pipeline.predict_proba(inputs)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / MODEL_FILE).write_bytes(proto.SerializeToString())
+    payload = {
+        "n_features": int(inputs.shape[1]),
+        "tolerance": PARITY_TOLERANCE,
+        "inputs": [[float(v) for v in row] for row in inputs],
+        "expected_probabilities": [[float(v) for v in row] for row in expected],
+    }
+    (out_dir / PARITY_FILE).write_text(json.dumps(payload, indent=1), encoding="utf-8")
+
+
+def main() -> None:
+    """Entry point: ``python -m flow_ml.export <output_dir>``."""
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: python -m flow_ml.export <output_dir>")
+    write_parity_fixture(Path(sys.argv[1]))
+
+
+if __name__ == "__main__":
+    main()

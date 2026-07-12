@@ -21,3 +21,4 @@ Conventions:
 | [0003](0003-per-site-model-training.md) | One trained model per site | accepted |
 | [0004](0004-python-training-onnx-rust-inference.md) | Train in Python, export to ONNX, run inference in Rust with tract | accepted |
 | [0005](0005-esp-csi-text-wire-format.md) | Node-to-edge frame format: esp-csi text lines | accepted |
+| [0006](0006-handbuilt-onnx-graph-export.md) | Hand-built core-operator ONNX graph for the v1 export | accepted |
