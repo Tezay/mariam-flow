@@ -183,6 +183,9 @@ fn nearest_class(level: f32) -> DensityClass {
 /// One published estimate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WaitEstimate {
+    /// Edge timestamp of the observation behind this estimate, in µs —
+    /// consumers use it to detect staleness.
+    pub ts_us: TimestampUs,
     /// Estimated waiting time in minutes (`W = E[L]smoothed / λ`).
     pub wait_minutes: f32,
     /// Smoothed expected people count in the zone.
@@ -234,6 +237,7 @@ impl WaitEstimator {
         let display_class = self.hysteresis.update(level);
         let confidence = prediction.confidence();
         WaitEstimate {
+            ts_us,
             wait_minutes: people / self.config.service_rate_per_min,
             people,
             level,

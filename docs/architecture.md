@@ -42,7 +42,7 @@ upstream.
 | `crates/flow-core` | Canonical domain types: CSI frames, density classes, labels, session metadata | Implemented |
 | `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` capture tool, UDP intake | Parser, stream reader, session writer and replay tool implemented; UDP intake planned |
 | `crates/flow-infer` | Window feature extraction (mirror of `flow_ml`), ONNX inference (`tract`), Little's Law, output smoothing, live pipeline and `csi-infer` tool | Full inference chain implemented; REST exposure planned |
-| `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Placeholder |
+| `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Live-estimate surface and edge daemon implemented; sessions/control/push planned |
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Loading, windowing, v1 features, training and grouped evaluation implemented; ONNX export planned |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi` | Placeholder |
 | `tools/labeler` | Web app for live ground-truth labeling during calibration | Not created yet |
@@ -254,6 +254,29 @@ with a site configuration file (calibration parameters, window/hop):
 ```sh
 csi-infer --input capture.txt --model model.onnx --config site.json
 cat /dev/ttyUSB0 | csi-infer --input - --model model.onnx --config site.json --json
+```
+
+## Local REST API
+
+The `flow-api` binary is the edge daemon: the blocking stream loop runs on
+its own thread and publishes each estimate into a `watch` channel; the
+async HTTP server (`axum`) reads the latest value. It binds to localhost
+by default and never exposes raw CSI.
+
+- `GET /health` — liveness probe.
+- `GET /estimate` — the public contract. Only **reliable** (confidence
+  above the site threshold) and **fresh** (younger than `--max-age-s`)
+  estimates are exposed; anything else answers
+  `{"status":"unavailable"}` without leaking values. Staleness masking
+  means a dead stream degrades to "unavailable" on its own — a frozen
+  wait time can never stay on display.
+- `GET /internal/estimate` — operator view: the full internal state
+  (people, level, reliability) plus whether and why the public endpoint
+  masks it.
+
+```sh
+flow-api --input - --model model.onnx --config site.json \
+         --listen 127.0.0.1:8080 --max-age-s 15
 ```
 
 ## Toolchain and quality gates
