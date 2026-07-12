@@ -41,7 +41,7 @@ upstream.
 |---|---|---|
 | `crates/flow-core` | Canonical domain types: CSI frames, density classes, labels, session metadata | Implemented |
 | `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` capture tool, UDP intake | Parser, stream reader, session writer and replay tool implemented; UDP intake planned |
-| `crates/flow-infer` | Sliding-window features, ONNX inference (`tract`), Little's Law, output smoothing | Placeholder |
+| `crates/flow-infer` | ONNX inference (`tract`), Little's Law, output smoothing | Model loading and probabilistic inference implemented; wait-time layer planned |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Placeholder |
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Loading, windowing, v1 features, training and grouped evaluation implemented; ONNX export planned |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi` | Placeholder |
@@ -149,6 +149,19 @@ Models are trained in Python (`ml/`) and exported to ONNX; the edge runs
 inference in Rust through `tract`, so production carries no Python runtime.
 Every exported model must pass a Python↔Rust parity test: identical inputs
 must produce identical outputs within a 1e-5 tolerance.
+
+The v1 exporter (`flow_ml.export`) hand-builds the ONNX graph from the
+fitted pipeline using five core operators — `Sub, Div, MatMul, Add,
+Softmax` — because tract does not register the `ai.onnx.ml` extension
+operators that sklearn-specific converters emit (ADR 0006). The artifact
+carries the whole pipeline, standardization included, so the edge cannot
+mismatch the normalization. The parity contract is enforced in CI:
+`flow_ml.export` writes fixtures (model plus sklearn-computed
+probabilities) committed under `crates/flow-infer/tests/fixtures/`, and a
+`flow-infer` integration test requires tract to reproduce them within
+tolerance. `flow-infer` exposes the result as the full probability
+distribution with derived class, confidence, and expected density level
+(ADR 0002).
 
 Evaluation uses cross-validation grouped by session — a single session is
 never split between train and test, as adjacent windows of the same capture
