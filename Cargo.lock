@@ -322,7 +322,9 @@ dependencies = [
 name = "flow-infer"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "flow-core",
+ "flow-ingest",
  "serde",
  "serde_json",
  "thiserror",

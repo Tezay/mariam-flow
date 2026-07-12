@@ -86,6 +86,14 @@ pub struct DensityModel {
     n_features: usize,
 }
 
+impl core::fmt::Debug for DensityModel {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DensityModel")
+            .field("n_features", &self.n_features)
+            .finish_non_exhaustive()
+    }
+}
+
 impl DensityModel {
     /// Loads an ONNX model from disk, optimizes it, and prepares an
     /// execution plan.
