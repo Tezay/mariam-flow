@@ -26,11 +26,19 @@ from flow_ml.session import (
     SessionMeta,
     load_session,
 )
+from flow_ml.synthetic import synthetic_session
+from flow_ml.training import (
+    EvaluationReport,
+    build_dataset,
+    evaluate_grouped,
+    make_classifier,
+)
 from flow_ml.windows import Window, label_at, sliding_windows
 
 __all__ = [
     "NODE_FEATURES",
     "DensityClass",
+    "EvaluationReport",
     "Frame",
     "Label",
     "NodePlacement",
@@ -38,12 +46,16 @@ __all__ = [
     "SessionFormatError",
     "SessionMeta",
     "Window",
+    "build_dataset",
+    "evaluate_grouped",
     "feature_names",
     "label_at",
     "load_session",
+    "make_classifier",
     "node_features",
     "session_dataset",
     "sliding_windows",
+    "synthetic_session",
     "window_vector",
 ]
 
