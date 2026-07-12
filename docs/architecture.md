@@ -41,7 +41,7 @@ upstream.
 |---|---|---|
 | `crates/flow-core` | Canonical domain types: CSI frames, density classes, labels, session metadata | Implemented |
 | `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` capture tool, UDP intake | Parser, stream reader, session writer and replay tool implemented; UDP intake planned |
-| `crates/flow-infer` | Window feature extraction (mirror of `flow_ml`), ONNX inference (`tract`), Little's Law, output smoothing | Features, inference and wait-time layer implemented; daemon integration planned |
+| `crates/flow-infer` | Window feature extraction (mirror of `flow_ml`), ONNX inference (`tract`), Little's Law, output smoothing, live pipeline and `csi-infer` tool | Full inference chain implemented; REST exposure planned |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Placeholder |
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Loading, windowing, v1 features, training and grouped evaluation implemented; ONNX export planned |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi` | Placeholder |
@@ -236,6 +236,25 @@ implemented in `flow-infer` (`WaitEstimator`):
 All parameters (class-to-people mapping, λ, τ, hysteresis margin,
 confidence threshold) are per-site configuration, validated at
 construction.
+
+## Live inference
+
+`flow-infer` ties the chain together in `LivePipeline`: frames are pushed
+in stream order into a trailing time window (`(t − window, t]`,
+duration-matched to the training windows — anchoring is statistically
+irrelevant, duration is not), and an estimate is emitted every hop of
+stream time once the first window has filled. Incomplete windows are
+counted and skipped; after a capture gap, missed hops are never replayed.
+At construction the pipeline cross-checks that the model's input width
+equals `rx_nodes × features` — a configuration/model mismatch cannot start.
+
+The `csi-infer` binary runs this chain on any stream of `CSI_DATA` lines
+with a site configuration file (calibration parameters, window/hop):
+
+```sh
+csi-infer --input capture.txt --model model.onnx --config site.json
+cat /dev/ttyUSB0 | csi-infer --input - --model model.onnx --config site.json --json
+```
 
 ## Toolchain and quality gates
 

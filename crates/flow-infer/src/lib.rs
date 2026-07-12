@@ -21,12 +21,14 @@
 #![warn(missing_docs)]
 
 mod features;
+mod live;
 mod model;
 mod wait;
 
 pub use features::{
     FeatureError, MIN_FRAMES_PER_NODE, NODE_FEATURES, node_features, window_vector,
 };
+pub use live::{LiveConfig, LiveError, LivePipeline, LiveStats};
 pub use model::{DensityModel, InferError, Prediction};
 pub use wait::{
     ClassHysteresis, ConfigError, Ema, WaitConfig, WaitEstimate, WaitEstimator, expected_people,
