@@ -5,6 +5,7 @@ members = [
     "crates/flow-ingest",
     "crates/flow-infer",
     "crates/flow-api",
+    "crates/flow-capture",
 ]
 
 [workspace.package]
@@ -20,7 +21,7 @@ flow-core = { path = "crates/flow-core" }
 flow-infer = { path = "crates/flow-infer" }
 flow-ingest = { path = "crates/flow-ingest" }
 http-body-util = "0.1"
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
