@@ -43,7 +43,7 @@ upstream.
 | `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` capture tool, UDP intake | Parser, stream reader, session writer and replay tool implemented; UDP intake planned |
 | `crates/flow-infer` | Sliding-window features, ONNX inference (`tract`), Little's Law, output smoothing | Placeholder |
 | `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Placeholder |
-| `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Loading, windowing and v1 features implemented; training and export planned |
+| `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export | Loading, windowing, v1 features, training and grouped evaluation implemented; ONNX export planned |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi` | Placeholder |
 | `tools/labeler` | Web app for live ground-truth labeling during calibration | Not created yet |
 
@@ -170,6 +170,23 @@ Ground truth is a step function over label timestamps; a window takes the
 state at its center. Windows without ground truth, or incomplete for any
 declared RX node, are dropped rather than imputed. The result is the
 supervised dataset `(X, y)` consumed by training.
+
+### Training and evaluation (v1)
+
+The v1 classifier is a multinomial logistic regression over standardized
+features (a scikit-learn pipeline, so scaling parameters are learned on
+training folds only). Its canonical output is the probability distribution
+over the four classes (ADR 0002); the discrete class is the argmax.
+
+Evaluation is session-grouped cross-validation: sessions are the split
+unit, so every window is predicted exactly once by a model that never saw
+its session — overlapping windows of one capture are heavily correlated
+and would otherwise leak. Reports include accuracy against a
+majority-class baseline and the full confusion matrix.
+
+Deterministic synthetic sessions with separable classes
+(`flow_ml.synthetic`) validate the pipeline end to end without hardware;
+accuracy on them validates plumbing only, never field performance.
 
 ## Wait-time estimation (design)
 
