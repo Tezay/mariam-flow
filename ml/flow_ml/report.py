@@ -214,19 +214,27 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(f"wrote {target}")
 
     labeled = [session for session in sessions if session.labels]
-    if len(labeled) >= 2:
+    if len(labeled) < 2:
+        print("fewer than 2 labeled sessions: skipping the evaluation report")
+        return
+    try:
         report = evaluate_grouped(
             labeled,
             n_splits=min(3, len(labeled)),
             window_us=args.window_us,
             hop_us=args.hop_us,
         )
-        target = args.out / "evaluation.png"
-        evaluation_figure(report).savefig(target, dpi=130)
-        print(f"wrote {target}")
-        print(report.format())
-    else:
-        print("fewer than 2 labeled sessions: skipping the evaluation report")
+    except ValueError as exc:
+        # The session portraits (the main output) are already written; a
+        # cross-validation fold can still be untrainable when a session
+        # covers a single density class. Report it instead of crashing.
+        print(f"skipping the evaluation report: {exc}")
+        print("(training needs each session to cover at least two density classes)")
+        return
+    target = args.out / "evaluation.png"
+    evaluation_figure(report).savefig(target, dpi=130)
+    print(f"wrote {target}")
+    print(report.format())
 
 
 if __name__ == "__main__":
