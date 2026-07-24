@@ -1,0 +1,92 @@
+menu "CSI node configuration"
+
+    choice CSI_NODE_ROLE
+        prompt "Node role"
+        default CSI_NODE_ROLE_RX
+        help
+            TX blasts reference traffic on a fixed channel; RX extracts
+            CSI from that traffic and streams CSI_DATA lines to the edge.
+
+        config CSI_NODE_ROLE_TX
+            bool "Transmitter (tx)"
+        config CSI_NODE_ROLE_RX
+            bool "Receiver (rx)"
+    endchoice
+
+    config CSI_NODE_TX_CHANNEL
+        int "TX Wi-Fi channel"
+        depends on CSI_NODE_ROLE_TX
+        range 1 13
+        default 6
+        help
+            Must match the channel of the access point the RX nodes are
+            associated to: a station captures CSI on the channel it sits
+            on, and association pins that channel.
+
+    config CSI_NODE_SEND_RATE_HZ
+        int "TX frames per second"
+        depends on CSI_NODE_ROLE_TX
+        range 1 500
+        default 100
+
+    choice CSI_NODE_RX_MODE
+        prompt "RX capture mode"
+        depends on CSI_NODE_ROLE_RX
+        default CSI_NODE_RX_MODE_FIXED
+        help
+            Fixed channel: no network, serial output — the simplest
+            bring-up, mirroring the esp-csi csi_recv example. Join access
+            point: connect to the edge network and stream CSI over UDP
+            (production, ADR 0007).
+
+        config CSI_NODE_RX_MODE_FIXED
+            bool "Fixed channel, no network (serial bring-up)"
+        config CSI_NODE_RX_MODE_JOIN
+            bool "Join access point (UDP production)"
+    endchoice
+
+    config CSI_NODE_RX_CHANNEL
+        int "RX fixed channel"
+        depends on CSI_NODE_RX_MODE_FIXED
+        range 1 13
+        default 6
+        help
+            Must equal the TX channel: a station only captures CSI on the
+            channel it currently sits on. In fixed-channel mode the node
+            neither scans nor associates — it parks here and listens.
+
+    config CSI_NODE_WIFI_SSID
+        string "RX: Wi-Fi SSID to join"
+        depends on CSI_NODE_RX_MODE_JOIN
+        default "mariam-flow-edge"
+        help
+            The network through which UDP reaches the edge — typically an
+            access point hosted by the edge device itself.
+
+    config CSI_NODE_WIFI_PASSWORD
+        string "RX: Wi-Fi password"
+        depends on CSI_NODE_RX_MODE_JOIN
+        default ""
+
+    config CSI_NODE_EDGE_HOST
+        string "RX: edge IP address"
+        depends on CSI_NODE_RX_MODE_JOIN
+        default "192.168.4.1"
+
+    config CSI_NODE_EDGE_PORT
+        int "RX: edge UDP port"
+        depends on CSI_NODE_RX_MODE_JOIN
+        range 1 65535
+        default 5566
+
+    config CSI_NODE_SERIAL_OUTPUT
+        bool "RX (join mode): also print CSI_DATA lines on the serial console"
+        depends on CSI_NODE_RX_MODE_JOIN
+        default n
+        help
+            Debug aid while streaming over UDP. At 100 frames per second the
+            lines saturate slow consoles — keep the 921600 baud default and
+            disable this in production. Fixed-channel mode always prints to
+            serial (that is its whole purpose), independently of this option.
+
+endmenu
