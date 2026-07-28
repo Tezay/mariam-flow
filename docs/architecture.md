@@ -46,6 +46,7 @@ upstream.
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export, visual reports | Loading, windowing, v1 features, training, grouped evaluation, ONNX export and reporting implemented |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi`; TX or RX role via sdkconfig; RX streams over serial (bring-up) or UDP (ADR 0007) | Serial capture validated on ESP32-C6; UDP path pending |
 | `crates/flow-capture` | Labeled capture: session recording plus the phone labeling page (`csi-capture`) | Implemented |
+| `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, stream arbitration, status surface; the dashboard it serves | Configuration, lifecycle and status surface implemented; dashboard, pairing, network integration and calibration control planned |
 
 The edge components are plain Rust binaries with no board-specific
 dependency; any Linux/macOS machine can play the edge role during
@@ -337,6 +338,75 @@ by default and never exposes raw CSI.
 ```sh
 flow-api --input - --model model.onnx --config site.json \
          --listen 127.0.0.1:8080 --max-age-s 15
+```
+
+## Edge appliance
+
+An installed site does not run the tools above by hand: it runs one
+long-lived process, `flow-edge`, which embeds them as libraries and adds
+what only a deployed unit needs — its configuration, its installation
+lifecycle, and the dashboard an installer works from (ADR 0008). The
+laboratory tools remain the fastest way to exercise one stage of the chain
+in isolation and are unaffected.
+
+### Network topology
+
+The appliance hosts the access point the sensing nodes join, on a fixed
+2.4 GHz channel matching the transmitter's — a station only senses CSI on
+the channel it is associated with, so that channel cannot be allowed to
+move. It therefore never doubles as a client of the site's network: the
+built-in radio is dedicated to the sensor access point, and the site uplink
+runs on a second interface, a USB Wi-Fi or USB Ethernet adapter (ADR 0009).
+Both uplink kinds are configured through one code path.
+
+The two networks are never bridged. Running with no uplink at all is a
+supported mode rather than a failure: sensing, calibration and local
+display work unchanged, and only remote supervision is unavailable. The
+configuration consequently distinguishes an unanswered uplink question from
+a deliberate choice to stay offline.
+
+### Configuration and state
+
+Configuration lives in one human-readable JSON file, validated on every
+load and every save, and written atomically — a power cut during a write
+leaves the previous configuration intact, and an invalid value is rejected
+before it can reach the disk and lock the unit out of its next boot. It
+carries the appliance identity, the sensor access point, the uplink, the
+paired nodes and the per-site wait-estimation tuning; that tuning is a
+field-for-field mirror of the `site.json` the laboratory tools read, so a
+tuning produced in the lab moves into an appliance unchanged. Historical
+series — node health, estimates, events — belong in SQLite instead, where
+queries and retention are the natural operations.
+
+Installation progress is *derived from facts* rather than stored as a
+cursor: whether the site is named, the nodes are paired, the uplink
+question is answered and a model is ready. An appliance interrupted
+mid-installation resumes exactly where its configuration says it stands.
+A single stored flag records that the installer closed the installation, so
+a finished setup does not fall back into the wizard because a node is
+temporarily unplugged.
+
+### Stream arbitration
+
+Calibration and live inference both consume the single UDP stream from the
+receivers, so at most one may hold it. The daemon makes that a type-level
+rule: every start requires an idle stream, and switching from one activity
+to the other requires stopping first — an explicit act. A refused request
+leaves the running activity untouched, so a stray "start live" cannot end a
+calibration session an installer is halfway through.
+
+### Status surface
+
+`GET /health` is a liveness probe; `GET /api/status` reports the
+appliance identity, installation progress, current activity, sensor access
+point, uplink *shape* and paired nodes. Two rules bound what may appear
+there: no credentials — the uplink is reported by mode and network name,
+never by passphrase, even though the daemon holds it — and no raw CSI, the
+privacy invariant of the whole system.
+
+```sh
+flow-edge --config /etc/mariam-flow/appliance.json \
+          --data-dir /var/lib/mariam-flow --listen 127.0.0.1:8080
 ```
 
 ## Toolchain and quality gates

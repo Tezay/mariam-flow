@@ -6,6 +6,7 @@ members = [
     "crates/flow-infer",
     "crates/flow-api",
     "crates/flow-capture",
+    "crates/flow-edge",
 ]
 
 [workspace.package]

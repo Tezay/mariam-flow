@@ -407,6 +407,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "flow-edge"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "clap",
+ "flow-core",
+ "flow-infer",
+ "flow-ingest",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "flow-infer"
 version = "0.1.0"
 dependencies = [

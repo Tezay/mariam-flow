@@ -23,3 +23,5 @@ Conventions:
 | [0005](0005-esp-csi-text-wire-format.md) | Node-to-edge frame format: esp-csi text lines | accepted |
 | [0006](0006-handbuilt-onnx-graph-export.md) | Hand-built core-operator ONNX graph for the v1 export | accepted |
 | [0007](0007-udp-intake-sender-identity.md) | UDP intake: sender-identified nodes, reception-time stamping | accepted |
+| [0008](0008-single-process-edge-appliance-daemon.md) | Single-process edge appliance daemon | accepted |
+| [0009](0009-dedicated-sensor-access-point-separate-uplink.md) | Dedicated sensor access point on a separate radio from the site uplink | accepted |
