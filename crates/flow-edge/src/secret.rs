@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn the_alphabet_excludes_every_confusable_letter() {
-        for excluded in [b'I', b'L', b'O', b'U'] {
+        for excluded in *b"ILOU" {
             assert!(
                 !ALPHABET.contains(&excluded),
                 "{} must not be in the alphabet",
