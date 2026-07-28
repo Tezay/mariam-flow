@@ -43,6 +43,53 @@ jobs:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
 
+  dashboard:
+    name: Dashboard (format, types, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      # No version here on purpose: pnpm/action-setup reads it from the
+      # `packageManager` field of dashboard/package.json, so CI and a
+      # developer's machine cannot drift apart.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: dashboard/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: dashboard/.nvmrc
+          cache: pnpm
+          cache-dependency-path: dashboard/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting
+        run: pnpm run format:check
+
+      - name: Type-check
+        run: pnpm run check
+
+      - name: Tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # The Rust job builds without the dashboard feature, so this is the
+      # only place the embedding is exercised against real files.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check the dashboard embeds into the daemon
+        working-directory: .
+        run: cargo check -p flow-edge --features dashboard
+
   python:
     name: Python (ruff, pyright, pytest)
     runs-on: ubuntu-latest

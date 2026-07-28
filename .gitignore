@@ -12,6 +12,12 @@ target/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+node_modules/
+dashboard/.svelte-kit/
+
+# The dashboard is built in CI and embedded into the daemon binary through
+# the `dashboard` feature; its output is never versioned.
+dashboard/build/
 
 # OS
 .DS_Store

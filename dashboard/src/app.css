@@ -1,0 +1,72 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter/index.css';
+
+/* Design tokens of the Mariam brand.
+ *
+ * The scale is already Tailwind's (4 px steps), so only what the brand
+ * actually fixes is declared here: the type family, the blue ramp, the
+ * neutrals and the radii. Everything else is inherited rather than
+ * restated, which keeps this file a statement of brand rather than a
+ * second copy of Tailwind.
+ *
+ * The density palette is deliberately identical to the one the labeling
+ * page and the Python reports already use: an operator who has seen a
+ * session portrait must recognise the colours on the dashboard without
+ * having to think about it. */
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --color-mariam-50: #e8eefb;
+  --color-mariam-100: #d4dff6;
+  --color-mariam-200: #c5d2f1;
+  --color-mariam-500: #0b4bcf;
+  --color-mariam-600: #093eaa;
+  --color-mariam-700: #072e80;
+  --color-mariam-800: #051f57;
+
+  --color-ink-50: #f6f6f6;
+  --color-ink-100: #eeeeee;
+  --color-ink-200: #dddddd;
+  --color-ink-500: #666666;
+  --color-ink-700: #3a3a3a;
+  --color-ink-900: #161616;
+
+  --color-density-empty: #1e7e34;
+  --color-density-low: #b8860b;
+  --color-density-medium: #cc5500;
+  --color-density-saturated: #b02a37;
+
+  --color-danger: #b02a37;
+  --color-success: #1e7e34;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-3xl: 32px;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    background-color: var(--color-ink-50);
+    color: var(--color-ink-900);
+    font-family: var(--font-sans);
+  }
+
+  /* The dashboard is used at arm's length on a phone, sometimes in a noisy
+   * service hall. Focus has to be unmistakable. */
+  :focus-visible {
+    outline: 2px solid var(--color-mariam-600);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

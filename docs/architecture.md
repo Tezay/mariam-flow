@@ -46,7 +46,8 @@ upstream.
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export, visual reports | Loading, windowing, v1 features, training, grouped evaluation, ONNX export and reporting implemented |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi`; TX or RX role via sdkconfig; RX streams over serial (bring-up) or UDP (ADR 0007) | Serial capture validated on ESP32-C6; UDP path pending |
 | `crates/flow-capture` | Labeled capture: session recording plus the phone labeling page (`csi-capture`) | Implemented |
-| `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, stream arbitration, administrator credential, authenticated HTTP surface, event journal; the dashboard it serves | Configuration, lifecycle, credential, sessions, journal and status surface implemented; dashboard, pairing, network integration and calibration control planned |
+| `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, stream arbitration, administrator credential, authenticated HTTP surface, event journal, and the embedded dashboard | Configuration, lifecycle, credential, sessions, journal, status surface and dashboard serving implemented; pairing, network integration and calibration control planned |
+| `dashboard/` | Svelte 5 single-page dashboard: sign-in, installation wizard shell, supervision; built to static assets and embedded in the daemon | Toolchain, brand tokens, translations, sign-in and shell implemented; wizard steps, calibration and live view planned |
 
 The edge components are plain Rust binaries with no board-specific
 dependency; any Linux/macOS machine can play the edge role during
@@ -429,6 +430,39 @@ The secret travels in the request body, never in a query string. The QR code
 on the label follows the same reasoning: it carries the secret in the URL
 *fragment*, which browsers never transmit, so the dashboard reads it
 client-side, exchanges it for a session and clears it from the address bar.
+
+### Dashboard
+
+The installer works from a web dashboard the appliance serves: a Svelte 5
+single-page application, prerendered to static assets and **compiled into the
+daemon binary** (ADR 0013). The appliance therefore ships as one artifact,
+with no way for dashboard and API to disagree about their version. Debug
+builds read the same files from disk instead, so a frontend rebuild does not
+mean recompiling Rust.
+
+Everything is served from one origin: the daemon answers `/api` and
+`/health`, and treats every other path as the dashboard's — an unmatched path
+returns the application shell, which resolves it as a client-side route. The
+session cookie is consequently a same-origin cookie, with no CORS anywhere.
+Assets, the brand typeface included, are self-hosted without exception: an
+appliance with no uplink is a supported mode, and the dashboard must render
+identically there.
+
+The shell follows the appliance's phase rather than guessing: during
+installation it is a full-frame wizard with no navigation, and the tabbed
+shell appears only once the installation is closed. Translations are
+dictionaries in the repository — English is the reference, other locales are
+typed against it, so a missing key fails the build rather than the customer.
+
+Embedding sits behind an optional Cargo feature, off by default: the crate
+has to build, test and be developed on a machine with no Node installed, and
+on a clean clone where nothing has been built. Without it the daemon serves a
+notice saying so — a development state, never a deployment one.
+
+```sh
+cd dashboard && pnpm install && pnpm build
+cargo build --release -p flow-edge --features dashboard
+```
 
 ### Journal
 

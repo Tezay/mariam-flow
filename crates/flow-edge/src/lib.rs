@@ -40,6 +40,7 @@
 #![warn(missing_docs)]
 
 mod api;
+mod assets;
 mod config;
 mod credential;
 mod error;

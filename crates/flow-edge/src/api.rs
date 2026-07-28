@@ -24,7 +24,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use axum::extract::{ConnectInfo, Query, Request, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -277,7 +277,41 @@ pub fn router(state: EdgeState) -> Router {
         .route("/health", get(health))
         .route("/api/session", post(login).delete(logout))
         .merge(protected)
+        // Anything the API does not claim is the dashboard: its assets, or
+        // one of its client-side routes.
+        .fallback(crate::assets::serve)
+        .layer(middleware::from_fn(security_headers))
         .with_state(state)
+}
+
+/// Adds the protections a browser applies on the server's word alone.
+///
+/// The content security policy itself is not here: only the build knows the
+/// hash of the script SvelteKit inlines, so the policy travels in the
+/// document (see `dashboard/svelte.config.js`). What a document cannot
+/// carry is sent here instead.
+///
+/// - `nosniff` stops a browser from second-guessing a declared content
+///   type, which is how a JSON response gets executed as script.
+/// - `DENY` refuses framing outright: nothing should ever embed an
+///   administration interface, and this is the header form of
+///   `frame-ancestors`, which a meta policy cannot express.
+/// - `no-referrer` keeps the appliance's address out of any request the
+///   browser makes elsewhere. The QR code already keeps the secret in the
+///   URL fragment, which is never sent anywhere; this covers the path.
+async fn security_headers(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    response
 }
 
 /// Rejects any request that does not carry a live session.
@@ -822,6 +856,32 @@ mod tests {
         state.with_runtime(Runtime::stop);
         let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
         assert_eq!(body["runtime"]["mode"], "idle");
+    }
+
+    #[tokio::test]
+    async fn every_response_carries_the_browser_protections() {
+        let state = state_for(installed(), true);
+        // The probe, a refused request and an authenticated one: the
+        // headers must not depend on the outcome.
+        let cookie = session_of(&state).await;
+        for (path, cookie) in [
+            ("/health", None),
+            ("/api/status", None),
+            ("/api/status", Some(cookie.as_str())),
+        ] {
+            let (_, headers, _) = send(&state, "GET", path, cookie, None, 10).await;
+            assert_eq!(
+                headers.get("x-content-type-options").unwrap(),
+                "nosniff",
+                "{path}"
+            );
+            assert_eq!(headers.get("x-frame-options").unwrap(), "DENY", "{path}");
+            assert_eq!(
+                headers.get("referrer-policy").unwrap(),
+                "no-referrer",
+                "{path}"
+            );
+        }
     }
 
     #[tokio::test]
