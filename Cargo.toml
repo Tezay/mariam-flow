@@ -16,6 +16,7 @@ rust-version = "1.85"
 license = "PolyForm-Noncommercial-1.0.0"
 
 [workspace.dependencies]
+argon2 = "0.5"
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 flow-core = { path = "crates/flow-core" }

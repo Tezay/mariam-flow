@@ -18,7 +18,6 @@
 //! versa.
 
 use std::collections::HashSet;
-use std::fs;
 use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
@@ -29,6 +28,7 @@ use flow_ingest::MacAddr;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ConfigError, StoreError};
+use crate::store::{read_to_string, write_atomic};
 
 /// Wi-Fi channel the sensor access point runs on unless configured
 /// otherwise.
@@ -386,10 +386,7 @@ impl ApplianceConfig {
     /// [`StoreError`] if the file cannot be read, does not parse, or holds
     /// a configuration the daemon refuses to run with.
     pub fn load(path: &Path) -> Result<Self, StoreError> {
-        let text = fs::read_to_string(path).map_err(|source| StoreError::Read {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        let text = read_to_string(path)?;
         let config: Self = serde_json::from_str(&text).map_err(|source| StoreError::Parse {
             path: path.to_path_buf(),
             source,
@@ -486,48 +483,10 @@ fn validate_passphrase(passphrase: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// Writes `contents` to `path` through a temporary file and a rename, so a
-/// crash mid-write cannot leave a truncated configuration behind.
-///
-/// On unix the file is restricted to its owner before being moved into
-/// place: it carries Wi-Fi passphrases.
-fn write_atomic(path: &Path, contents: &str) -> Result<(), StoreError> {
-    let write_error = |source: std::io::Error| StoreError::Write {
-        path: path.to_path_buf(),
-        source,
-    };
-
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent).map_err(write_error)?;
-    }
-
-    let mut temp = path.as_os_str().to_owned();
-    temp.push(".tmp");
-    let temp = std::path::PathBuf::from(temp);
-
-    fs::write(&temp, contents).map_err(|source| StoreError::Write {
-        path: temp.clone(),
-        source,
-    })?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&temp, fs::Permissions::from_mode(0o600)).map_err(|source| {
-            StoreError::Write {
-                path: temp.clone(),
-                source,
-            }
-        })?;
-    }
-
-    fs::rename(&temp, path).map_err(write_error)
-}
-
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     fn factory() -> ApplianceConfig {

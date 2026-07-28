@@ -104,6 +104,45 @@ pub enum ConfigError {
     },
 }
 
+/// A string that is not a well-formed device secret.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum SecretError {
+    /// The secret does not have the expected number of characters.
+    #[error("a device secret has {expected} characters, got {got}")]
+    InvalidLength {
+        /// Characters a device secret must carry.
+        expected: usize,
+        /// Characters actually found, separators excluded.
+        got: usize,
+    },
+    /// A character is neither in the alphabet nor foldable onto it.
+    #[error("{0:?} is not a device-secret character")]
+    InvalidCharacter(char),
+}
+
+/// Failure while establishing or checking the administrator credential.
+#[derive(Debug, Error)]
+pub enum CredentialError {
+    /// The supplied secret is not well formed.
+    #[error("malformed device secret")]
+    Secret(#[from] SecretError),
+    /// The credential file could not be read or written.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// The password hasher rejected the operation.
+    ///
+    /// Carries the hasher's own message: its error type is not
+    /// comparable, and the detail only ever reaches an operator's console.
+    #[error("password hashing failed: {0}")]
+    Hashing(String),
+    /// The appliance has no administrator credential yet.
+    #[error("no administrator credential at {path}; run `flow-edge provision` first")]
+    Missing {
+        /// Where the credential was expected.
+        path: PathBuf,
+    },
+}
+
 /// A refused appliance lifecycle or runtime transition.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TransitionError {
