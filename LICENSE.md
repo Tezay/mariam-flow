@@ -150,3 +150,12 @@ software under these terms.
 
 **Use** means anything you do with the software requiring one
 of your licenses.
+
+---
+
+## Third-party components
+
+This software incorporates third-party components under their own licenses,
+whose notices are reproduced in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+Nothing in the license above limits the rights those licenses grant you in
+their respective components.

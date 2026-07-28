@@ -40,7 +40,8 @@ picture.
 | `crates/flow-infer` | Feature extraction, ONNX inference, Little's Law, smoothing, `csi-infer` |
 | `crates/flow-api` | Local REST API serving the live estimate |
 | `crates/flow-capture` | Labeled capture: recording plus the phone labeling page (`csi-capture`) |
-| `crates/flow-edge` | Appliance daemon: configuration, installation lifecycle, dashboard *(in progress)* |
+| `crates/flow-edge` | Appliance daemon: configuration, installation lifecycle, credential, journal *(in progress)* |
+| `dashboard/` | Svelte single-page dashboard, embedded in the daemon *(in progress)* |
 | `ml/` | Python package: features, training, evaluation, ONNX export, reports |
 | `firmware/csi-node` | ESP32-C6 firmware based on `espressif/esp-csi` |
 | `docs/` | Architecture documentation and ADRs |
@@ -62,6 +63,23 @@ uv sync
 uv run pytest
 ```
 
+Dashboard (Node ≥ 22, [pnpm](https://pnpm.io/)):
+
+```sh
+cd dashboard
+pnpm install
+pnpm test
+pnpm build
+```
+
+The daemon embeds the built dashboard behind an optional feature, so the
+Rust workspace builds and tests without a JavaScript toolchain. A release
+build turns it on:
+
+```sh
+cargo build --release -p flow-edge --features dashboard
+```
+
 ## Project status
 
 Early development. The sensing chain is implemented end to end — frame
@@ -78,3 +96,7 @@ cross-compilation check on every change.
 Code is licensed under the PolyForm Noncommercial License 1.0.0; commercial
 licensing is available separately. Datasets and trained models are published
 separately under CC BY-NC 4.0. See [LICENSE.md](LICENSE.md).
+
+Third-party components distributed with the appliance keep their own
+licenses; their notices are in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
