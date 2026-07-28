@@ -43,10 +43,12 @@
 use std::net::IpAddr;
 use std::path::Path;
 
+use flow_core::DensityClass;
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
 use crate::error::JournalError;
+use crate::history::MinuteSummary;
 
 /// Events older than this are pruned, in µs (90 days).
 pub const RETENTION_US: u64 = 90 * 24 * 60 * 60 * 1_000_000;
@@ -62,7 +64,18 @@ pub const JOURNAL_FILE: &str = "appliance.db";
 const PENDING_LIMIT: usize = 64;
 
 /// Schema revision this build expects.
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
+
+/// Minute rows older than this are pruned, in µs (two years).
+///
+/// Long enough to compare a term against the same term a year earlier,
+/// which is the question a site manager actually asks. At roughly 70 bytes
+/// a row it costs on the order of 75 MB — affordable beside the capture
+/// sessions sharing the card.
+pub const ESTIMATE_RETENTION_US: u64 = 730 * 24 * 60 * 60 * 1_000_000;
+
+/// Hard ceiling on retained minute rows, whatever their age.
+pub const MAX_ESTIMATE_ROWS: usize = 1_500_000;
 
 /// Broad family an event belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -257,7 +270,21 @@ impl Journal {
                      client    TEXT,
                      detail    TEXT
                  );
-                 CREATE INDEX IF NOT EXISTS events_ts_us ON events(ts_us);",
+                 CREATE INDEX IF NOT EXISTS events_ts_us ON events(ts_us);
+
+                 -- One row per minute of live estimation. `minute_us` is the
+                 -- primary key, so re-writing a minute replaces it rather
+                 -- than duplicating it: a restart mid-minute cannot leave two
+                 -- rows describing the same sixty seconds.
+                 CREATE TABLE IF NOT EXISTS estimates (
+                     minute_us        INTEGER PRIMARY KEY,
+                     samples          INTEGER NOT NULL,
+                     reliable_samples INTEGER NOT NULL,
+                     wait_minutes     REAL    NOT NULL,
+                     level            REAL    NOT NULL,
+                     class            INTEGER NOT NULL,
+                     confidence       REAL    NOT NULL
+                 );",
             )?;
             connection.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -339,6 +366,21 @@ impl Journal {
                  (SELECT id FROM events ORDER BY id DESC LIMIT ?1)",
             params![cap],
         )?;
+
+        // The minute series is bounded the same way, on its own horizon: it
+        // is answered by year-on-year questions, so it is kept far longer
+        // than the event log.
+        let estimate_cutoff = to_sql_us(now_us.saturating_sub(ESTIMATE_RETENTION_US));
+        removed += self.connection.execute(
+            "DELETE FROM estimates WHERE minute_us < ?1",
+            params![estimate_cutoff],
+        )?;
+        let estimate_cap = i64::try_from(MAX_ESTIMATE_ROWS).unwrap_or(i64::MAX);
+        removed += self.connection.execute(
+            "DELETE FROM estimates WHERE minute_us NOT IN
+                 (SELECT minute_us FROM estimates ORDER BY minute_us DESC LIMIT ?1)",
+            params![estimate_cap],
+        )?;
         Ok(removed)
     }
 
@@ -370,6 +412,92 @@ impl Journal {
             events.push(row?);
         }
         Ok(events)
+    }
+
+    /// Stores one folded minute of estimates.
+    ///
+    /// Written as it closes rather than buffered: one transaction a minute
+    /// is negligible against the card's endurance, and buffering would risk
+    /// losing the minute a power cut interrupts for no gain.
+    ///
+    /// # Errors
+    ///
+    /// [`JournalError`] if the write fails.
+    pub fn write_minute(&mut self, summary: &MinuteSummary) -> Result<(), JournalError> {
+        self.connection.execute(
+            "INSERT OR REPLACE INTO estimates
+                 (minute_us, samples, reliable_samples, wait_minutes, level, class, confidence)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                to_sql_us(summary.minute_us),
+                summary.samples,
+                summary.reliable_samples,
+                f64::from(summary.wait_minutes),
+                f64::from(summary.level),
+                i64::from(summary.class.as_u8()),
+                f64::from(summary.confidence),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The most recent minutes at or after `since_us`, oldest first.
+    ///
+    /// The limit keeps the *newest* rows, then hands them back in
+    /// chronological order: a caller asking for "the last hour" wants the
+    /// last hour, and wants to plot it left to right.
+    ///
+    /// # Errors
+    ///
+    /// [`JournalError`] if the query fails.
+    pub fn minutes(&self, since_us: u64, limit: usize) -> Result<Vec<MinuteSummary>, JournalError> {
+        let mut statement = self.connection.prepare(
+            "SELECT minute_us, samples, reliable_samples, wait_minutes, level, class, confidence
+             FROM (
+                 SELECT * FROM estimates WHERE minute_us >= ?1 ORDER BY minute_us DESC LIMIT ?2
+             )
+             ORDER BY minute_us ASC",
+        )?;
+        let rows = statement.query_map(
+            params![
+                to_sql_us(since_us),
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            |row| {
+                let minute_us: i64 = row.get(0)?;
+                let class: i64 = row.get(5)?;
+                let wait: f64 = row.get(3)?;
+                let level: f64 = row.get(4)?;
+                let confidence: f64 = row.get(6)?;
+                Ok(MinuteSummary {
+                    minute_us: from_sql_us(minute_us),
+                    samples: row.get(1)?,
+                    reliable_samples: row.get(2)?,
+                    wait_minutes: wait as f32,
+                    level: level as f32,
+                    class: DensityClass::try_from(u8::try_from(class).unwrap_or(0))
+                        .unwrap_or(DensityClass::Empty),
+                    confidence: confidence as f32,
+                })
+            },
+        )?;
+        let mut minutes = Vec::new();
+        for row in rows {
+            minutes.push(row?);
+        }
+        Ok(minutes)
+    }
+
+    /// Minute rows stored.
+    ///
+    /// # Errors
+    ///
+    /// [`JournalError`] if the query fails.
+    pub fn minute_count(&self) -> Result<usize, JournalError> {
+        let count: i64 =
+            self.connection
+                .query_row("SELECT COUNT(*) FROM estimates", [], |row| row.get(0))?;
+        Ok(usize::try_from(count).unwrap_or(0))
     }
 
     /// Events written but not yet counted by [`Journal::recent`].
@@ -450,6 +578,146 @@ mod tests {
 
     fn client() -> IpAddr {
         IpAddr::V4(Ipv4Addr::new(192, 168, 4, 10))
+    }
+
+    fn summary(minute_us: u64, class: DensityClass, samples: u32) -> MinuteSummary {
+        MinuteSummary {
+            minute_us,
+            samples,
+            reliable_samples: samples,
+            wait_minutes: 6.5,
+            level: 2.0,
+            class,
+            confidence: 0.8,
+        }
+    }
+
+    #[test]
+    fn a_minute_round_trips_through_storage() {
+        let mut journal = Journal::open_in_memory().unwrap();
+        let written = summary(NOW, DensityClass::Medium, 58);
+        journal.write_minute(&written).unwrap();
+
+        let read = journal.minutes(0, 10).unwrap();
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].minute_us, written.minute_us);
+        assert_eq!(read[0].class, DensityClass::Medium);
+        assert_eq!(read[0].samples, 58);
+        assert!((read[0].wait_minutes - 6.5).abs() < 1e-5);
+        assert!(read[0].is_reliable());
+    }
+
+    #[test]
+    fn rewriting_a_minute_replaces_it_rather_than_duplicating() {
+        // A restart mid-minute must not leave two rows for one minute.
+        let mut journal = Journal::open_in_memory().unwrap();
+        journal
+            .write_minute(&summary(NOW, DensityClass::Low, 10))
+            .unwrap();
+        journal
+            .write_minute(&summary(NOW, DensityClass::Saturated, 60))
+            .unwrap();
+
+        let read = journal.minutes(0, 10).unwrap();
+        assert_eq!(read.len(), 1);
+        assert_eq!(
+            read[0].class,
+            DensityClass::Saturated,
+            "the later write wins"
+        );
+        assert_eq!(journal.minute_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn minutes_come_back_in_chronological_order() {
+        let mut journal = Journal::open_in_memory().unwrap();
+        for step in 0..5u64 {
+            journal
+                .write_minute(&summary(NOW + step * 60_000_000, DensityClass::Low, 60))
+                .unwrap();
+        }
+        let read = journal.minutes(0, 10).unwrap();
+        let order: Vec<u64> = read.iter().map(|m| m.minute_us).collect();
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        assert_eq!(order, sorted, "a caller plots these left to right");
+    }
+
+    #[test]
+    fn a_limit_keeps_the_newest_minutes_still_in_order() {
+        let mut journal = Journal::open_in_memory().unwrap();
+        for step in 0..10u64 {
+            journal
+                .write_minute(&summary(NOW + step * 60_000_000, DensityClass::Low, 60))
+                .unwrap();
+        }
+        let read = journal.minutes(0, 3).unwrap();
+        assert_eq!(read.len(), 3);
+        assert_eq!(read[0].minute_us, NOW + 7 * 60_000_000, "the newest three");
+        assert_eq!(read[2].minute_us, NOW + 9 * 60_000_000);
+    }
+
+    #[test]
+    fn the_since_bound_excludes_older_minutes() {
+        let mut journal = Journal::open_in_memory().unwrap();
+        for step in 0..5u64 {
+            journal
+                .write_minute(&summary(NOW + step * 60_000_000, DensityClass::Low, 60))
+                .unwrap();
+        }
+        let read = journal.minutes(NOW + 3 * 60_000_000, 10).unwrap();
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].minute_us, NOW + 3 * 60_000_000);
+    }
+
+    #[test]
+    fn minutes_past_their_horizon_are_pruned() {
+        let mut journal = Journal::open_in_memory().unwrap();
+        journal
+            .write_minute(&summary(NOW, DensityClass::Low, 60))
+            .unwrap();
+        journal
+            .write_minute(&summary(NOW + ESTIMATE_RETENTION_US, DensityClass::Low, 60))
+            .unwrap();
+
+        journal.prune(NOW + ESTIMATE_RETENTION_US + DAY).unwrap();
+        assert_eq!(journal.minute_count().unwrap(), 1);
+        assert_eq!(
+            journal.minutes(0, 10).unwrap()[0].minute_us,
+            NOW + ESTIMATE_RETENTION_US
+        );
+    }
+
+    #[test]
+    fn pruning_events_leaves_the_minute_series_alone() {
+        // The two series have different horizons; one purge must not take
+        // the other with it.
+        let mut journal = Journal::open_in_memory().unwrap();
+        journal.record(Event::new(EventKind::Started), NOW).unwrap();
+        journal.flush().unwrap();
+        journal
+            .write_minute(&summary(NOW, DensityClass::Low, 60))
+            .unwrap();
+
+        journal.prune(NOW + RETENTION_US + DAY).unwrap();
+        assert_eq!(journal.count().unwrap(), 0, "the old event went");
+        assert_eq!(journal.minute_count().unwrap(), 1, "the minute stayed");
+    }
+
+    #[test]
+    fn the_minute_series_survives_a_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let mut journal = Journal::open(dir.path()).unwrap();
+            journal
+                .write_minute(&summary(NOW, DensityClass::Medium, 60))
+                .unwrap();
+        }
+        let journal = Journal::open(dir.path()).unwrap();
+        assert_eq!(
+            journal.minutes(0, 10).unwrap()[0].class,
+            DensityClass::Medium
+        );
     }
 
     #[test]

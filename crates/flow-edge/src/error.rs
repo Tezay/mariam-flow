@@ -148,6 +148,50 @@ pub enum CredentialError {
 #[error("appliance journal")]
 pub struct JournalError(#[from] rusqlite::Error);
 
+/// Why the live pipeline could not start.
+///
+/// Most variants describe an installation that has not reached calibration
+/// yet, which is a normal stage rather than a fault: the daemon reports the
+/// reason and keeps serving.
+#[derive(Debug, Error)]
+pub enum PipelineError {
+    /// The site has no calibrated wait-estimation parameters.
+    #[error("the site is not calibrated yet")]
+    NoSiteTuning,
+    /// No density model is installed.
+    #[error("no density model at {path}")]
+    NoModel {
+        /// Where a model was expected.
+        path: PathBuf,
+    },
+    /// No receiving node is paired, or none carries a reserved address.
+    #[error("no receiving node with a reserved address")]
+    NoReceivers,
+    /// The frame source could not be opened.
+    ///
+    /// The cause is carried as text rather than as a nested error: it comes
+    /// from another crate's error type, and only ever reaches an operator's
+    /// console.
+    #[error("opening {input}: {detail}")]
+    Source {
+        /// The input specification that failed.
+        input: String,
+        /// The underlying message.
+        detail: String,
+    },
+    /// The model could not be loaded.
+    #[error("loading {path}: {detail}")]
+    Model {
+        /// The model that failed to load.
+        path: PathBuf,
+        /// The underlying message.
+        detail: String,
+    },
+    /// The model and the configuration disagree.
+    #[error("pipeline: {0}")]
+    Pipeline(String),
+}
+
 /// A refused appliance lifecycle or runtime transition.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TransitionError {

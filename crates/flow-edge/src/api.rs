@@ -26,15 +26,19 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use axum::extract::{ConnectInfo, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
+use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use tokio_stream::StreamExt;
 
 use crate::config::{ApplianceConfig, Uplink};
 use crate::credential::AdminCredential;
+use crate::history::{MINUTE_US, MinuteSummary};
 use crate::journal::{Event, EventKind, Journal, RecordedEvent};
 use crate::now_us;
+use crate::pipeline::StreamHealth;
 use crate::session::{ABSOLUTE_LIFETIME_US, SessionStore};
 use crate::state::{Phase, Readiness, Runtime, RuntimeMode};
 use crate::throttle::Throttle;
@@ -65,6 +69,18 @@ pub struct EdgeState {
     /// The appliance journal, behind its own lock so a database write
     /// never holds up a status request.
     journal: Arc<Mutex<Journal>>,
+    /// What the pipeline thread publishes.
+    live: Arc<Live>,
+}
+
+/// The live surface, written by the pipeline thread and read by handlers.
+///
+/// A `watch` channel rather than a queue: a client wants the *current*
+/// estimate, not every one ever produced, and a slow reader must never
+/// apply back-pressure to sensing.
+struct Live {
+    estimates: tokio::sync::watch::Sender<Option<flow_infer::WaitEstimate>>,
+    health: Mutex<StreamHealth>,
 }
 
 impl EdgeState {
@@ -90,6 +106,67 @@ impl EdgeState {
             })),
             login_gate: Arc::new(tokio::sync::Mutex::new(())),
             journal: Arc::new(Mutex::new(journal)),
+            live: Arc::new(Live {
+                estimates: tokio::sync::watch::Sender::new(None),
+                health: Mutex::new(StreamHealth::default()),
+            }),
+        }
+    }
+
+    /// Publishes a freshly computed estimate.
+    ///
+    /// `send_replace` rather than `send`: the latter *fails* when no
+    /// receiver is subscribed and then discards the value. Nobody is
+    /// subscribed most of the time — receivers only exist while a browser
+    /// holds the live stream open — so a plain `send` would leave the
+    /// channel empty and the appliance would report no estimate to the
+    /// first client that connects.
+    pub fn publish_estimate(&self, estimate: flow_infer::WaitEstimate) {
+        self.live.estimates.send_replace(Some(estimate));
+    }
+
+    /// The most recent estimate, if the pipeline has produced one.
+    #[must_use]
+    pub fn latest_estimate(&self) -> Option<flow_infer::WaitEstimate> {
+        *self.live.estimates.borrow()
+    }
+
+    /// A receiver that wakes on every new estimate.
+    fn watch_estimates(&self) -> tokio::sync::watch::Receiver<Option<flow_infer::WaitEstimate>> {
+        self.live.estimates.subscribe()
+    }
+
+    /// Replaces the reported stream health.
+    pub fn set_stream_health(&self, health: StreamHealth) {
+        *self.lock_health() = health;
+    }
+
+    /// Marks the pipeline as running or stopped.
+    pub fn set_stream_running(&self, running: bool) {
+        self.lock_health().running = running;
+    }
+
+    /// How the stream is feeding the pipeline.
+    #[must_use]
+    pub fn stream_health(&self) -> StreamHealth {
+        self.lock_health().clone()
+    }
+
+    /// Stores one folded minute, reporting rather than propagating failure.
+    pub fn write_minute(&self, summary: &MinuteSummary) {
+        if let Err(err) = self.journal().write_minute(summary) {
+            eprintln!("journal minute: {err}");
+        }
+    }
+
+    fn minutes(&self, since_us: u64, limit: usize) -> Vec<MinuteSummary> {
+        self.journal().minutes(since_us, limit).unwrap_or_default()
+    }
+
+    fn lock_health(&self) -> MutexGuard<'_, StreamHealth> {
+        match self.live.health.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
         }
     }
 
@@ -222,6 +299,7 @@ impl EdgeState {
             readiness,
             runtime: inner.runtime.mode().clone(),
             model_installed: inner.model_installed,
+            stream: self.stream_health(),
             sensor_ap: SensorApView {
                 ssid: config.network.sensor_ap.ssid.clone(),
                 channel: config.network.sensor_ap.channel,
@@ -268,6 +346,8 @@ pub fn router(state: EdgeState) -> Router {
     let protected = Router::new()
         .route("/api/status", get(status))
         .route("/api/events", get(events))
+        .route("/api/live", get(live))
+        .route("/api/estimates", get(estimates))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_session,
@@ -336,6 +416,107 @@ async fn health() -> Json<Health> {
 
 async fn status(State(state): State<EdgeState>) -> Json<StatusResponse> {
     Json(state.status())
+}
+
+/// What the live stream sends on every tick.
+///
+/// Estimate and stream health travel together because the screen needs
+/// both to say anything useful: a missing estimate means one thing when the
+/// nodes are streaming and quite another when they have gone silent.
+#[derive(Serialize)]
+struct LiveSnapshot {
+    /// The current estimate, absent until the first window fills.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    estimate: Option<EstimateView>,
+    /// How the frames are arriving.
+    stream: StreamHealth,
+    /// Appliance clock, so a browser can judge staleness without trusting
+    /// its own — the same reasoning as the labeling page.
+    now_us: u64,
+}
+
+/// An estimate as the dashboard sees it.
+///
+/// `reliable` is carried rather than used to hide the value: an operator
+/// looking at an administration screen needs to see what the model produced
+/// *and* that it is not trustworthy. The public estimate surface is where
+/// masking belongs, and it already does it.
+#[derive(Serialize)]
+struct EstimateView {
+    ts_us: u64,
+    wait_minutes: f32,
+    people: f32,
+    level: f32,
+    class: String,
+    confidence: f32,
+    reliable: bool,
+}
+
+impl From<flow_infer::WaitEstimate> for EstimateView {
+    fn from(estimate: flow_infer::WaitEstimate) -> Self {
+        Self {
+            ts_us: estimate.ts_us,
+            wait_minutes: estimate.wait_minutes,
+            people: estimate.people,
+            level: estimate.level,
+            class: estimate.display_class.to_string(),
+            confidence: estimate.confidence,
+            reliable: estimate.reliable,
+        }
+    }
+}
+
+impl EdgeState {
+    fn live_snapshot(&self) -> LiveSnapshot {
+        LiveSnapshot {
+            estimate: self.latest_estimate().map(EstimateView::from),
+            stream: self.stream_health(),
+            now_us: now_us(),
+        }
+    }
+}
+
+/// Streams the live state as server-sent events.
+///
+/// One-way and over plain HTTP, which is all this needs: the browser only
+/// listens, and the built-in reconnection of `EventSource` covers a dropped
+/// connection without a line of code. Keep-alives stop an idle appliance —
+/// one whose queue has not changed — from looking dead to a proxy.
+async fn live(
+    State(state): State<EdgeState>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
+    let receiver = state.watch_estimates();
+    let stream = tokio_stream::wrappers::WatchStream::new(receiver).map(move |_| {
+        let event = SseEvent::default()
+            .json_data(state.live_snapshot())
+            .unwrap_or_else(|_| SseEvent::default().comment("snapshot unavailable"));
+        Ok(event)
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// How far back `/api/estimates` reaches unless asked otherwise.
+const DEFAULT_HISTORY_MINUTES: u64 = 60;
+
+/// Ceiling on the minutes one request may ask for, so a single call cannot
+/// make the appliance serialize two years of history.
+const MAX_HISTORY_MINUTES: u64 = 7 * 24 * 60;
+
+#[derive(Deserialize)]
+struct EstimatesQuery {
+    minutes: Option<u64>,
+}
+
+async fn estimates(
+    State(state): State<EdgeState>,
+    Query(query): Query<EstimatesQuery>,
+) -> Json<Vec<MinuteSummary>> {
+    let minutes = query
+        .minutes
+        .unwrap_or(DEFAULT_HISTORY_MINUTES)
+        .clamp(1, MAX_HISTORY_MINUTES);
+    let since = now_us().saturating_sub(minutes * MINUTE_US);
+    Json(state.minutes(since, usize::try_from(minutes).unwrap_or(usize::MAX)))
 }
 
 /// How many journal entries `/api/events` returns unless asked otherwise.
@@ -472,6 +653,7 @@ struct StatusResponse {
     readiness: Readiness,
     runtime: RuntimeMode,
     model_installed: bool,
+    stream: StreamHealth,
     sensor_ap: SensorApView,
     uplink: UplinkView,
     nodes: Vec<NodeView>,
@@ -882,6 +1064,33 @@ mod tests {
                 "{path}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn an_estimate_published_with_nobody_listening_is_still_kept() {
+        // The pipeline runs whether or not a browser is watching. A channel
+        // that dropped values when unobserved would leave the appliance
+        // reporting nothing to the first client to connect.
+        let state = state_for(installed(), true);
+        assert!(state.latest_estimate().is_none());
+
+        state.publish_estimate(flow_infer::WaitEstimate {
+            ts_us: 1_800_000_000_000_000,
+            wait_minutes: 4.5,
+            people: 12.0,
+            level: 1.8,
+            display_class: flow_core::DensityClass::Medium,
+            confidence: 0.71,
+            reliable: true,
+        });
+
+        let kept = state.latest_estimate().expect("kept without a subscriber");
+        assert!((kept.wait_minutes - 4.5).abs() < 1e-6);
+
+        let cookie = session_of(&state).await;
+        let (status, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["stream"]["running"], false, "no pipeline in this test");
     }
 
     #[tokio::test]
