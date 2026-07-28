@@ -395,14 +395,40 @@ to the other requires stopping first — an explicit act. A refused request
 leaves the running activity untouched, so a stray "start live" cannot end a
 calibration session an installer is halfway through.
 
-### Status surface
+### HTTP surface
 
-`GET /health` is a liveness probe; `GET /api/status` reports the
-appliance identity, installation progress, current activity, sensor access
-point, uplink *shape* and paired nodes. Two rules bound what may appear
-there: no credentials — the uplink is reported by mode and network name,
-never by passphrase, even though the daemon holds it — and no raw CSI, the
-privacy invariant of the whole system.
+The surface is **denied by default** (ADR 0011). Exactly two routes are
+open: `GET /health`, a liveness probe that reveals nothing, and
+`POST /api/session`, the login itself. Protected routes sit behind the
+session guard as a group, so a route added there is protected by
+construction rather than by remembering to protect it.
+
+`GET /api/status` reports the appliance identity, installation progress,
+current activity, sensor access point, uplink *shape* and paired nodes. Two
+further rules bound what may appear there: no credentials — the uplink is
+reported by mode and network name, never by passphrase, even though the
+daemon holds it — and no raw CSI, the privacy invariant of the whole system.
+
+### Sessions
+
+A successful login exchanges the device secret for an opaque 256-bit token,
+held in memory and delivered in an `HttpOnly`, `SameSite=Strict` cookie. The
+token is tracked server-side so that logging out revokes it immediately.
+Sessions expire on two independent clocks — 12 hours idle, 7 days absolute —
+and never survive a reboot, so nothing bearer-shaped is written to the card.
+
+Because verifying a secret costs an Argon2id hash, the login endpoint is
+protected from being turned into either a guessing oracle or a way to
+exhaust the appliance. Failures impose a doubling per-client delay (three
+free attempts, then 1 s, 2 s, 4 s… to a five-minute ceiling, cleared on
+success) rather than a lockout, which would let anyone on the site network
+shut the installer out. Verification is also serialized process-wide and run
+off the async runtime, so only one 19 MiB hash is ever in flight.
+
+The secret travels in the request body, never in a query string. The QR code
+on the label follows the same reasoning: it carries the secret in the URL
+*fragment*, which browsers never transmit, so the dashboard reads it
+client-side, exchanges it for a session and clears it from the address bar.
 
 ### Administrator credential
 

@@ -11,14 +11,14 @@
 //!   in a recovery file.
 
 use std::error::Error;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use flow_edge::{
     AdminCredential, ApplianceConfig, DeviceSecret, EdgeState, Phase, ResetOutcome,
-    SECRET_ENTROPY_BITS, apply_pending_reset, router,
+    SECRET_ENTROPY_BITS, apply_pending_reset, now_us, router,
 };
 
 /// File name of the active density model inside the data directory.
@@ -149,7 +149,12 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
     runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind(&args.listen).await?;
         eprintln!("serving on http://{}", args.listen);
-        axum::serve(listener, router(state)).await?;
+        // Connect info carries the client address the login throttle keys on.
+        axum::serve(
+            listener,
+            router(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await?;
         Ok::<(), Box<dyn Error>>(())
     })
 }
@@ -176,12 +181,4 @@ fn provision(args: &ProvisionArgs) -> Result<(), Box<dyn Error>> {
 fn print_secret(secret: &DeviceSecret) {
     eprintln!("device secret ({SECRET_ENTROPY_BITS} bits) — print it, it is not recoverable:");
     println!("{secret}");
-}
-
-fn now_us() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX)
-        })
 }

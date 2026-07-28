@@ -28,8 +28,11 @@
 //!   path that requires physical possession of the card.
 //! - [`router`] — the read-only status surface the dashboard builds on.
 //!
-//! Planned: authenticated sessions over that surface, the embedded
-//! dashboard, node pairing, network configuration through NetworkManager,
+//! - [`SessionStore`] / [`Throttle`] — sessions opened by a successful
+//!   login, and the doubling delay that makes guessing the secret
+//!   uneconomic without ever locking the installer out.
+//!
+//! Planned: the embedded dashboard, node pairing, network configuration through NetworkManager,
 //! calibration control, model import and the outbound push of aggregated
 //! estimates. See `docs/architecture.md`.
 
@@ -41,8 +44,10 @@ mod config;
 mod credential;
 mod error;
 mod secret;
+mod session;
 mod state;
 mod store;
+mod throttle;
 
 pub use api::{EdgeState, router};
 pub use config::{
@@ -52,4 +57,20 @@ pub use config::{
 pub use credential::{AdminCredential, CREDENTIAL_FILE, ResetOutcome, apply_pending_reset};
 pub use error::{ConfigError, CredentialError, SecretError, StoreError, TransitionError};
 pub use secret::{DeviceSecret, SECRET_ENTROPY_BITS};
+pub use session::{ABSOLUTE_LIFETIME_US, IDLE_TIMEOUT_US, SessionStore};
 pub use state::{Phase, Readiness, Runtime, RuntimeMode, Stage};
+pub use throttle::Throttle;
+
+/// Current Unix time in microseconds — the appliance clock.
+///
+/// Every timestamp the daemon assigns comes from here, exactly as frame and
+/// label timestamps do elsewhere in the system: the edge clock is the only
+/// one trusted.
+#[must_use]
+pub fn now_us() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX)
+        })
+}

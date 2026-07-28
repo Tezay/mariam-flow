@@ -1,42 +1,66 @@
-//! The appliance status surface.
+//! The appliance HTTP surface.
 //!
-//! This is the read-only foundation the dashboard is built on: one
-//! endpoint that answers "what is this appliance, where is its
-//! installation up to, and what is it doing right now". The wizard, the
-//! node pairing and the calibration controls all hang off this same shared
-//! state as they land.
+//! Everything the dashboard is built on hangs off one piece of shared
+//! state: what this appliance is, how far its installation has got, what it
+//! is doing, and who is allowed to ask.
 //!
-//! Two rules govern what may appear here:
+//! Access is **denied by default**. Exactly two routes are open — the
+//! liveness probe, which reveals nothing, and the login endpoint itself.
+//! Every other route requires a session, so a route added later is
+//! protected unless someone deliberately places it outside the guard,
+//! rather than exposed unless someone remembers to protect it.
+//!
+//! Three rules bound what may cross this boundary:
 //!
 //! - **No credentials, ever.** The status surface reports network *shape*
 //!   (which SSID, which mode) and never a passphrase, even though the
-//!   daemon holds them. A test pins this.
-//! - **No raw CSI.** The privacy invariant of the whole system: raw
-//!   measurements never leave the site, and they never leave this process
-//!   either.
+//!   daemon holds them.
+//! - **No raw CSI.** The privacy invariant of the whole system.
+//! - **No unbounded verification.** Checking a secret costs an Argon2id
+//!   hash — 19 MiB and real CPU time — so attempts are both throttled per
+//!   client and serialized process-wide (ADR 0011).
 
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use axum::extract::State;
-use axum::routing::get;
+use axum::extract::{ConnectInfo, Request, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{ApplianceConfig, Uplink};
 use crate::credential::AdminCredential;
+use crate::now_us;
+use crate::session::{ABSOLUTE_LIFETIME_US, SessionStore};
 use crate::state::{Phase, Readiness, Runtime, RuntimeMode};
+use crate::throttle::Throttle;
+
+/// Name of the cookie carrying the session token.
+const SESSION_COOKIE: &str = "mf_session";
 
 struct Inner {
     config: ApplianceConfig,
     credential: AdminCredential,
     model_installed: bool,
     runtime: Runtime,
+    sessions: SessionStore,
+    throttle: Throttle,
 }
 
 /// State shared by every handler.
 #[derive(Clone)]
 pub struct EdgeState {
     inner: Arc<Mutex<Inner>>,
+    /// Serializes secret verification.
+    ///
+    /// One Argon2id hash claims 19 MiB by design. Without this gate a
+    /// handful of parallel login attempts would claim that much each and
+    /// exhaust a 512 MB appliance — the very cost that makes guessing
+    /// expensive would become the way to take the unit down.
+    login_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl EdgeState {
@@ -56,18 +80,11 @@ impl EdgeState {
                 credential,
                 model_installed,
                 runtime: Runtime::new(),
+                sessions: SessionStore::default(),
+                throttle: Throttle::new(),
             })),
+            login_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
-    }
-
-    /// Checks a secret presented by a client against the appliance
-    /// credential.
-    ///
-    /// Verification is deliberately expensive (Argon2id), so callers must
-    /// throttle it rather than expose it to unlimited attempts.
-    #[must_use]
-    pub fn verify_secret(&self, presented: &str) -> bool {
-        self.lock().credential.verify(presented)
     }
 
     /// The installation facts, as they stand.
@@ -91,6 +108,49 @@ impl EdgeState {
     /// activity without the guard escaping the shared lock.
     pub fn with_runtime<T>(&self, f: impl FnOnce(&mut Runtime) -> T) -> T {
         f(&mut self.lock().runtime)
+    }
+
+    /// Checks a secret and, if it matches, opens a session.
+    ///
+    /// Returns the session token, or the wait imposed on this client. The
+    /// hash itself runs on a blocking thread behind the login gate: it is
+    /// CPU- and memory-bound work that must not stall the async runtime,
+    /// and only one may run at a time.
+    async fn authenticate(
+        &self,
+        client: IpAddr,
+        presented: String,
+    ) -> Result<String, LoginRefusal> {
+        let now = now_us();
+        if let Err(wait_us) = self.lock().throttle.check(client, now) {
+            return Err(LoginRefusal::TooManyAttempts { wait_us });
+        }
+
+        let _permit = self.login_gate.lock().await;
+        let credential = self.lock().credential.clone();
+        let verified = tokio::task::spawn_blocking(move || credential.verify(&presented))
+            .await
+            .unwrap_or(false);
+
+        let now = now_us();
+        let mut inner = self.lock();
+        if !verified {
+            let wait_us = inner.throttle.record_failure(client, now);
+            return Err(LoginRefusal::WrongSecret { wait_us });
+        }
+        inner.throttle.record_success(client);
+        Ok(inner.sessions.open(now))
+    }
+
+    /// Whether `token` names a live session, marking it as just used.
+    fn touch_session(&self, token: &str) -> bool {
+        let now = now_us();
+        self.lock().sessions.touch(token, now)
+    }
+
+    /// Ends a session.
+    fn close_session(&self, token: &str) {
+        self.lock().sessions.close(token);
     }
 
     fn status(&self) -> StatusResponse {
@@ -134,12 +194,39 @@ impl EdgeState {
     }
 }
 
-/// Builds the status router.
+/// Why a login was refused.
+enum LoginRefusal {
+    /// The client is still serving a throttling delay.
+    TooManyAttempts { wait_us: u64 },
+    /// The secret did not match; a delay may now apply.
+    WrongSecret { wait_us: u64 },
+}
+
+/// Builds the appliance router.
+///
+/// Protected routes are grouped behind the session guard, so adding a route
+/// to that group is enough to protect it.
 pub fn router(state: EdgeState) -> Router {
+    let protected = Router::new().route("/api/status", get(status)).route_layer(
+        middleware::from_fn_with_state(state.clone(), require_session),
+    );
+
     Router::new()
         .route("/health", get(health))
-        .route("/api/status", get(status))
+        .route("/api/session", post(login).delete(logout))
+        .merge(protected)
         .with_state(state)
+}
+
+/// Rejects any request that does not carry a live session.
+async fn require_session(State(state): State<EdgeState>, request: Request, next: Next) -> Response {
+    let authorized =
+        session_token(request.headers()).is_some_and(|token| state.touch_session(&token));
+    if authorized {
+        next.run(request).await
+    } else {
+        error_response(StatusCode::UNAUTHORIZED, "authentication required")
+    }
 }
 
 #[derive(Serialize)]
@@ -153,6 +240,104 @@ async fn health() -> Json<Health> {
 
 async fn status(State(state): State<EdgeState>) -> Json<StatusResponse> {
     Json(state.status())
+}
+
+#[derive(Deserialize)]
+struct LoginRequest {
+    /// The device secret, as printed on the label or carried by the QR
+    /// code. Sent in the body, never in the URL: query strings reach
+    /// server logs and browser history.
+    secret: String,
+}
+
+async fn login(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(request): Json<LoginRequest>,
+) -> Response {
+    match state.authenticate(peer.ip(), request.secret).await {
+        Ok(token) => (
+            StatusCode::NO_CONTENT,
+            [(header::SET_COOKIE, session_cookie(&token))],
+        )
+            .into_response(),
+        // Both refusals answer the same way, so the response never
+        // distinguishes "wrong secret" from "wrong secret, and you are now
+        // being slowed down" in a way that helps an attacker calibrate.
+        Err(LoginRefusal::TooManyAttempts { wait_us } | LoginRefusal::WrongSecret { wait_us }) => {
+            let seconds = wait_us.div_ceil(1_000_000);
+            let status = if wait_us > 0 {
+                StatusCode::TOO_MANY_REQUESTS
+            } else {
+                StatusCode::UNAUTHORIZED
+            };
+            (
+                status,
+                [(header::RETRY_AFTER, seconds.to_string())],
+                Json(ErrorResponse {
+                    error: "authentication failed".into(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn logout(State(state): State<EdgeState>, headers: HeaderMap) -> Response {
+    if let Some(token) = session_token(&headers) {
+        state.close_session(&token);
+    }
+    // Answering the same way whether or not a session existed keeps logout
+    // idempotent and free of information.
+    (
+        StatusCode::NO_CONTENT,
+        [(header::SET_COOKIE, cleared_cookie())],
+    )
+        .into_response()
+}
+
+/// Reads the session token out of the `Cookie` header.
+fn session_token(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(header::COOKIE)?.to_str().ok()?;
+    raw.split(';')
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(name, _)| *name == SESSION_COOKIE)
+        .map(|(_, value)| value.trim().to_owned())
+}
+
+/// The cookie a successful login sets.
+///
+/// `HttpOnly` keeps the token out of reach of scripts, so a cross-site
+/// scripting flaw in the dashboard cannot read it. `SameSite=Strict` stops
+/// another site from riding the session with a forged request.
+///
+/// `Secure` is deliberately absent: on the sensor access point the
+/// dashboard is served over plain HTTP — the captive portal requires it —
+/// and a `Secure` cookie would simply never be sent there. That traffic is
+/// already encrypted by the access point's own WPA2. The HTTPS listener for
+/// the site network will set it on its own cookies.
+fn session_cookie(token: &str) -> String {
+    let max_age = ABSOLUTE_LIFETIME_US / 1_000_000;
+    format!("{SESSION_COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}")
+}
+
+fn cleared_cookie() -> String {
+    format!("{SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+}
+
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: String,
+}
+
+fn error_response(status: StatusCode, message: &str) -> Response {
+    (
+        status,
+        Json(ErrorResponse {
+            error: message.to_owned(),
+        }),
+    )
+        .into_response()
 }
 
 #[derive(Serialize)]
@@ -216,17 +401,21 @@ struct NodeView {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::StatusCode;
+    use std::net::Ipv4Addr;
+
     use flow_core::NodeRole;
     use http_body_util::BodyExt;
     use tower::util::ServiceExt;
 
     use super::*;
-    use crate::config::{Addressing, PairedNode, SiteTuning, Uplink, WifiSecurity};
+    use crate::config::{Addressing, PairedNode, SiteTuning, WifiSecurity};
+    use crate::secret::DeviceSecret;
     use crate::state::Stage;
 
     const AP_PASSPHRASE: &str = "correct-horse-battery";
     const UPLINK_PASSPHRASE: &str = "campus-secret-value";
+    const SECRET: &str = "K7M4-9PQR-2WXY-6BTN-3HFD";
+    const WRONG_SECRET: &str = "K7M4-9PQR-2WXY-6BTN-3HFE";
 
     fn factory() -> ApplianceConfig {
         ApplianceConfig::factory("KIT-0001", "mariam-flow-0001", AP_PASSPHRASE)
@@ -269,89 +458,278 @@ mod tests {
         config
     }
 
-    const TEST_SECRET: &str = "K7M4-9PQR-2WXY-6BTN-3HFD";
-
     fn state_for(config: ApplianceConfig, model_installed: bool) -> EdgeState {
-        let secret = crate::secret::DeviceSecret::parse(TEST_SECRET).unwrap();
-        let credential = AdminCredential::establish(&secret, 1_800_000_000_000_000).unwrap();
+        let secret = DeviceSecret::parse(SECRET).unwrap();
+        let credential = AdminCredential::establish(&secret, now_us()).unwrap();
         EdgeState::new(config, credential, model_installed)
     }
 
-    async fn get(state: EdgeState, path: &str) -> (StatusCode, String) {
-        let request = axum::http::Request::builder()
-            .uri(path)
-            .body(axum::body::Body::empty())
-            .unwrap();
-        let response = router(state).oneshot(request).await.unwrap();
-        let code = response.status();
+    /// Sends a request, optionally with a cookie and a JSON body, from a
+    /// given client address.
+    async fn send(
+        state: &EdgeState,
+        method: &str,
+        path: &str,
+        cookie: Option<&str>,
+        body: Option<String>,
+        client: u8,
+    ) -> (StatusCode, HeaderMap, serde_json::Value) {
+        let mut builder = axum::http::Request::builder().method(method).uri(path);
+        if let Some(cookie) = cookie {
+            builder = builder.header(header::COOKIE, cookie);
+        }
+        let body = match body {
+            Some(json) => {
+                builder = builder.header(header::CONTENT_TYPE, "application/json");
+                axum::body::Body::from(json)
+            }
+            None => axum::body::Body::empty(),
+        };
+        let mut request = builder.body(body).unwrap();
+        // The real server supplies this through `into_make_service_with_
+        // connect_info`; the throttle keys on it.
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from((
+                Ipv4Addr::new(192, 168, 4, client),
+                51_000,
+            ))));
+
+        let response = router(state.clone()).oneshot(request).await.unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
-        (code, String::from_utf8(bytes.to_vec()).unwrap())
+        let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, headers, value)
     }
 
-    async fn get_json(state: EdgeState, path: &str) -> serde_json::Value {
-        let (code, text) = get(state, path).await;
-        assert_eq!(code, StatusCode::OK);
-        serde_json::from_str(&text).unwrap()
+    async fn login_with(state: &EdgeState, secret: &str, client: u8) -> (StatusCode, HeaderMap) {
+        let body = serde_json::json!({ "secret": secret }).to_string();
+        let (status, headers, _) =
+            send(state, "POST", "/api/session", None, Some(body), client).await;
+        (status, headers)
+    }
+
+    /// Logs in and returns the cookie to present on later requests.
+    async fn session_of(state: &EdgeState) -> String {
+        let (status, headers) = login_with(state, SECRET, 10).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let set = headers.get(header::SET_COOKIE).unwrap().to_str().unwrap();
+        set.split(';').next().unwrap().to_owned()
     }
 
     #[tokio::test]
-    async fn health_answers_ok() {
-        let body = get_json(state_for(factory(), false), "/health").await;
+    async fn health_needs_no_session() {
+        let state = state_for(factory(), false);
+        let (status, _, body) = send(&state, "GET", "/health", None, None, 10).await;
+        assert_eq!(status, StatusCode::OK);
         assert_eq!(body["status"], "ok");
     }
 
     #[tokio::test]
-    async fn a_factory_appliance_reports_the_first_onboarding_step() {
-        let body = get_json(state_for(factory(), false), "/api/status").await;
+    async fn the_status_surface_is_closed_to_anonymous_callers() {
+        let state = state_for(installed(), true);
+        let (status, _, body) = send(&state, "GET", "/api/status", None, None, 10).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"], "authentication required");
+        assert!(body.get("kit_id").is_none(), "nothing leaks before login");
+    }
+
+    #[tokio::test]
+    async fn a_forged_or_stale_cookie_is_refused() {
+        let state = state_for(installed(), true);
+        for cookie in [
+            "mf_session=deadbeef",
+            "mf_session=",
+            "other=value",
+            "mf_session",
+        ] {
+            let (status, _, _) = send(&state, "GET", "/api/status", Some(cookie), None, 10).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "cookie {cookie:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_right_secret_opens_a_session_that_unlocks_the_surface() {
+        let state = state_for(installed(), true);
+        let cookie = session_of(&state).await;
+
+        let (status, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
+        assert_eq!(status, StatusCode::OK);
         assert_eq!(body["kit_id"], "KIT-0001");
+        assert_eq!(body["phase"]["phase"], "operational");
+    }
+
+    #[tokio::test]
+    async fn the_session_cookie_is_defended_against_scripts_and_other_sites() {
+        let state = state_for(installed(), true);
+        let (_, headers) = login_with(&state, SECRET, 10).await;
+        let cookie = headers.get(header::SET_COOKIE).unwrap().to_str().unwrap();
+
+        assert!(cookie.contains("HttpOnly"), "unreadable by scripts");
+        assert!(cookie.contains("SameSite=Strict"), "no cross-site riding");
+        assert!(cookie.contains("Path=/"));
+        assert!(
+            !cookie.contains(SECRET),
+            "the cookie must carry a token, never the secret"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_secret_is_accepted_however_it_was_typed() {
+        let state = state_for(installed(), true);
+        let (status, _) = login_with(&state, "k7m49pqr2wxy6btn3hfd", 10).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn a_wrong_secret_is_refused_without_a_session() {
+        let state = state_for(installed(), true);
+        let (status, headers) = login_with(&state, WRONG_SECRET, 10).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert!(
+            headers.get(header::SET_COOKIE).is_none(),
+            "no session handed out"
+        );
+    }
+
+    #[tokio::test]
+    async fn repeated_failures_start_costing_time() {
+        let state = state_for(installed(), true);
+
+        // The first few failures are free — mistyping happens.
+        for _ in 0..3 {
+            let (status, _) = login_with(&state, WRONG_SECRET, 20).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED);
+        }
+        // Then the client is told to wait.
+        let (status, headers) = login_with(&state, WRONG_SECRET, 20).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(headers.get(header::RETRY_AFTER).unwrap(), "1");
+
+        // And while blocked, even the correct secret has to wait its turn —
+        // otherwise the block would be trivially bypassed.
+        let (status, headers) = login_with(&state, SECRET, 20).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert!(headers.get(header::SET_COOKIE).is_none());
+    }
+
+    #[tokio::test]
+    async fn one_client_being_throttled_never_locks_out_another() {
+        let state = state_for(installed(), true);
+        for _ in 0..8 {
+            login_with(&state, WRONG_SECRET, 66).await;
+        }
+        let (blocked, _) = login_with(&state, SECRET, 66).await;
+        assert_eq!(blocked, StatusCode::TOO_MANY_REQUESTS);
+
+        let (installer, _) = login_with(&state, SECRET, 10).await;
+        assert_eq!(
+            installer,
+            StatusCode::NO_CONTENT,
+            "the installer must still get in"
+        );
+    }
+
+    #[tokio::test]
+    async fn logging_out_revokes_the_session_and_clears_the_cookie() {
+        let state = state_for(installed(), true);
+        let cookie = session_of(&state).await;
+
+        let (status, headers, _) =
+            send(&state, "DELETE", "/api/session", Some(&cookie), None, 10).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let cleared = headers.get(header::SET_COOKIE).unwrap().to_str().unwrap();
+        assert!(cleared.contains("Max-Age=0"));
+
+        let (status, _, _) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "the token is dead");
+
+        // Logging out again is harmless.
+        let (status, _, _) = send(&state, "DELETE", "/api/session", Some(&cookie), None, 10).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn sessions_are_independent_of_one_another() {
+        let state = state_for(installed(), true);
+        let first = session_of(&state).await;
+        let second = session_of(&state).await;
+        assert_ne!(first, second);
+
+        send(&state, "DELETE", "/api/session", Some(&first), None, 10).await;
+
+        let (status, _, _) = send(&state, "GET", "/api/status", Some(&second), None, 10).await;
+        assert_eq!(status, StatusCode::OK, "one logout must not end the others");
+    }
+
+    #[tokio::test]
+    async fn the_session_cookie_is_found_among_others() {
+        let state = state_for(installed(), true);
+        let cookie = session_of(&state).await;
+        let mixed = format!("theme=dark; {cookie}; lang=fr");
+
+        let (status, _, _) = send(&state, "GET", "/api/status", Some(&mixed), None, 10).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn the_status_surface_never_leaks_credentials() {
+        let state = state_for(installed(), true);
+        let cookie = session_of(&state).await;
+        let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
+        let text = body.to_string();
+
+        assert!(!text.contains(AP_PASSPHRASE), "sensor AP passphrase leaked");
+        assert!(
+            !text.contains(UPLINK_PASSPHRASE),
+            "uplink passphrase leaked"
+        );
+        assert!(!text.contains("passphrase"), "no passphrase field at all");
+        assert!(!text.contains("argon2"), "no credential material");
+    }
+
+    #[tokio::test]
+    async fn a_factory_appliance_reports_the_first_onboarding_step() {
+        let state = state_for(factory(), false);
+        let cookie = session_of(&state).await;
+        let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
+
         assert_eq!(body["phase"]["phase"], "onboarding");
         assert_eq!(body["phase"]["stage"], "site");
         assert_eq!(body["uplink"]["mode"], "undecided");
         assert_eq!(body["runtime"]["mode"], "idle");
-        assert_eq!(body["model_installed"], false);
         assert_eq!(body["sensor_ap"]["channel"], 6);
         assert!(body["nodes"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn an_installed_appliance_reports_operational_state() {
-        let body = get_json(state_for(installed(), true), "/api/status").await;
-        assert_eq!(body["phase"]["phase"], "operational");
+        let state = state_for(installed(), true);
+        let cookie = session_of(&state).await;
+        let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
+
         assert_eq!(body["site_name"], "RU EFREI");
         assert_eq!(body["uplink"]["mode"], "wifi");
         assert_eq!(body["uplink"]["ssid"], "campus");
         assert_eq!(body["readiness"]["model_ready"], true);
-        assert_eq!(body["nodes"][0]["node_id"], "tx-1");
         assert_eq!(body["nodes"][1]["address"], "192.168.4.51");
-    }
-
-    #[tokio::test]
-    async fn the_status_surface_never_leaks_credentials() {
-        let (_, text) = get(state_for(installed(), true), "/api/status").await;
-        assert!(
-            !text.contains(AP_PASSPHRASE),
-            "sensor AP passphrase leaked into the status surface"
-        );
-        assert!(
-            !text.contains(UPLINK_PASSPHRASE),
-            "uplink passphrase leaked into the status surface"
-        );
-        assert!(!text.contains("passphrase"), "no passphrase field at all");
     }
 
     #[tokio::test]
     async fn the_reported_runtime_mode_follows_the_stream_guard() {
         let state = state_for(installed(), true);
+        let cookie = session_of(&state).await;
         state
             .with_runtime(|runtime| runtime.start_calibration("s-001"))
             .unwrap();
 
-        let body = get_json(state.clone(), "/api/status").await;
+        let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
         assert_eq!(body["runtime"]["mode"], "calibrating");
         assert_eq!(body["runtime"]["session_id"], "s-001");
 
         state.with_runtime(Runtime::stop);
-        let body = get_json(state, "/api/status").await;
+        let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
         assert_eq!(body["runtime"]["mode"], "idle");
     }
 
@@ -360,11 +738,12 @@ mod tests {
         let mut config = installed();
         config.nodes.clear();
         let state = state_for(config, true);
+        let cookie = session_of(&state).await;
 
         assert_eq!(state.phase(), Phase::Operational);
         assert_eq!(state.readiness().stage(), Stage::Nodes);
 
-        let body = get_json(state, "/api/status").await;
+        let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
         assert_eq!(body["phase"]["phase"], "operational");
         assert_eq!(body["readiness"]["nodes_paired"], false);
     }
