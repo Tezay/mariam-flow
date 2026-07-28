@@ -13,7 +13,12 @@
  * page and the Python reports already use: an operator who has seen a
  * session portrait must recognise the colours on the dashboard without
  * having to think about it. */
-@theme {
+/* `static` emits every variable declared here whether or not a utility
+ * class happens to reference it. These tokens are the app's design surface,
+ * not an implementation detail to be optimised away: a future reference
+ * through `var()` — which the class scanner cannot see — must not silently
+ * resolve to nothing. */
+@theme static {
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
 
   --color-mariam-50: #e8eefb;
@@ -31,13 +36,17 @@
   --color-ink-700: #3a3a3a;
   --color-ink-900: #161616;
 
-  --color-density-empty: #1e7e34;
-  --color-density-low: #b8860b;
-  --color-density-medium: #cc5500;
-  --color-density-saturated: #b02a37;
+  /* Density classes read as a status ramp — good to bad — and every adjacent
+   * pair is validated to stay apart in normal vision and under simulated
+   * colour-vision deficiency. `low` sits below 3:1 against the surface, so it
+   * never appears without its written label. */
+  --color-density-empty: #177245;
+  --color-density-low: #e0a800;
+  --color-density-medium: #e2571e;
+  --color-density-saturated: #a01b2b;
 
-  --color-danger: #b02a37;
-  --color-success: #1e7e34;
+  --color-danger: #a01b2b;
+  --color-success: #177245;
 
   --radius-sm: 6px;
   --radius-md: 8px;

@@ -44,6 +44,57 @@ export type Status = {
   nodes: SensingNode[];
 };
 
+/** Density classes, in their canonical order. */
+export const DENSITY_CLASSES = ['empty', 'low', 'medium', 'saturated'] as const;
+
+export type DensityClass = (typeof DENSITY_CLASSES)[number];
+
+/** One receiver's contribution to the stream. */
+export type NodeHealth = {
+  frames: number;
+  frames_per_second: number;
+  last_frame_us?: number;
+};
+
+/** How the frames are arriving. */
+export type StreamHealth = {
+  running: boolean;
+  frames: number;
+  estimates: number;
+  last_frame_us?: number;
+  nodes: Record<string, NodeHealth>;
+};
+
+/** The current estimate, as the administration surface reports it. */
+export type Estimate = {
+  ts_us: number;
+  wait_minutes: number;
+  people: number;
+  level: number;
+  class: DensityClass;
+  confidence: number;
+  reliable: boolean;
+};
+
+/** What the live stream sends on every tick. */
+export type LiveSnapshot = {
+  estimate?: Estimate;
+  stream: StreamHealth;
+  now_us: number;
+};
+
+/** One folded minute of history. */
+export type MinuteSummary = {
+  minute_us: number;
+  samples: number;
+  reliable_samples: number;
+  wait_minutes: number;
+  level: number;
+  /** Encoded as its integer value on the wire, as everywhere else. */
+  class: number;
+  confidence: number;
+};
+
 /** How a sign-in attempt ended. */
 export type LoginOutcome =
   { kind: 'ok' } | { kind: 'invalid' } | { kind: 'throttled'; seconds: number } | { kind: 'error' };
@@ -106,6 +157,43 @@ export async function fetchStatus(): Promise<Status | 'unauthorized' | 'unreacha
   } catch {
     return 'unreachable';
   }
+}
+
+/** Reads the folded minutes of the last `minutes` minutes, oldest first. */
+export async function fetchHistory(minutes: number): Promise<MinuteSummary[]> {
+  try {
+    const response = await fetch(`/api/estimates?minutes=${minutes}`);
+    if (!response.ok) {
+      return [];
+    }
+    return (await response.json()) as MinuteSummary[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Subscribes to the live stream, returning a function that closes it.
+ *
+ * `EventSource` reconnects on its own after a dropped connection, which is
+ * the behaviour that matters on a phone carried across a service hall — so
+ * there is no retry logic here, only a way to stop listening.
+ */
+export function subscribeLive(
+  onSnapshot: (snapshot: LiveSnapshot) => void,
+  onError?: () => void,
+): () => void {
+  const source = new EventSource('/api/live');
+  source.onmessage = (event) => {
+    try {
+      onSnapshot(JSON.parse(event.data) as LiveSnapshot);
+    } catch {
+      // A malformed frame is not worth tearing the stream down for; the
+      // next one arrives in a second.
+    }
+  };
+  source.onerror = () => onError?.();
+  return () => source.close();
 }
 
 /**

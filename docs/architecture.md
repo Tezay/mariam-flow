@@ -47,7 +47,7 @@ upstream.
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi`; TX or RX role via sdkconfig; RX streams over serial (bring-up) or UDP (ADR 0007) | Serial capture validated on ESP32-C6; UDP path pending |
 | `crates/flow-capture` | Labeled capture: session recording plus the phone labeling page (`csi-capture`) | Implemented |
 | `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, administrator credential, authenticated HTTP surface, live estimation, event journal and estimate history, and the embedded dashboard | Configuration, lifecycle, credential, sessions, journal, live pipeline, history and dashboard serving implemented; pairing, network integration and calibration control planned |
-| `dashboard/` | Svelte 5 single-page dashboard: sign-in, installation wizard shell, supervision; built to static assets and embedded in the daemon | Toolchain, brand tokens, translations, sign-in and shell implemented; wizard steps, calibration and live view planned |
+| `dashboard/` | Svelte 5 single-page dashboard: sign-in, installation wizard shell, live supervision; built to static assets and embedded in the daemon | Toolchain, brand tokens, translations, sign-in, shell and the live view implemented; wizard steps and calibration planned |
 
 The edge components are plain Rust binaries with no board-specific
 dependency; any Linux/macOS machine can play the edge role during
@@ -152,6 +152,15 @@ The classifier output space is frozen at four classes, encoded as integers:
 What each class concretely means at a given site (e.g. person counts in a
 lab, queue landmarks in a restaurant) is recorded per session in the
 `class_mapping` of `meta.json`.
+
+One palette carries these classes everywhere they are drawn — the labeling
+page, the Python session portraits and the dashboard — so that an operator
+who has seen one recognises the others without thinking. It reads as a
+status ramp, good to bad, and every adjacent pair is verified to stay
+distinguishable both in normal vision and under simulated colour-vision
+deficiency. One step sits below the 3:1 contrast floor against a light
+surface, so a class is never shown by colour alone: its name is always
+written beside it, and every chart has a table view.
 
 The classifier's output is a probability distribution over the four classes,
 not just the most likely class. The discrete class is the argmax; downstream
@@ -509,6 +518,21 @@ ceiling, exactly as the event journal is.
 
 `GET /api/estimates?minutes=N` returns the most recent minutes in
 chronological order, ready to plot.
+
+The dashboard's live view reads both: the current estimate as the figure it
+leads with, the folded minutes as an hour of context. That history is drawn
+as one figure sharing an x-axis — the waiting time as a line, a continuous
+magnitude answering "is it growing?", over a continuous band coloured by
+density class, an ordinal state answering "was it saturated at noon?". The
+class is never plotted as a height, because averaging ordinal labels means
+nothing. Per-node frame rates sit beside them, since a silent sensor
+explains most of what goes wrong on site and is invisible from the estimate
+alone.
+
+Unlike the public estimate, the administration view **shows** an unreliable
+value and marks it as such: an operator needs to see what the model produced
+*and* that it is not trustworthy. Masking belongs to the surface that
+publishes to end users, which already does it.
 
 ### Journal
 
