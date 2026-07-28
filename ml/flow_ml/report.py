@@ -36,12 +36,18 @@ from flow_ml.training import EvaluationReport, evaluate_grouped
 from flow_ml.windows import DEFAULT_HOP_US, DEFAULT_WINDOW_US, sliding_windows
 
 CLASS_COLORS: dict[DensityClass, str] = {
-    DensityClass.EMPTY: "#1e7e34",
-    DensityClass.LOW: "#b8860b",
-    DensityClass.MEDIUM: "#cc5500",
-    DensityClass.SATURATED: "#b02a37",
+    DensityClass.EMPTY: "#177245",
+    DensityClass.LOW: "#e0a800",
+    DensityClass.MEDIUM: "#e2571e",
+    DensityClass.SATURATED: "#a01b2b",
 }
-"""Semantic class colors — the same palette as the labeling page."""
+"""Semantic class colors — the same palette as the labeling page and the
+dashboard.
+
+Validated for perceptual separation: every adjacent pair stays apart both
+in normal vision and under simulated colour-vision deficiency. The earlier
+ramp placed ``low`` and ``medium`` too close to be told apart at a glance,
+which is the whole job of a colour band."""
 
 
 def session_figure(

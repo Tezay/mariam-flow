@@ -6,7 +6,8 @@
   import Target from '@lucide/svelte/icons/target';
 
   import type { Status } from '$lib/api';
-  import { t } from '$lib/i18n/i18n.svelte';
+  import { hour12, locale, t, toggleHourCycle, toggleLocale } from '$lib/i18n/i18n.svelte';
+  import LivePanel from '$components/LivePanel.svelte';
   import StatusPanel from '$components/StatusPanel.svelte';
 
   let { status, onsignout }: { status: Status; onsignout: () => void } = $props();
@@ -52,18 +53,42 @@
       <h1 class="truncate text-base font-semibold text-mariam-600">
         {status.site_name ?? t('app.name')}
       </h1>
-      <button
-        type="button"
-        onclick={onsignout}
-        aria-label={t('shell.signOut')}
-        class="rounded-md p-2 text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900"
-      >
-        <LogOut size={18} aria-hidden="true" />
-      </button>
+      <div class="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          onclick={toggleLocale}
+          title={t('header.language')}
+          aria-label={t('header.language')}
+          class="rounded-md px-2 py-1.5 text-xs font-medium text-ink-500 uppercase
+                 transition-colors hover:bg-ink-100 hover:text-ink-900"
+        >
+          {locale() === 'fr' ? 'EN' : 'FR'}
+        </button>
+        <button
+          type="button"
+          onclick={toggleHourCycle}
+          title={hour12() ? t('header.clock24') : t('header.clock')}
+          aria-label={hour12() ? t('header.clock24') : t('header.clock')}
+          class="rounded-md px-2 py-1.5 text-xs font-medium text-ink-500
+                 transition-colors hover:bg-ink-100 hover:text-ink-900"
+        >
+          {hour12() ? '24h' : '12h'}
+        </button>
+        <button
+          type="button"
+          onclick={onsignout}
+          aria-label={t('shell.signOut')}
+          class="rounded-md p-2 text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900"
+        >
+          <LogOut size={18} aria-hidden="true" />
+        </button>
+      </div>
     </header>
 
     <main class="flex-1 px-4 pb-6">
       {#if active === 'live'}
+        <LivePanel />
+      {:else if active === 'settings'}
         <StatusPanel {status} />
       {:else}
         <p class="rounded-lg bg-white p-4 text-sm text-ink-500">{t('wizard.comingNext')}</p>
