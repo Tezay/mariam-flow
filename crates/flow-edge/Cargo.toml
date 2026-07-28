@@ -10,6 +10,12 @@ license.workspace = true
 name = "flow-edge"
 path = "src/main.rs"
 
+[features]
+# Compiles the built dashboard into the binary. Off by default so the crate
+# builds and tests on a clean clone with no JavaScript toolchain installed;
+# a release build turns it on after `pnpm build`.
+dashboard = ["dep:rust-embed"]
+
 [dependencies]
 argon2.workspace = true
 axum.workspace = true
@@ -18,6 +24,7 @@ flow-core.workspace = true
 flow-infer.workspace = true
 flow-ingest.workspace = true
 rusqlite.workspace = true
+rust-embed = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

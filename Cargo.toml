@@ -24,6 +24,7 @@ flow-infer = { path = "crates/flow-infer" }
 flow-ingest = { path = "crates/flow-ingest" }
 http-body-util = "0.1"
 rusqlite = { version = "0.40", features = ["bundled"] }
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }
 serde = { version = "1", features = ["derive"] }
