@@ -29,3 +29,4 @@ Conventions:
 | [0011](0011-cookie-sessions-and-login-throttling.md) | Cookie sessions, login throttling, and a deny-by-default surface | accepted |
 | [0012](0012-sqlite-appliance-journal.md) | SQLite appliance journal with bounded retention | accepted |
 | [0013](0013-svelte-dashboard-embedded-in-the-daemon.md) | Svelte single-page dashboard embedded in the daemon | accepted |
+| [0014](0014-minute-resolution-estimate-history.md) | Minute-resolution estimate history | accepted |

@@ -44,7 +44,9 @@ mod assets;
 mod config;
 mod credential;
 mod error;
+mod history;
 mod journal;
+mod pipeline;
 mod secret;
 mod session;
 mod state;
@@ -58,15 +60,21 @@ pub use config::{
 };
 pub use credential::{AdminCredential, CREDENTIAL_FILE, ResetOutcome, apply_pending_reset};
 pub use error::{
-    ConfigError, CredentialError, JournalError, SecretError, StoreError, TransitionError,
+    ConfigError, CredentialError, JournalError, PipelineError, SecretError, StoreError,
+    TransitionError,
 };
+pub use history::{MINUTE_US, MinuteAggregator, MinuteSummary};
 pub use journal::{
     Event, EventCategory, EventKind, JOURNAL_FILE, Journal, MAX_EVENTS, RETENTION_US, RecordedEvent,
 };
+pub use pipeline::{LiveOptions, NodeHealth, StreamHealth, spawn_pipeline};
 pub use secret::{DeviceSecret, SECRET_ENTROPY_BITS};
 pub use session::{ABSOLUTE_LIFETIME_US, IDLE_TIMEOUT_US, SessionStore};
 pub use state::{Phase, Readiness, Runtime, RuntimeMode, Stage};
 pub use throttle::Throttle;
+
+/// File name of the active density model inside the data directory.
+pub const ACTIVE_MODEL: &str = "model.onnx";
 
 /// Current Unix time in microseconds — the appliance clock.
 ///

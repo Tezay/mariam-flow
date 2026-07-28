@@ -17,12 +17,10 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use flow_edge::{
-    AdminCredential, ApplianceConfig, DeviceSecret, EdgeState, Event, EventKind, Journal, Phase,
-    ResetOutcome, SECRET_ENTROPY_BITS, apply_pending_reset, now_us, router,
+    ACTIVE_MODEL, AdminCredential, ApplianceConfig, DeviceSecret, EdgeState, Event, EventKind,
+    Journal, LiveOptions, Phase, ResetOutcome, SECRET_ENTROPY_BITS, apply_pending_reset, now_us,
+    router, spawn_pipeline,
 };
-
-/// File name of the active density model inside the data directory.
-const ACTIVE_MODEL: &str = "model.onnx";
 
 /// How often buffered journal entries are written out.
 const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
@@ -66,6 +64,22 @@ struct ServeArgs {
     /// the card in a laptop, not having a login on the appliance.
     #[arg(long, default_value = "/boot/firmware/mariam-flow-secret-reset")]
     reset_file: PathBuf,
+
+    /// Where the daemon reads CSI frames from.
+    ///
+    /// The receivers stream to this socket in production. A capture file or
+    /// `-` replays a recorded session instead, which is how the whole chain
+    /// is exercised on a machine with no sensors attached.
+    #[arg(long, default_value = "udp://0.0.0.0:5566")]
+    input: String,
+
+    /// Receiving node id, required only when replaying a line-based input.
+    #[arg(long)]
+    node_id: Option<String>,
+
+    /// Keep only frames sensed from this transmitter MAC address.
+    #[arg(long)]
+    tx_mac: Option<String>,
 
     /// Address to serve the dashboard and API on.
     ///
@@ -138,6 +152,7 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
     let model_installed = args.data_dir.join(ACTIVE_MODEL).is_file();
 
     let kit_id = config.identity.kit_id.clone();
+    let config_for_pipeline = config.clone();
     let journal = Journal::open(&args.data_dir)?;
     let state = EdgeState::new(config, credential, model_installed, journal);
 
@@ -163,6 +178,20 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
             "no active model at {}",
             args.data_dir.join(ACTIVE_MODEL).display()
         );
+    }
+
+    // An appliance that cannot estimate yet is a normal stage of an
+    // installation, not a failure: the reason is reported and the daemon
+    // serves regardless, so the dashboard can explain what is missing.
+    let tx_mac = args.tx_mac.as_deref().map(str::parse).transpose()?;
+    let options = LiveOptions {
+        input: args.input.clone(),
+        node_id: args.node_id.clone(),
+        tx_mac,
+    };
+    match spawn_pipeline(state.clone(), &config_for_pipeline, &args.data_dir, options) {
+        Ok(()) => eprintln!("estimating from {}", args.input),
+        Err(err) => eprintln!("not estimating: {err}"),
     }
 
     let runtime = tokio::runtime::Runtime::new()?;

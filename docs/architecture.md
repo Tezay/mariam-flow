@@ -46,7 +46,7 @@ upstream.
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export, visual reports | Loading, windowing, v1 features, training, grouped evaluation, ONNX export and reporting implemented |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi`; TX or RX role via sdkconfig; RX streams over serial (bring-up) or UDP (ADR 0007) | Serial capture validated on ESP32-C6; UDP path pending |
 | `crates/flow-capture` | Labeled capture: session recording plus the phone labeling page (`csi-capture`) | Implemented |
-| `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, stream arbitration, administrator credential, authenticated HTTP surface, event journal, and the embedded dashboard | Configuration, lifecycle, credential, sessions, journal, status surface and dashboard serving implemented; pairing, network integration and calibration control planned |
+| `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, administrator credential, authenticated HTTP surface, live estimation, event journal and estimate history, and the embedded dashboard | Configuration, lifecycle, credential, sessions, journal, live pipeline, history and dashboard serving implemented; pairing, network integration and calibration control planned |
 | `dashboard/` | Svelte 5 single-page dashboard: sign-in, installation wizard shell, supervision; built to static assets and embedded in the daemon | Toolchain, brand tokens, translations, sign-in and shell implemented; wizard steps, calibration and live view planned |
 
 The edge components are plain Rust binaries with no board-specific
@@ -463,6 +463,52 @@ notice saying so — a development state, never a deployment one.
 cd dashboard && pnpm install && pnpm build
 cargo build --release -p flow-edge --features dashboard
 ```
+
+### Live estimation
+
+The daemon runs the inference chain itself (ADR 0014). Frames are read on a
+dedicated thread — a blocking loop that must not tie up the async runtime —
+and each estimate is published through a `watch` channel, so the server never
+waits on the pipeline and a slow browser cannot back-pressure sensing.
+
+Starting requires a model, a tuned site and a receiver: exactly the facts the
+installation readiness already tracks. An appliance missing one of them is not
+reporting a fault, it is an installation that has not reached calibration; the
+daemon names what is missing and serves regardless. The frame source is the
+UDP socket the receivers stream to, or a recorded capture — which is how the
+whole chain is exercised on a machine with no sensors attached:
+
+```sh
+flow-edge serve --config … --data-dir … \
+                --input capture.txt --node-id rx-1 --tx-mac 1a:00:00:00:00:00
+```
+
+`GET /api/live` streams the state as server-sent events: one-way traffic, and
+`EventSource` reconnects on its own when a phone's Wi-Fi drops. Each event
+carries the estimate **and** the stream health, because a missing estimate
+means one thing while the nodes are streaming and another once they have gone
+silent. Per-node frame counts and rates are measured on stream time rather
+than the wall clock, so a replayed capture reports the rate it was recorded
+at.
+
+### Estimate history
+
+Estimates are folded into one row per minute and stored beside the event
+journal. Keeping each one would cost roughly 1.9 GB a year against about
+31 MB folded, and answers the same questions — a chart of a day paints
+several minutes to a pixel.
+
+The class of a minute is its most frequent class rather than an average:
+density classes are ordinal labels, and the mean of `empty` and `saturated`
+is not `medium`. Ties resolve towards the busier class, since understating a
+queue costs more trust than overstating it. The mean level is kept alongside
+for callers wanting a continuous curve, and reliability is a count rather
+than a flag — a minute where two samples in sixty were trustworthy is not a
+reliable minute. Retention is bounded on two axes, two years and a row
+ceiling, exactly as the event journal is.
+
+`GET /api/estimates?minutes=N` returns the most recent minutes in
+chronological order, ready to plot.
 
 ### Journal
 
