@@ -36,11 +36,13 @@ picture.
 | Path | Contents |
 |---|---|
 | `crates/flow-core` | Canonical domain types (CSI frames, density classes, sessions) |
-| `crates/flow-ingest` | UDP ingestion, buffering, session storage *(placeholder)* |
-| `crates/flow-infer` | ONNX inference, Little's Law, smoothing *(placeholder)* |
-| `crates/flow-api` | Local REST API *(placeholder)* |
-| `ml/` | Python package: features, training, ONNX export *(scaffold)* |
-| `firmware/csi-node` | ESP32-C6 firmware based on `espressif/esp-csi` *(placeholder)* |
+| `crates/flow-ingest` | Frame parsing, UDP intake, session storage, `csi-replay` |
+| `crates/flow-infer` | Feature extraction, ONNX inference, Little's Law, smoothing, `csi-infer` |
+| `crates/flow-api` | Local REST API serving the live estimate |
+| `crates/flow-capture` | Labeled capture: recording plus the phone labeling page (`csi-capture`) |
+| `crates/flow-edge` | Appliance daemon: configuration, installation lifecycle, dashboard *(in progress)* |
+| `ml/` | Python package: features, training, evaluation, ONNX export, reports |
+| `firmware/csi-node` | ESP32-C6 firmware based on `espressif/esp-csi` |
 | `docs/` | Architecture documentation and ADRs |
 
 ## Getting started
@@ -62,9 +64,14 @@ uv run pytest
 
 ## Project status
 
-Early development. The data model (`flow-core`) is implemented and tested;
-ingestion, inference, API, and firmware are placeholders. CI enforces
-formatting, linting, type checks, and tests on every change.
+Early development. The sensing chain is implemented end to end — frame
+parsing, UDP intake, session recording and labeling, feature extraction,
+training and ONNX export, live inference, wait-time estimation and the
+local estimate API — with the Python↔Rust parity contracts enforced in CI.
+Node firmware is validated for serial capture; the UDP path awaits hardware
+validation. The appliance daemon (`flow-edge`) and its dashboard are the
+work in progress. CI enforces formatting, linting, type checks, tests and a
+cross-compilation check on every change.
 
 ## License
 
