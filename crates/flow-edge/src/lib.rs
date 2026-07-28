@@ -23,25 +23,33 @@
 //!   reboot mid-installation.
 //! - [`Runtime`] — exclusive access to the CSI stream, so calibration and
 //!   live inference can never both claim it.
+//! - [`DeviceSecret`] / [`AdminCredential`] — the credential printed on an
+//!   appliance's label, stored only as an Argon2id hash, with a recovery
+//!   path that requires physical possession of the card.
 //! - [`router`] — the read-only status surface the dashboard builds on.
 //!
-//! Planned: authentication, the embedded dashboard, node pairing, network
-//! configuration through NetworkManager, calibration control, model
-//! import and the outbound push of aggregated estimates. See
-//! `docs/architecture.md`.
+//! Planned: authenticated sessions over that surface, the embedded
+//! dashboard, node pairing, network configuration through NetworkManager,
+//! calibration control, model import and the outbound push of aggregated
+//! estimates. See `docs/architecture.md`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 mod api;
 mod config;
+mod credential;
 mod error;
+mod secret;
 mod state;
+mod store;
 
 pub use api::{EdgeState, router};
 pub use config::{
     Addressing, ApplianceConfig, DEFAULT_HOP_US, DEFAULT_SENSOR_CHANNEL, DEFAULT_WINDOW_US,
     Identity, NetworkConfig, PairedNode, SensorAp, SiteTuning, Uplink, WifiSecurity,
 };
-pub use error::{ConfigError, StoreError, TransitionError};
+pub use credential::{AdminCredential, CREDENTIAL_FILE, ResetOutcome, apply_pending_reset};
+pub use error::{ConfigError, CredentialError, SecretError, StoreError, TransitionError};
+pub use secret::{DeviceSecret, SECRET_ENTROPY_BITS};
 pub use state::{Phase, Readiness, Runtime, RuntimeMode, Stage};

@@ -25,3 +25,4 @@ Conventions:
 | [0007](0007-udp-intake-sender-identity.md) | UDP intake: sender-identified nodes, reception-time stamping | accepted |
 | [0008](0008-single-process-edge-appliance-daemon.md) | Single-process edge appliance daemon | accepted |
 | [0009](0009-dedicated-sensor-access-point-separate-uplink.md) | Dedicated sensor access point on a separate radio from the site uplink | accepted |
+| [0010](0010-per-device-secret-argon2id-credential.md) | Per-device secret as the administrator credential | accepted |

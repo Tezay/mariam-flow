@@ -46,7 +46,7 @@ upstream.
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export, visual reports | Loading, windowing, v1 features, training, grouped evaluation, ONNX export and reporting implemented |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi`; TX or RX role via sdkconfig; RX streams over serial (bring-up) or UDP (ADR 0007) | Serial capture validated on ESP32-C6; UDP path pending |
 | `crates/flow-capture` | Labeled capture: session recording plus the phone labeling page (`csi-capture`) | Implemented |
-| `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, stream arbitration, status surface; the dashboard it serves | Configuration, lifecycle and status surface implemented; dashboard, pairing, network integration and calibration control planned |
+| `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, stream arbitration, administrator credential, status surface; the dashboard it serves | Configuration, lifecycle, credential and status surface implemented; authenticated sessions, dashboard, pairing, network integration and calibration control planned |
 
 The edge components are plain Rust binaries with no board-specific
 dependency; any Linux/macOS machine can play the edge role during
@@ -404,9 +404,30 @@ there: no credentials — the uplink is reported by mode and network name,
 never by passphrase, even though the daemon holds it — and no raw CSI, the
 privacy invariant of the whole system.
 
+### Administrator credential
+
+Each unit carries its own secret, generated during preparation and printed
+on its label: twenty characters over Crockford's base32 alphabet, grouped in
+fours (`K7M4-9PQR-2WXY-6BTN-3HFD`), drawn uniformly from the operating
+system's cryptographic generator — 100 bits (ADR 0010). The appliance stores
+an Argon2id hash of it and never the secret itself. Verification normalizes
+input first, so case, separators and the letters that resemble digits are
+all forgiven; a secret read off a label under bad lighting still works.
+
+Provisioning is a separate command run once per unit, and the daemon refuses
+to serve without a credential — an appliance nobody can authenticate against
+must not be reachable. Recovery is physical: the new secret is written into
+a file on the card's boot partition, and the daemon consumes it at startup,
+replaces the credential and deletes the file. A malformed recovery file is
+reported and left in place while the previous credential stands, so a
+mistyped secret cannot take a working installation offline.
+
 ```sh
-flow-edge --config /etc/mariam-flow/appliance.json \
-          --data-dir /var/lib/mariam-flow --listen 127.0.0.1:8080
+flow-edge provision --data-dir /var/lib/mariam-flow   # once, during preparation
+flow-edge new-secret                                  # print a secret, store nothing
+
+flow-edge serve --config /etc/mariam-flow/appliance.json \
+                --data-dir /var/lib/mariam-flow --listen 127.0.0.1:8080
 ```
 
 ## Toolchain and quality gates

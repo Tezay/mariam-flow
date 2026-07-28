@@ -23,10 +23,12 @@ use axum::{Json, Router};
 use serde::Serialize;
 
 use crate::config::{ApplianceConfig, Uplink};
+use crate::credential::AdminCredential;
 use crate::state::{Phase, Readiness, Runtime, RuntimeMode};
 
 struct Inner {
     config: ApplianceConfig,
+    credential: AdminCredential,
     model_installed: bool,
     runtime: Runtime,
 }
@@ -38,19 +40,34 @@ pub struct EdgeState {
 }
 
 impl EdgeState {
-    /// Wraps a loaded configuration.
+    /// Wraps a loaded configuration and the appliance credential.
     ///
     /// `model_installed` reports whether an active density model artifact
     /// is present on disk.
     #[must_use]
-    pub fn new(config: ApplianceConfig, model_installed: bool) -> Self {
+    pub fn new(
+        config: ApplianceConfig,
+        credential: AdminCredential,
+        model_installed: bool,
+    ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 config,
+                credential,
                 model_installed,
                 runtime: Runtime::new(),
             })),
         }
+    }
+
+    /// Checks a secret presented by a client against the appliance
+    /// credential.
+    ///
+    /// Verification is deliberately expensive (Argon2id), so callers must
+    /// throttle it rather than expose it to unlimited attempts.
+    #[must_use]
+    pub fn verify_secret(&self, presented: &str) -> bool {
+        self.lock().credential.verify(presented)
     }
 
     /// The installation facts, as they stand.
@@ -252,6 +269,14 @@ mod tests {
         config
     }
 
+    const TEST_SECRET: &str = "K7M4-9PQR-2WXY-6BTN-3HFD";
+
+    fn state_for(config: ApplianceConfig, model_installed: bool) -> EdgeState {
+        let secret = crate::secret::DeviceSecret::parse(TEST_SECRET).unwrap();
+        let credential = AdminCredential::establish(&secret, 1_800_000_000_000_000).unwrap();
+        EdgeState::new(config, credential, model_installed)
+    }
+
     async fn get(state: EdgeState, path: &str) -> (StatusCode, String) {
         let request = axum::http::Request::builder()
             .uri(path)
@@ -271,13 +296,13 @@ mod tests {
 
     #[tokio::test]
     async fn health_answers_ok() {
-        let body = get_json(EdgeState::new(factory(), false), "/health").await;
+        let body = get_json(state_for(factory(), false), "/health").await;
         assert_eq!(body["status"], "ok");
     }
 
     #[tokio::test]
     async fn a_factory_appliance_reports_the_first_onboarding_step() {
-        let body = get_json(EdgeState::new(factory(), false), "/api/status").await;
+        let body = get_json(state_for(factory(), false), "/api/status").await;
         assert_eq!(body["kit_id"], "KIT-0001");
         assert_eq!(body["phase"]["phase"], "onboarding");
         assert_eq!(body["phase"]["stage"], "site");
@@ -290,7 +315,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_installed_appliance_reports_operational_state() {
-        let body = get_json(EdgeState::new(installed(), true), "/api/status").await;
+        let body = get_json(state_for(installed(), true), "/api/status").await;
         assert_eq!(body["phase"]["phase"], "operational");
         assert_eq!(body["site_name"], "RU EFREI");
         assert_eq!(body["uplink"]["mode"], "wifi");
@@ -302,7 +327,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_status_surface_never_leaks_credentials() {
-        let (_, text) = get(EdgeState::new(installed(), true), "/api/status").await;
+        let (_, text) = get(state_for(installed(), true), "/api/status").await;
         assert!(
             !text.contains(AP_PASSPHRASE),
             "sensor AP passphrase leaked into the status surface"
@@ -316,7 +341,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_reported_runtime_mode_follows_the_stream_guard() {
-        let state = EdgeState::new(installed(), true);
+        let state = state_for(installed(), true);
         state
             .with_runtime(|runtime| runtime.start_calibration("s-001"))
             .unwrap();
@@ -334,7 +359,7 @@ mod tests {
     async fn readiness_is_reported_even_when_the_installation_is_closed() {
         let mut config = installed();
         config.nodes.clear();
-        let state = EdgeState::new(config, true);
+        let state = state_for(config, true);
 
         assert_eq!(state.phase(), Phase::Operational);
         assert_eq!(state.readiness().stage(), Stage::Nodes);
