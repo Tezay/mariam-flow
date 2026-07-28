@@ -17,12 +17,18 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use flow_edge::{
-    AdminCredential, ApplianceConfig, DeviceSecret, EdgeState, Phase, ResetOutcome,
-    SECRET_ENTROPY_BITS, apply_pending_reset, now_us, router,
+    AdminCredential, ApplianceConfig, DeviceSecret, EdgeState, Event, EventKind, Journal, Phase,
+    ResetOutcome, SECRET_ENTROPY_BITS, apply_pending_reset, now_us, router,
 };
 
 /// File name of the active density model inside the data directory.
 const ACTIVE_MODEL: &str = "model.onnx";
+
+/// How often buffered journal entries are written out.
+const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Flushes between two prunes — roughly one hour.
+const PRUNE_EVERY_TICKS: u64 = 720;
 
 /// Run the Mariam Flow edge appliance.
 #[derive(Debug, Parser)]
@@ -112,8 +118,10 @@ fn main() -> ExitCode {
 fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
     // Recovery runs before anything else: an operator who has lost the
     // label must be able to get back in even if the rest is unhappy.
+    let mut reset_applied = false;
     match apply_pending_reset(&args.reset_file, &args.data_dir, now_us()) {
         Ok(ResetOutcome::Applied) => {
+            reset_applied = true;
             eprintln!(
                 "administrator credential replaced from {}",
                 args.reset_file.display()
@@ -130,7 +138,19 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
     let model_installed = args.data_dir.join(ACTIVE_MODEL).is_file();
 
     let kit_id = config.identity.kit_id.clone();
-    let state = EdgeState::new(config, credential, model_installed);
+    let journal = Journal::open(&args.data_dir)?;
+    let state = EdgeState::new(config, credential, model_installed, journal);
+
+    if reset_applied {
+        state.record(Event::new(EventKind::CredentialReset));
+    }
+    state.record(
+        Event::new(EventKind::Started)
+            .with_detail(format!("version {}", env!("CARGO_PKG_VERSION"))),
+    );
+    // One write to make "when did this unit last boot" reliable; the rest
+    // of the lifecycle traffic rides the periodic flush.
+    state.flush_journal();
 
     match state.phase() {
         Phase::Onboarding { stage } => {
@@ -149,14 +169,69 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
     runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind(&args.listen).await?;
         eprintln!("serving on http://{}", args.listen);
+
+        let housekeeper = tokio::spawn(housekeeping(state.clone()));
+
         // Connect info carries the client address the login throttle keys on.
         axum::serve(
             listener,
-            router(state).into_make_service_with_connect_info::<SocketAddr>(),
+            router(state.clone()).into_make_service_with_connect_info::<SocketAddr>(),
         )
+        .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+        housekeeper.abort();
+        state.record(Event::new(EventKind::Stopped));
+        state.flush_journal();
+        eprintln!("stopped");
         Ok::<(), Box<dyn Error>>(())
     })
+}
+
+/// Writes what the journal has buffered, and prunes it now and then.
+///
+/// Buffered events would otherwise sit in memory until something forced
+/// them out; this bounds that wait to a few seconds without paying a
+/// physical write per event.
+async fn housekeeping(state: EdgeState) {
+    let mut ticks: u64 = 0;
+    let mut interval = tokio::time::interval(FLUSH_INTERVAL);
+    loop {
+        interval.tick().await;
+        state.flush_journal();
+        ticks += 1;
+        if ticks % PRUNE_EVERY_TICKS == 0 {
+            state.prune_journal();
+        }
+    }
+}
+
+/// Resolves when the supervisor asks the daemon to stop.
+///
+/// Both signals matter: systemd sends SIGTERM, a console sends SIGINT.
+/// Catching them is what lets the journal be flushed instead of losing
+/// whatever was buffered.
+async fn shutdown_signal() {
+    let interrupt = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(err) => eprintln!("cannot listen for SIGTERM: {err}"),
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = interrupt => {}
+        () = terminate => {}
+    }
 }
 
 fn provision(args: &ProvisionArgs) -> Result<(), Box<dyn Error>> {

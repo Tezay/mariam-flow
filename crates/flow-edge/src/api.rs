@@ -23,7 +23,7 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::{ConnectInfo, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{ApplianceConfig, Uplink};
 use crate::credential::AdminCredential;
+use crate::journal::{Event, EventKind, Journal, RecordedEvent};
 use crate::now_us;
 use crate::session::{ABSOLUTE_LIFETIME_US, SessionStore};
 use crate::state::{Phase, Readiness, Runtime, RuntimeMode};
@@ -61,6 +62,9 @@ pub struct EdgeState {
     /// exhaust a 512 MB appliance — the very cost that makes guessing
     /// expensive would become the way to take the unit down.
     login_gate: Arc<tokio::sync::Mutex<()>>,
+    /// The appliance journal, behind its own lock so a database write
+    /// never holds up a status request.
+    journal: Arc<Mutex<Journal>>,
 }
 
 impl EdgeState {
@@ -73,6 +77,7 @@ impl EdgeState {
         config: ApplianceConfig,
         credential: AdminCredential,
         model_installed: bool,
+        journal: Journal,
     ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(Inner {
@@ -84,6 +89,46 @@ impl EdgeState {
                 throttle: Throttle::new(),
             })),
             login_gate: Arc::new(tokio::sync::Mutex::new(())),
+            journal: Arc::new(Mutex::new(journal)),
+        }
+    }
+
+    /// Records an event, reporting rather than propagating a failure.
+    ///
+    /// An appliance that refused to authenticate anyone because its card
+    /// filled up would be worse than one that loses an audit line, so a
+    /// journal failure is written to the console and the request carries
+    /// on.
+    pub fn record(&self, event: Event) {
+        let now = now_us();
+        if let Err(err) = self.journal().record(event, now) {
+            eprintln!("journal: {err}");
+        }
+    }
+
+    /// Writes everything the journal has buffered.
+    pub fn flush_journal(&self) {
+        if let Err(err) = self.journal().flush() {
+            eprintln!("journal flush: {err}");
+        }
+    }
+
+    /// Drops events past the retention window or the row cap.
+    pub fn prune_journal(&self) {
+        let now = now_us();
+        if let Err(err) = self.journal().prune(now) {
+            eprintln!("journal prune: {err}");
+        }
+    }
+
+    fn recent_events(&self, limit: usize) -> Vec<RecordedEvent> {
+        self.journal().recent(limit).unwrap_or_default()
+    }
+
+    fn journal(&self) -> MutexGuard<'_, Journal> {
+        match self.journal.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
         }
     }
 
@@ -123,6 +168,7 @@ impl EdgeState {
     ) -> Result<String, LoginRefusal> {
         let now = now_us();
         if let Err(wait_us) = self.lock().throttle.check(client, now) {
+            self.record(Event::new(EventKind::LoginThrottled).from_client(client));
             return Err(LoginRefusal::TooManyAttempts { wait_us });
         }
 
@@ -133,13 +179,25 @@ impl EdgeState {
             .unwrap_or(false);
 
         let now = now_us();
-        let mut inner = self.lock();
-        if !verified {
-            let wait_us = inner.throttle.record_failure(client, now);
-            return Err(LoginRefusal::WrongSecret { wait_us });
+        let opened = {
+            let mut inner = self.lock();
+            if verified {
+                inner.throttle.record_success(client);
+                Ok(inner.sessions.open(now))
+            } else {
+                Err(inner.throttle.record_failure(client, now))
+            }
+        };
+        match opened {
+            Ok(token) => {
+                self.record(Event::new(EventKind::LoginSucceeded).from_client(client));
+                Ok(token)
+            }
+            Err(wait_us) => {
+                self.record(Event::new(EventKind::LoginFailed).from_client(client));
+                Err(LoginRefusal::WrongSecret { wait_us })
+            }
         }
-        inner.throttle.record_success(client);
-        Ok(inner.sessions.open(now))
     }
 
     /// Whether `token` names a live session, marking it as just used.
@@ -207,9 +265,13 @@ enum LoginRefusal {
 /// Protected routes are grouped behind the session guard, so adding a route
 /// to that group is enough to protect it.
 pub fn router(state: EdgeState) -> Router {
-    let protected = Router::new().route("/api/status", get(status)).route_layer(
-        middleware::from_fn_with_state(state.clone(), require_session),
-    );
+    let protected = Router::new()
+        .route("/api/status", get(status))
+        .route("/api/events", get(events))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_session,
+        ));
 
     Router::new()
         .route("/health", get(health))
@@ -240,6 +302,29 @@ async fn health() -> Json<Health> {
 
 async fn status(State(state): State<EdgeState>) -> Json<StatusResponse> {
     Json(state.status())
+}
+
+/// How many journal entries `/api/events` returns unless asked otherwise.
+const DEFAULT_EVENT_LIMIT: usize = 100;
+
+/// Ceiling on that, so one request cannot ask the appliance to serialize
+/// its whole journal.
+const MAX_EVENT_LIMIT: usize = 1_000;
+
+#[derive(Deserialize)]
+struct EventsQuery {
+    limit: Option<usize>,
+}
+
+async fn events(
+    State(state): State<EdgeState>,
+    Query(query): Query<EventsQuery>,
+) -> Json<Vec<RecordedEvent>> {
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_EVENT_LIMIT)
+        .clamp(1, MAX_EVENT_LIMIT);
+    Json(state.recent_events(limit))
 }
 
 #[derive(Deserialize)]
@@ -283,9 +368,14 @@ async fn login(
     }
 }
 
-async fn logout(State(state): State<EdgeState>, headers: HeaderMap) -> Response {
+async fn logout(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Response {
     if let Some(token) = session_token(&headers) {
         state.close_session(&token);
+        state.record(Event::new(EventKind::LoggedOut).from_client(peer.ip()));
     }
     // Answering the same way whether or not a session existed keeps logout
     // idempotent and free of information.
@@ -461,7 +551,8 @@ mod tests {
     fn state_for(config: ApplianceConfig, model_installed: bool) -> EdgeState {
         let secret = DeviceSecret::parse(SECRET).unwrap();
         let credential = AdminCredential::establish(&secret, now_us()).unwrap();
-        EdgeState::new(config, credential, model_installed)
+        let journal = Journal::open_in_memory().unwrap();
+        EdgeState::new(config, credential, model_installed, journal)
     }
 
     /// Sends a request, optionally with a cookie and a JSON body, from a
@@ -731,6 +822,123 @@ mod tests {
         state.with_runtime(Runtime::stop);
         let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
         assert_eq!(body["runtime"]["mode"], "idle");
+    }
+
+    #[tokio::test]
+    async fn the_journal_is_closed_to_anonymous_callers() {
+        let state = state_for(installed(), true);
+        let (status, _, _) = send(&state, "GET", "/api/events", None, None, 10).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn a_successful_login_is_recorded_with_its_client() {
+        let state = state_for(installed(), true);
+        let cookie = session_of(&state).await;
+
+        let (status, _, body) = send(&state, "GET", "/api/events", Some(&cookie), None, 10).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body[0]["kind"], "login-succeeded");
+        assert_eq!(body[0]["category"], "access");
+        assert_eq!(body[0]["client"], "192.168.4.10");
+    }
+
+    #[tokio::test]
+    async fn failures_and_throttling_are_recorded_too() {
+        let state = state_for(installed(), true);
+        // Three failures are free, the fourth sets the delay, and only the
+        // fifth is actually turned away.
+        for _ in 0..5 {
+            login_with(&state, WRONG_SECRET, 66).await;
+        }
+        let cookie = session_of(&state).await;
+
+        let (_, _, body) = send(&state, "GET", "/api/events", Some(&cookie), None, 10).await;
+        let kinds: Vec<&str> = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event["kind"].as_str().unwrap())
+            .collect();
+
+        assert!(kinds.contains(&"login-failed"));
+        assert!(
+            kinds.contains(&"login-throttled"),
+            "a blocked attempt is worth recording: {kinds:?}"
+        );
+        // The attacker's address is on record, not just the installer's.
+        let attackers = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|event| event["client"] == "192.168.4.66")
+            .count();
+        assert!(attackers >= 5, "every attempt from 192.168.4.66 is kept");
+    }
+
+    #[tokio::test]
+    async fn logging_out_is_recorded() {
+        let state = state_for(installed(), true);
+        let cookie = session_of(&state).await;
+        send(&state, "DELETE", "/api/session", Some(&cookie), None, 10).await;
+
+        let fresh = session_of(&state).await;
+        let (_, _, body) = send(&state, "GET", "/api/events", Some(&fresh), None, 10).await;
+        let kinds: Vec<&str> = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event["kind"].as_str().unwrap())
+            .collect();
+        assert!(kinds.contains(&"logged-out"), "{kinds:?}");
+    }
+
+    #[tokio::test]
+    async fn the_journal_query_honours_and_clamps_its_limit() {
+        let state = state_for(installed(), true);
+        for _ in 0..3 {
+            login_with(&state, WRONG_SECRET, 10).await;
+        }
+        let cookie = session_of(&state).await;
+
+        let (_, _, body) = send(
+            &state,
+            "GET",
+            "/api/events?limit=2",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        assert_eq!(body.as_array().unwrap().len(), 2);
+
+        // An absurd limit is clamped rather than refused.
+        let (status, _, body) = send(
+            &state,
+            "GET",
+            "/api/events?limit=999999",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.as_array().unwrap().len() <= MAX_EVENT_LIMIT);
+    }
+
+    #[tokio::test]
+    async fn the_journal_never_records_the_secret_itself() {
+        let state = state_for(installed(), true);
+        login_with(&state, WRONG_SECRET, 10).await;
+        let cookie = session_of(&state).await;
+
+        let (_, _, body) = send(&state, "GET", "/api/events", Some(&cookie), None, 10).await;
+        let text = body.to_string();
+        assert!(
+            !text.contains(SECRET),
+            "a secret must never reach the journal"
+        );
+        assert!(!text.contains(WRONG_SECRET), "not even a wrong one");
     }
 
     #[tokio::test]

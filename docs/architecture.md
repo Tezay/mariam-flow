@@ -46,7 +46,7 @@ upstream.
 | `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export, visual reports | Loading, windowing, v1 features, training, grouped evaluation, ONNX export and reporting implemented |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi`; TX or RX role via sdkconfig; RX streams over serial (bring-up) or UDP (ADR 0007) | Serial capture validated on ESP32-C6; UDP path pending |
 | `crates/flow-capture` | Labeled capture: session recording plus the phone labeling page (`csi-capture`) | Implemented |
-| `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, stream arbitration, administrator credential, status surface; the dashboard it serves | Configuration, lifecycle, credential and status surface implemented; authenticated sessions, dashboard, pairing, network integration and calibration control planned |
+| `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, stream arbitration, administrator credential, authenticated HTTP surface, event journal; the dashboard it serves | Configuration, lifecycle, credential, sessions, journal and status surface implemented; dashboard, pairing, network integration and calibration control planned |
 
 The edge components are plain Rust binaries with no board-specific
 dependency; any Linux/macOS machine can play the edge role during
@@ -429,6 +429,30 @@ The secret travels in the request body, never in a query string. The QR code
 on the label follows the same reasoning: it carries the secret in the URL
 *fragment*, which browsers never transmit, so the dashboard reads it
 client-side, exchanges it for a session and clears it from the address bar.
+
+### Journal
+
+History lives in SQLite (`appliance.db`), not in files: it accumulates, it is
+queried by time, and it has to be pruned (ADR 0012). One table records four
+categories of event — access, appliance lifecycle, installation progress and
+node connectivity — of which access and lifecycle have emitters today.
+
+Durability is split by kind. Access events are committed before the call
+returns, since those are the ones an attacker would erase by pulling the
+power; everything else is buffered and written in one transaction every few
+seconds, at shutdown, or when the buffer fills. The database runs in WAL mode
+with `synchronous=FULL`, so an immediate write really has reached the card.
+The daemon handles SIGTERM and SIGINT in order to flush rather than discard
+what is buffered.
+
+Access events carry the client address — administration data, never anything
+about the people in the monitored queue. Because an address is personal data,
+retention is bounded on two axes: a 90-day window, and a ceiling on retained
+rows so a runaway loop cannot fill the card however recent its output. A
+journal write that fails is reported and the request carries on; refusing to
+authenticate anyone because the card filled up would be the worse failure.
+
+`GET /api/events` reads it back, newest first, with a clamped `limit`.
 
 ### Administrator credential
 

@@ -143,6 +143,11 @@ pub enum CredentialError {
     },
 }
 
+/// Failure while reading or writing the appliance journal.
+#[derive(Debug, Error)]
+#[error("appliance journal")]
+pub struct JournalError(#[from] rusqlite::Error);
+
 /// A refused appliance lifecycle or runtime transition.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TransitionError {

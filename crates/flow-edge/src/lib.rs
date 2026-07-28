@@ -43,6 +43,7 @@ mod api;
 mod config;
 mod credential;
 mod error;
+mod journal;
 mod secret;
 mod session;
 mod state;
@@ -55,7 +56,12 @@ pub use config::{
     Identity, NetworkConfig, PairedNode, SensorAp, SiteTuning, Uplink, WifiSecurity,
 };
 pub use credential::{AdminCredential, CREDENTIAL_FILE, ResetOutcome, apply_pending_reset};
-pub use error::{ConfigError, CredentialError, SecretError, StoreError, TransitionError};
+pub use error::{
+    ConfigError, CredentialError, JournalError, SecretError, StoreError, TransitionError,
+};
+pub use journal::{
+    Event, EventCategory, EventKind, JOURNAL_FILE, Journal, MAX_EVENTS, RETENTION_US, RecordedEvent,
+};
 pub use secret::{DeviceSecret, SECRET_ENTROPY_BITS};
 pub use session::{ABSOLUTE_LIFETIME_US, IDLE_TIMEOUT_US, SessionStore};
 pub use state::{Phase, Readiness, Runtime, RuntimeMode, Stage};
