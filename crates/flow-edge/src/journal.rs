@@ -111,6 +111,10 @@ pub enum EventKind {
     Stopped,
     /// The appliance configuration was written.
     ConfigurationChanged,
+    /// The site opened for service.
+    ServiceOpened,
+    /// The site closed for the day, or for a break between services.
+    ServiceClosed,
     /// A step of the guided installation was satisfied.
     StageCompleted,
     /// A calibration capture began.
@@ -135,7 +139,11 @@ impl EventKind {
             | Self::LoginThrottled
             | Self::LoggedOut
             | Self::CredentialReset => EventCategory::Access,
-            Self::Started | Self::Stopped | Self::ConfigurationChanged => EventCategory::Lifecycle,
+            Self::Started
+            | Self::Stopped
+            | Self::ConfigurationChanged
+            | Self::ServiceOpened
+            | Self::ServiceClosed => EventCategory::Lifecycle,
             Self::StageCompleted
             | Self::CalibrationStarted
             | Self::CalibrationStopped
@@ -162,6 +170,8 @@ impl EventKind {
             Self::Started => "started",
             Self::Stopped => "stopped",
             Self::ConfigurationChanged => "configuration-changed",
+            Self::ServiceOpened => "service-opened",
+            Self::ServiceClosed => "service-closed",
             Self::StageCompleted => "stage-completed",
             Self::CalibrationStarted => "calibration-started",
             Self::CalibrationStopped => "calibration-stopped",
@@ -557,6 +567,8 @@ fn parse_kind(text: &str) -> EventKind {
         "started" => EventKind::Started,
         "stopped" => EventKind::Stopped,
         "configuration-changed" => EventKind::ConfigurationChanged,
+        "service-opened" => EventKind::ServiceOpened,
+        "service-closed" => EventKind::ServiceClosed,
         "stage-completed" => EventKind::StageCompleted,
         "calibration-started" => EventKind::CalibrationStarted,
         "calibration-stopped" => EventKind::CalibrationStopped,
@@ -731,6 +743,8 @@ mod tests {
             EventKind::Started,
             EventKind::Stopped,
             EventKind::ConfigurationChanged,
+            EventKind::ServiceOpened,
+            EventKind::ServiceClosed,
             EventKind::StageCompleted,
             EventKind::CalibrationStarted,
             EventKind::CalibrationStopped,

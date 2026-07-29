@@ -23,6 +23,9 @@ flow-core = { path = "crates/flow-core" }
 flow-infer = { path = "crates/flow-infer" }
 flow-ingest = { path = "crates/flow-ingest" }
 http-body-util = "0.1"
+# Reads the system time-zone database on Unix, so no copy is carried in the
+# binary; Raspberry Pi OS ships one.
+jiff = "0.2"
 rusqlite = { version = "0.40", features = ["bundled"] }
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 tokio-stream = { version = "0.1", features = ["sync"] }

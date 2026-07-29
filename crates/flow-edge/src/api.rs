@@ -28,7 +28,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
@@ -39,6 +39,7 @@ use crate::history::{MINUTE_US, MinuteSummary};
 use crate::journal::{Event, EventKind, Journal, RecordedEvent};
 use crate::now_us;
 use crate::pipeline::StreamHealth;
+use crate::schedule::{ServiceState, ServiceWindow};
 use crate::session::{ABSOLUTE_LIFETIME_US, SessionStore};
 use crate::state::{Phase, Readiness, Runtime, RuntimeMode};
 use crate::throttle::Throttle;
@@ -48,6 +49,8 @@ const SESSION_COOKIE: &str = "mf_session";
 
 struct Inner {
     config: ApplianceConfig,
+    /// Where the configuration is persisted, so a write can be durable.
+    config_path: std::path::PathBuf,
     credential: AdminCredential,
     model_installed: bool,
     runtime: Runtime,
@@ -91,6 +94,7 @@ impl EdgeState {
     #[must_use]
     pub fn new(
         config: ApplianceConfig,
+        config_path: std::path::PathBuf,
         credential: AdminCredential,
         model_installed: bool,
         journal: Journal,
@@ -98,6 +102,7 @@ impl EdgeState {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 config,
+                config_path,
                 credential,
                 model_installed,
                 runtime: Runtime::new(),
@@ -209,6 +214,47 @@ impl EdgeState {
         }
     }
 
+    /// Applies a change to the configuration and persists it.
+    ///
+    /// Validation happens inside `save`, before anything reaches the disk,
+    /// and the in-memory copy is only replaced once the write succeeded —
+    /// so a rejected change leaves the running appliance exactly as it was.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the new configuration is unusable or cannot be
+    /// written.
+    pub fn update_config(
+        &self,
+        change: impl FnOnce(&mut ApplianceConfig),
+    ) -> Result<(), crate::error::StoreError> {
+        let mut inner = self.lock();
+        let mut candidate = inner.config.clone();
+        change(&mut candidate);
+        candidate.save(&inner.config_path)?;
+        inner.config = candidate;
+        Ok(())
+    }
+
+    /// Whether the site is serving, and when that next changes.
+    ///
+    /// An appliance with no schedule is always open: hours that have not
+    /// been declared must not silence a working installation.
+    #[must_use]
+    pub fn service_state(&self) -> ServiceState {
+        let window = self.lock().config.service.clone();
+        let Some(window) = window else {
+            return ServiceState {
+                open: true,
+                changes_at_us: None,
+            };
+        };
+        window.state(now_us()).unwrap_or(ServiceState {
+            open: true,
+            changes_at_us: None,
+        })
+    }
+
     /// The installation facts, as they stand.
     #[must_use]
     pub fn readiness(&self) -> Readiness {
@@ -289,6 +335,8 @@ impl EdgeState {
     }
 
     fn status(&self) -> StatusResponse {
+        // Read before taking the lock: `service_state` takes it too.
+        let service = self.service_state();
         let inner = self.lock();
         let readiness = Readiness::evaluate(&inner.config, inner.model_installed);
         let config = &inner.config;
@@ -300,6 +348,7 @@ impl EdgeState {
             runtime: inner.runtime.mode().clone(),
             model_installed: inner.model_installed,
             stream: self.stream_health(),
+            service,
             sensor_ap: SensorApView {
                 ssid: config.network.sensor_ap.ssid.clone(),
                 channel: config.network.sensor_ap.channel,
@@ -348,6 +397,7 @@ pub fn router(state: EdgeState) -> Router {
         .route("/api/events", get(events))
         .route("/api/live", get(live))
         .route("/api/estimates", get(estimates))
+        .route("/api/service-window", put(set_service_window))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_session,
@@ -430,6 +480,8 @@ struct LiveSnapshot {
     estimate: Option<EstimateView>,
     /// How the frames are arriving.
     stream: StreamHealth,
+    /// Whether the site is serving, and when that next changes.
+    service: ServiceState,
     /// Appliance clock, so a browser can judge staleness without trusting
     /// its own — the same reasoning as the labeling page.
     now_us: u64,
@@ -471,6 +523,7 @@ impl EdgeState {
         LiveSnapshot {
             estimate: self.latest_estimate().map(EstimateView::from),
             stream: self.stream_health(),
+            service: self.service_state(),
             now_us: now_us(),
         }
     }
@@ -517,6 +570,57 @@ async fn estimates(
         .clamp(1, MAX_HISTORY_MINUTES);
     let since = now_us().saturating_sub(minutes * MINUTE_US);
     Json(state.minutes(since, usize::try_from(minutes).unwrap_or(usize::MAX)))
+}
+
+/// Replaces the service schedule, or clears it.
+///
+/// The whole schedule is sent at once rather than patched field by field:
+/// its parts constrain one another — intervals must not overlap, a closure
+/// must not end before it begins — so validating a fragment against a stored
+/// remainder would be checking half a thing.
+///
+/// A `null` body clears the schedule, which returns the appliance to
+/// estimating around the clock.
+async fn set_service_window(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(window): Json<Option<ServiceWindow>>,
+) -> Response {
+    if let Some(window) = window.as_ref() {
+        if let Err(err) = window.validate() {
+            return error_response(StatusCode::BAD_REQUEST, &err.to_string());
+        }
+    }
+
+    let described = window.as_ref().map_or_else(
+        || "service schedule cleared".to_owned(),
+        |window| format!("service schedule set ({})", window.timezone),
+    );
+
+    match state.update_config(|config| config.service = window) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(described),
+            );
+            (StatusCode::OK, Json(state.service_state())).into_response()
+        }
+        // The schedule was already found sound, so what remains is the
+        // appliance failing to record it — a read-only card, a full disk. That
+        // is not something the caller can correct by sending something else.
+        Err(err) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(format!("service schedule rejected: {err}")),
+            );
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "the appliance could not store the schedule",
+            )
+        }
+    }
 }
 
 /// How many journal entries `/api/events` returns unless asked otherwise.
@@ -654,6 +758,7 @@ struct StatusResponse {
     runtime: RuntimeMode,
     model_installed: bool,
     stream: StreamHealth,
+    service: ServiceState,
     sensor_ap: SensorApView,
     uplink: UplinkView,
     nodes: Vec<NodeView>,
@@ -768,7 +873,15 @@ mod tests {
         let secret = DeviceSecret::parse(SECRET).unwrap();
         let credential = AdminCredential::establish(&secret, now_us()).unwrap();
         let journal = Journal::open_in_memory().unwrap();
-        EdgeState::new(config, credential, model_installed, journal)
+        // Tests that write configuration supply a real path of their own;
+        // the rest never reach the disk.
+        EdgeState::new(
+            config,
+            std::path::PathBuf::from("/nonexistent/appliance.json"),
+            credential,
+            model_installed,
+            journal,
+        )
     }
 
     /// Sends a request, optionally with a cookie and a JSON body, from a
@@ -1223,5 +1336,168 @@ mod tests {
         let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
         assert_eq!(body["phase"]["phase"], "operational");
         assert_eq!(body["readiness"]["nodes_paired"], false);
+    }
+
+    /// An appliance whose configuration can actually be written, with the
+    /// directory kept alive for the duration of the test.
+    fn writable() -> (EdgeState, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appliance.json");
+        let config = installed();
+        config.save(&path).unwrap();
+
+        let secret = DeviceSecret::parse(SECRET).unwrap();
+        let credential = AdminCredential::establish(&secret, now_us()).unwrap();
+        let journal = Journal::open_in_memory().unwrap();
+        let state = EdgeState::new(config, path, credential, true, journal);
+        (state, dir)
+    }
+
+    fn always_open() -> serde_json::Value {
+        let day = serde_json::json!([{ "from": "00:00", "to": "23:59" }]);
+        serde_json::json!({
+            "timezone": "Europe/Paris",
+            "weekly": {
+                "monday": day, "tuesday": day, "wednesday": day, "thursday": day,
+                "friday": day, "saturday": day, "sunday": day,
+            },
+            "closures": [],
+        })
+    }
+
+    #[tokio::test]
+    async fn a_schedule_is_stored_and_answered_with_the_resulting_state() {
+        let (state, _dir) = writable();
+        let cookie = session_of(&state).await;
+        let body = always_open().to_string();
+
+        let (status, _, answer) = send(
+            &state,
+            "PUT",
+            "/api/service-window",
+            Some(&cookie),
+            Some(body),
+            10,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(answer["open"], true);
+        // Reloaded from disk, not from the copy held in memory: the point of
+        // the write is that it survives a restart.
+        let path = state.lock().config_path.clone();
+        let stored = ApplianceConfig::load(&path).unwrap();
+        assert_eq!(stored.service.unwrap().timezone, "Europe/Paris");
+    }
+
+    #[tokio::test]
+    async fn clearing_the_schedule_returns_the_appliance_to_estimating() {
+        let (state, _dir) = writable();
+        let cookie = session_of(&state).await;
+        let body = always_open().to_string();
+        send(
+            &state,
+            "PUT",
+            "/api/service-window",
+            Some(&cookie),
+            Some(body),
+            10,
+        )
+        .await;
+
+        let (status, _, answer) = send(
+            &state,
+            "PUT",
+            "/api/service-window",
+            Some(&cookie),
+            Some("null".to_owned()),
+            10,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(answer["open"], true);
+        let path = state.lock().config_path.clone();
+        assert!(ApplianceConfig::load(&path).unwrap().service.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_refusal_says_what_is_wrong_and_names_no_server_path() {
+        let (state, _dir) = writable();
+        let cookie = session_of(&state).await;
+        let overlapping = serde_json::json!({
+            "timezone": "Europe/Paris",
+            "weekly": { "monday": [
+                { "from": "08:00", "to": "12:00" },
+                { "from": "11:00", "to": "14:00" },
+            ] },
+            "closures": [],
+        })
+        .to_string();
+
+        let (status, _, body) = send(
+            &state,
+            "PUT",
+            "/api/service-window",
+            Some(&cookie),
+            Some(overlapping),
+            10,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let message = body["error"].as_str().unwrap();
+        // Someone is typing opening hours into a form: the answer has to name
+        // the day that is wrong. Reporting that the configuration as a whole
+        // was refused — and naming the file it was refused for — tells them
+        // nothing and hands out a server path.
+        assert!(message.contains("monday"), "unhelpful message: {message}");
+        assert!(!message.contains('/'), "leaks a path: {message}");
+    }
+
+    #[tokio::test]
+    async fn a_refused_schedule_leaves_the_stored_one_untouched() {
+        let (state, _dir) = writable();
+        let cookie = session_of(&state).await;
+        let body = always_open().to_string();
+        send(
+            &state,
+            "PUT",
+            "/api/service-window",
+            Some(&cookie),
+            Some(body),
+            10,
+        )
+        .await;
+
+        let unknown_zone =
+            serde_json::json!({ "timezone": "Mars/Olympus", "weekly": {}, "closures": [] })
+                .to_string();
+        let (status, _, _) = send(
+            &state,
+            "PUT",
+            "/api/service-window",
+            Some(&cookie),
+            Some(unknown_zone),
+            10,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let path = state.lock().config_path.clone();
+        let stored = ApplianceConfig::load(&path).unwrap();
+        assert_eq!(stored.service.unwrap().timezone, "Europe/Paris");
+    }
+
+    #[tokio::test]
+    async fn the_schedule_cannot_be_set_without_a_session() {
+        let (state, _dir) = writable();
+        let body = always_open().to_string();
+
+        let (status, _, _) = send(&state, "PUT", "/api/service-window", None, Some(body), 10).await;
+
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let path = state.lock().config_path.clone();
+        assert!(ApplianceConfig::load(&path).unwrap().service.is_none());
     }
 }
