@@ -11,6 +11,7 @@ import {
   isValidTime,
   minutesOf,
   newInterval,
+  offeredZones,
   timeZoneNames,
   validateWeek,
 } from './schedule';
@@ -206,8 +207,44 @@ describe('cloneWindow', () => {
   });
 });
 
+describe('offeredZones', () => {
+  it('offers what the platform knows', () => {
+    expect(offeredZones(['Europe/Paris', 'Europe/London'], 'Europe/Paris')).toEqual([
+      'Europe/Paris',
+      'Europe/London',
+    ]);
+  });
+
+  it('adds the detected zone when the platform does not list it', () => {
+    // `Intl.supportedValuesOf` answers with canonical identifiers only, and
+    // `UTC` is not one — so a machine set to UTC detects a zone its own
+    // browser will not offer. Pre-filling the field with a value that has no
+    // matching option renders the select empty.
+    const canonical = ['Africa/Abidjan', 'Europe/Paris'];
+    expect(offeredZones(canonical, 'UTC')).toEqual(['UTC', ...canonical]);
+  });
+
+  it('falls back to a usable handful when the platform knows nothing', () => {
+    const zones = offeredZones([], 'Europe/Paris');
+    expect(zones.length).toBeGreaterThan(0);
+    expect(zones).toContain('Europe/Paris');
+  });
+
+  it('still offers the detected zone when falling back', () => {
+    expect(offeredZones([], 'Pacific/Auckland')).toContain('Pacific/Auckland');
+  });
+
+  it('never offers a zone twice', () => {
+    const zones = offeredZones(['Europe/Paris', 'Europe/London'], 'Europe/Paris');
+    expect(new Set(zones).size).toBe(zones.length);
+  });
+});
+
 describe('timeZoneNames', () => {
-  it('offers zones, including the one the browser reports', () => {
+  it('offers the zone this browser reports, wherever it is running', () => {
+    // The assertion that failed on a runner set to UTC while passing on a
+    // laptop in Europe/Paris. It stays here, on the real environment, as the
+    // check that the pure rule above is actually wired to it.
     const zones = timeZoneNames();
     expect(zones.length).toBeGreaterThan(0);
     expect(zones).toContain(Intl.DateTimeFormat().resolvedOptions().timeZone);
@@ -215,24 +252,29 @@ describe('timeZoneNames', () => {
 });
 
 describe('formatNextChange', () => {
-  const NOW = Date.UTC(2026, 6, 30, 10, 0) * 1000;
+  /* Built in local time on purpose. The function decides between "today" and
+     another day by the reader's own calendar, so fixtures pinned to UTC only
+     mean what they look like where the machine's offset is small: 10:00 and
+     14:00 UTC are one day in Paris and two in Auckland, which made this suite
+     depend on where it ran. Local constructors make "the same day" true
+     wherever the tests are executed. */
+  const local = (day: number, hour: number) => new Date(2026, 6, day, hour, 0).getTime() * 1000;
+  const NOW = local(30, 10);
 
   it('names only the time when the change is later today', () => {
-    const later = Date.UTC(2026, 6, 30, 14, 0) * 1000;
-    const rendered = formatNextChange(later, NOW, 'fr-FR', false);
+    const rendered = formatNextChange(local(30, 14), NOW, 'fr-FR', false);
     expect(rendered).toMatch(/^\d{2}:\d{2}$/);
   });
 
   it('names the weekday when it is another day', () => {
-    const tomorrow = Date.UTC(2026, 6, 31, 8, 0) * 1000;
-    const rendered = formatNextChange(tomorrow, NOW, 'fr-FR', false);
+    const rendered = formatNextChange(local(31, 8), NOW, 'fr-FR', false);
     expect(rendered).toMatch(/^\p{L}+ \d{2}:\d{2}$/u);
   });
 
   it('follows the interface locale rather than the environment', () => {
     // The same bug the live view had: a French screen printing "2:00 PM"
     // because the laptop happened to be American.
-    const later = Date.UTC(2026, 6, 30, 14, 0) * 1000;
+    const later = local(30, 14);
     expect(formatNextChange(later, NOW, 'fr-FR', false)).not.toMatch(/AM|PM/i);
     expect(formatNextChange(later, NOW, 'en-GB', true)).toMatch(/AM|PM/i);
   });

@@ -55,8 +55,6 @@
   }
 
   function declare() {
-    // Pre-filled with this browser's zone: an appliance is configured on
-    // site, so the two almost always agree — but the field stays editable.
     draft = emptyWindow(detected);
     feedback = null;
   }
@@ -171,8 +169,7 @@
     <div class="mt-4 divide-y divide-ink-100">
       {#each WEEKDAYS as day (day)}
         {@const dayProblems = problemsOf(day)}
-        <!-- One group per day: the two time fields of an interval belong
-             together, and a screen reader announces the day once rather
+        <!-- A group per day, so a screen reader announces it once rather
              than in every field label. -->
         <fieldset class="py-3">
           <legend class="text-sm font-medium text-ink-900">{t(`weekday.${day}` as const)}</legend>
@@ -184,8 +181,8 @@
               {#each draft.weekly[day] as interval, index (index)}
                 <li class="flex flex-wrap items-center gap-2">
                   <!-- The value is always 24-hour `HH:MM`; only the way the
-                       control paints it follows the reader's system, which
-                       is why the header's clock toggle does not reach it. -->
+                       control paints it follows the reader's system, which is
+                       why the header's clock toggle does not reach it. -->
                   <input
                     type="time"
                     bind:value={interval.from}

@@ -1,16 +1,10 @@
 /**
  * The service-hours editor's pure logic.
  *
- * The rules here mirror the ones the appliance enforces (`schedule.rs`).
- * Duplicating them is deliberate: the appliance stays the authority — it
- * refuses what it refuses, whatever the browser thinks — but an editor that
- * only learns of a mistake after a round trip cannot point at the row that
- * caused it while the operator is still looking at it.
- *
- * One divergence is intentional. The appliance answers with the *first*
- * problem it finds, because an API returns one error. The screen shows
- * *every* problem at once, because seven days are edited together and fixing
- * them one refusal at a time is the slow way through.
+ * The rules mirror the ones the appliance enforces (`schedule.rs`), which is
+ * deliberate: the appliance stays the authority, but an editor that only
+ * learns of a mistake after a round trip cannot point at the row that caused
+ * it. It also reports every problem at once, where the API returns the first.
  */
 
 import { WEEKDAYS, type Interval, type ServiceWindow, type Weekday } from './api';
@@ -34,19 +28,11 @@ export function minutesOf(time: string): number {
 
 /** What is wrong with one day's intervals. */
 export type Problem =
-  /** A time that is not `HH:MM` on a real clock. */
   | { day: Weekday; kind: 'time'; value: string }
-  /** An interval that ends before, or when, it starts. */
   | { day: Weekday; kind: 'order'; interval: Interval }
-  /** Two intervals of one day that overlap. */
   | { day: Weekday; kind: 'overlap'; first: Interval; second: Interval };
 
-/**
- * Every problem in a week, in the order a reader scans the screen.
- *
- * Days are walked in their displayed order and each day's own problems are
- * reported, so the list can be filtered per row without sorting it again.
- */
+/** Every problem in a week, in displayed day order so rows can filter it. */
 export function validateWeek(weekly: Record<Weekday, Interval[]>): Problem[] {
   const problems: Problem[] = [];
 
@@ -90,10 +76,8 @@ export function validateWeek(weekly: Record<Weekday, Interval[]>): Problem[] {
 /**
  * Whether a schedule never opens.
  *
- * The appliance accepts this — a site may genuinely be shut — so it is a
- * warning rather than a refusal. It is worth saying out loud all the same:
- * an appliance that never opens never estimates, and a week left empty by
- * accident looks exactly like one emptied on purpose.
+ * The appliance accepts this, so the screen warns rather than refuses: a
+ * week left empty by accident looks exactly like one emptied on purpose.
  */
 export function isNeverOpen(weekly: Record<Weekday, Interval[]>): boolean {
   return WEEKDAYS.every((day) => (weekly[day] ?? []).length === 0);
@@ -115,9 +99,8 @@ export function emptyWeek(): Record<Weekday, Interval[]> {
 /**
  * The same intervals on every day of the week.
  *
- * Most sites keep one set of hours from Monday to Friday, so typing them
- * seven times is the tedium this removes. Copies are made per day: sharing
- * one array would make editing Tuesday change Monday too.
+ * Each day gets its own copies: sharing one array would make editing Tuesday
+ * change Monday too.
  */
 export function copyDayToAll(
   weekly: Record<Weekday, Interval[]>,
@@ -151,9 +134,8 @@ function asTime(minutes: number): string {
 /**
  * The time zone this browser believes it is in.
  *
- * Used to pre-fill the field, never to decide it: an appliance is almost
- * always configured on site, so the browser's zone is the site's zone, but
- * the operator can always say otherwise.
+ * Pre-fills the field, never decides it: an appliance is configured on site,
+ * so the two agree in almost every case, and the operator can say otherwise.
  */
 export function browserTimeZone(): string {
   try {
@@ -163,29 +145,41 @@ export function browserTimeZone(): string {
   }
 }
 
+/** Zones to offer when the browser cannot enumerate them itself. */
+const FALLBACK_ZONES = [
+  'Europe/Paris',
+  'Europe/London',
+  'Europe/Brussels',
+  'Europe/Madrid',
+] as const;
+
 /**
- * Every IANA zone this browser knows, or a usable handful if it cannot say.
+ * The zones to offer, given what the platform knows and where it thinks it is.
  *
- * The fallback matters less for its contents than for existing: a browser
- * without `supportedValuesOf` must still be able to name a zone, and the
- * appliance refuses anything it does not recognise anyway.
+ * The detected zone is always among them, because the field is pre-filled
+ * with it and a `<select>` whose value matches no option renders empty.
+ * `Intl.supportedValuesOf` returns *canonical* identifiers only, so a machine
+ * set to `UTC` — or to an alias such as `Asia/Calcutta` — detects a zone its
+ * own browser does not list.
  */
+export function offeredZones(supported: readonly string[], detected: string): string[] {
+  const zones = supported.length > 0 ? [...supported] : [...FALLBACK_ZONES];
+  return zones.includes(detected) ? zones : [detected, ...zones];
+}
+
+/** Every IANA zone this browser knows, with the one it reports among them. */
 export function timeZoneNames(): string[] {
   const supported = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] })
     .supportedValuesOf;
+  let known: string[] = [];
   if (typeof supported === 'function') {
     try {
-      const zones = supported('timeZone');
-      if (zones.length > 0) {
-        return zones;
-      }
+      known = supported('timeZone');
     } catch {
-      // Falls through to the short list below.
+      // An older platform: the fallback list carries the field instead.
     }
   }
-  const detected = browserTimeZone();
-  const fallback = ['UTC', 'Europe/Paris', 'Europe/London', 'Europe/Brussels', 'Europe/Madrid'];
-  return fallback.includes(detected) ? fallback : [detected, ...fallback];
+  return offeredZones(known, browserTimeZone());
 }
 
 /** A schedule with nothing declared, ready to be filled in. */

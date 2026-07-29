@@ -608,6 +608,16 @@ mod tests {
     }
 
     #[test]
+    fn utc_is_a_zone_like_any_other() {
+        // The dashboard pre-fills the zone from the browser, and a machine
+        // set to UTC reports exactly that. Refusing it here would turn an
+        // ordinary configuration into a dead end on those machines.
+        let mut window = lunch_only();
+        window.timezone = "UTC".into();
+        window.validate().unwrap();
+    }
+
+    #[test]
     fn a_complaint_names_the_day_it_is_about() {
         // Seven days are edited on one screen; "these two overlap" without a
         // day leaves the reader to find which row it means.
