@@ -3,8 +3,9 @@
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
   import { fetchHistory, subscribeLive, type LiveSnapshot, type MinuteSummary } from '$lib/api';
-  import { t } from '$lib/i18n/i18n.svelte';
+  import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';
   import { DENSITY_SWATCH, nodeLagSeconds } from '$lib/live';
+  import { formatNextChange } from '$lib/schedule';
   import HistoryFigure from '$components/HistoryFigure.svelte';
 
   /** How far back the short history reaches. */
@@ -50,12 +51,33 @@
   const stream = $derived(snapshot?.stream ?? null);
 
   const nodes = $derived(Object.entries(stream?.nodes ?? {}));
+
+  /* Closed is reported, never inferred from a missing estimate: outside
+     service hours there is no estimate *and* nothing wrong, which is not
+     what "not estimating" means anywhere else on this screen. */
+  const closed = $derived(snapshot !== null && !snapshot.service.open);
+
+  /** When the service next changes, phrased, or nothing if it never does. */
+  const nextChange = $derived.by(() => {
+    const at = snapshot?.service.changes_at_us;
+    if (at === undefined || !snapshot) {
+      return null;
+    }
+    return formatNextChange(at, snapshot.now_us, formattingLocale(), hour12());
+  });
 </script>
 
 <div class="space-y-4" class:opacity-60={dropped}>
   <!-- The hero: one number, the thing the product exists to say. -->
   <section class="rounded-lg bg-white p-5">
-    {#if estimate}
+    {#if closed}
+      <p class="text-xs font-medium uppercase tracking-wide text-ink-500">{t('live.wait')}</p>
+      <p class="mt-1 text-4xl font-semibold text-ink-900">{t('live.closed')}</p>
+      {#if nextChange}
+        <p class="mt-2 text-sm text-ink-900">{t('live.opensAt', { when: nextChange })}</p>
+      {/if}
+      <p class="mt-2 text-sm text-ink-500">{t('live.closedLead')}</p>
+    {:else if estimate}
       <p class="text-xs font-medium uppercase tracking-wide text-ink-500">{t('live.wait')}</p>
       <p class="mt-1 flex items-baseline gap-2">
         <span class="text-5xl font-semibold text-ink-900">{estimate.wait_minutes.toFixed(1)}</span>
@@ -81,6 +103,10 @@
           <TriangleAlert size={16} class="mt-0.5 shrink-0" aria-hidden="true" />
           {t('live.unreliable')}
         </p>
+      {/if}
+
+      {#if nextChange}
+        <p class="mt-2 text-xs text-ink-500">{t('live.closesAt', { when: nextChange })}</p>
       {/if}
     {:else}
       <p class="text-sm text-ink-500">

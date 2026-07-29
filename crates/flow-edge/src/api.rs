@@ -28,7 +28,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
@@ -397,7 +397,10 @@ pub fn router(state: EdgeState) -> Router {
         .route("/api/events", get(events))
         .route("/api/live", get(live))
         .route("/api/estimates", get(estimates))
-        .route("/api/service-window", put(set_service_window))
+        .route(
+            "/api/service-window",
+            get(service_window).put(set_service_window),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_session,
@@ -570,6 +573,15 @@ async fn estimates(
         .clamp(1, MAX_HISTORY_MINUTES);
     let since = now_us().saturating_sub(minutes * MINUTE_US);
     Json(state.minutes(since, usize::try_from(minutes).unwrap_or(usize::MAX)))
+}
+
+/// Returns the stored service schedule, or `null` when none is declared.
+///
+/// The schedule is read here rather than from `/api/status` because only the
+/// screen that edits it needs it: every other caller wants the resulting
+/// state — open or closed — which the status already carries.
+async fn service_window(State(state): State<EdgeState>) -> Json<Option<ServiceWindow>> {
+    Json(state.lock().config.service.clone())
 }
 
 /// Replaces the service schedule, or clears it.
@@ -1388,6 +1400,56 @@ mod tests {
         let path = state.lock().config_path.clone();
         let stored = ApplianceConfig::load(&path).unwrap();
         assert_eq!(stored.service.unwrap().timezone, "Europe/Paris");
+    }
+
+    #[tokio::test]
+    async fn the_stored_schedule_can_be_read_back_for_editing() {
+        let (state, _dir) = writable();
+        let cookie = session_of(&state).await;
+
+        // Nothing declared yet: the screen that edits hours has to tell an
+        // appliance with no schedule from one it failed to read.
+        let (status, _, body) = send(
+            &state,
+            "GET",
+            "/api/service-window",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.is_null());
+
+        send(
+            &state,
+            "PUT",
+            "/api/service-window",
+            Some(&cookie),
+            Some(always_open().to_string()),
+            10,
+        )
+        .await;
+
+        let (status, _, body) = send(
+            &state,
+            "GET",
+            "/api/service-window",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["timezone"], "Europe/Paris");
+        assert_eq!(body["weekly"]["monday"][0]["from"], "00:00");
+    }
+
+    #[tokio::test]
+    async fn the_schedule_cannot_be_read_without_a_session() {
+        let (state, _dir) = writable();
+        let (status, _, _) = send(&state, "GET", "/api/service-window", None, None, 10).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
