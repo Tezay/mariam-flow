@@ -28,6 +28,7 @@ use flow_ingest::MacAddr;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ConfigError, StoreError};
+use crate::schedule::ServiceWindow;
 use crate::store::{read_to_string, write_atomic};
 
 /// Wi-Fi channel the sensor access point runs on unless configured
@@ -58,6 +59,12 @@ pub struct ApplianceConfig {
     /// calibrated.
     #[serde(default)]
     pub site: Option<SiteTuning>,
+    /// When the site serves, or `None` while no schedule is set.
+    ///
+    /// Absent means always open: an appliance whose hours have not been
+    /// declared must keep estimating rather than fall silent.
+    #[serde(default)]
+    pub service: Option<ServiceWindow>,
     /// Set once the installer explicitly closes the guided installation.
     ///
     /// Kept here rather than derived, so that a completed installation
@@ -294,6 +301,7 @@ impl ApplianceConfig {
             },
             nodes: Vec::new(),
             site: None,
+            service: None,
             onboarding_completed: false,
         }
     }
@@ -339,6 +347,9 @@ impl ApplianceConfig {
         self.validate_nodes()?;
         if let Some(site) = &self.site {
             site.validate()?;
+        }
+        if let Some(service) = &self.service {
+            service.validate().map_err(ConfigError::Service)?;
         }
         Ok(())
     }

@@ -30,3 +30,4 @@ Conventions:
 | [0012](0012-sqlite-appliance-journal.md) | SQLite appliance journal with bounded retention | accepted |
 | [0013](0013-svelte-dashboard-embedded-in-the-daemon.md) | Svelte single-page dashboard embedded in the daemon | accepted |
 | [0014](0014-minute-resolution-estimate-history.md) | Minute-resolution estimate history | accepted |
+| [0015](0015-declared-service-hours.md) | Declared service hours | accepted |

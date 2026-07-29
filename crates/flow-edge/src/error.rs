@@ -96,6 +96,9 @@ pub enum ConfigError {
     /// the single source of truth for what a valid tuning is).
     #[error("site tuning: {0}")]
     SiteTuning(String),
+    /// The service schedule is unusable.
+    #[error("service schedule: {0}")]
+    Service(#[from] ScheduleError),
     /// A window or hop duration is zero.
     #[error("{field} must be greater than zero")]
     NotPositive {
@@ -190,6 +193,57 @@ pub enum PipelineError {
     /// The model and the configuration disagree.
     #[error("pipeline: {0}")]
     Pipeline(String),
+}
+
+/// A service schedule the appliance refuses to run with.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ScheduleError {
+    /// The time zone is not one the system knows.
+    #[error("unknown time zone {0:?}")]
+    TimeZone(String),
+    /// A time of day is not `HH:MM` within a real day.
+    #[error("{0:?} is not a time of day")]
+    Time(String),
+    /// A closure date is not `YYYY-MM-DD`.
+    #[error("{0:?} is not a date")]
+    Date(String),
+    /// An interval ends before, or when, it starts.
+    ///
+    /// The day is named because a week holds seven of them, and the person
+    /// reading this is looking at a form with seven rows.
+    #[error("{day}: service from {from} to {to} ends before it starts")]
+    IntervalOrder {
+        /// Day of the week the offending interval belongs to.
+        day: &'static str,
+        /// Start of the offending interval.
+        from: String,
+        /// End of the offending interval.
+        to: String,
+    },
+    /// Two intervals of the same day overlap.
+    ///
+    /// Two overlapping services are a mistake rather than a schedule: the
+    /// operator meant one longer interval.
+    #[error("{day}: service {first} overlaps {second}")]
+    Overlap {
+        /// Day of the week the offending intervals belong to.
+        day: &'static str,
+        /// The earlier interval.
+        first: String,
+        /// The one that starts before it ends.
+        second: String,
+    },
+    /// A closure ends before it starts.
+    #[error("closure from {from} to {to} ends before it starts")]
+    ClosureOrder {
+        /// First day of the offending closure.
+        from: String,
+        /// Last day of the offending closure.
+        to: String,
+    },
+    /// A timestamp outside the range the calendar can express.
+    #[error("{0} is not a representable instant")]
+    Instant(u64),
 }
 
 /// A refused appliance lifecycle or runtime transition.

@@ -37,6 +37,13 @@ use crate::error::PipelineError;
 use crate::history::MinuteAggregator;
 use crate::journal::{Event, EventKind};
 
+/// How often the service schedule is re-evaluated, in µs.
+///
+/// Converting an instant to a local time is cheap but not free, and at a
+/// hundred frames a second it would be done a hundred times to answer a
+/// question that changes twice a day. Between checks the last answer holds.
+const SERVICE_CHECK_US: u64 = 1_000_000;
+
 /// Window over which a per-node frame rate is measured, in µs.
 ///
 /// Long enough that a momentary gap does not read as a dead node, short
@@ -224,6 +231,12 @@ fn run(state: &EdgeState, mut source: FrameSource, mut pipeline: LivePipeline) {
     let mut frames: u64 = 0;
     let mut estimates: u64 = 0;
 
+    // Outside service hours the appliance reads its stream but does not
+    // estimate: Little's Law assumes a settled queue, so a wait computed at
+    // three in the morning would be a number with nothing behind it.
+    let mut open = true;
+    let mut next_service_check: u64 = 0;
+
     while let Some(result) = source.next_frame() {
         let frame = match result {
             Ok(frame) => frame,
@@ -240,6 +253,29 @@ fn run(state: &EdgeState, mut source: FrameSource, mut pipeline: LivePipeline) {
 
         frames += 1;
         observe(&mut counters, &frame);
+
+        let now = crate::now_us();
+        if now >= next_service_check {
+            let was_open = open;
+            open = state.service_state().open;
+            next_service_check = now + SERVICE_CHECK_US;
+            if was_open != open {
+                // The minute in progress belongs to the period that just
+                // ended; closing it here keeps the two from mixing.
+                if let Some(minute) = aggregator.flush() {
+                    state.write_minute(&minute);
+                }
+                state.record(Event::new(if open {
+                    EventKind::ServiceOpened
+                } else {
+                    EventKind::ServiceClosed
+                }));
+            }
+        }
+        if !open {
+            state.set_stream_health(health(&counters, frames, estimates));
+            continue;
+        }
 
         match pipeline.push(frame) {
             Ok(Some(estimate)) => {

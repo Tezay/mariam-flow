@@ -382,9 +382,10 @@ load and every save, and written atomically — a power cut during a write
 leaves the previous configuration intact, and an invalid value is rejected
 before it can reach the disk and lock the unit out of its next boot. It
 carries the appliance identity, the sensor access point, the uplink, the
-paired nodes and the per-site wait-estimation tuning; that tuning is a
-field-for-field mirror of the `site.json` the laboratory tools read, so a
-tuning produced in the lab moves into an appliance unchanged. Historical
+paired nodes, the service hours and the per-site wait-estimation tuning;
+that tuning is a field-for-field mirror of the `site.json` the laboratory
+tools read, so a tuning produced in the lab moves into an appliance
+unchanged. Historical
 series — node health, estimates, events — belong in SQLite instead, where
 queries and retention are the natural operations.
 
@@ -533,6 +534,41 @@ Unlike the public estimate, the administration view **shows** an unreliable
 value and marks it as such: an operator needs to see what the model produced
 *and* that it is not trustworthy. Masking belongs to the surface that
 publishes to end users, which already does it.
+
+### Service hours
+
+An appliance may declare when the site it watches is actually open
+(ADR 0015): an IANA time zone, seven lists of intervals, and closure date
+ranges for holidays. Outside those hours the pipeline stops estimating.
+
+This is not an optimisation. A closed hall has no queue, but the chain does
+not measure people — it measures the channel, and an empty room still yields
+a density class that smoothing carries for minutes. Those minutes would
+enter the history as ordinary rows and quietly corrupt every later reading
+of it. Opening hours are a fact the operator knows, so they are declared
+rather than inferred from a quiet signal, which is indistinguishable from a
+quiet Tuesday.
+
+Hours are resolved in the declared zone through the system time zone
+database, so a site that opens at 08:00 opens at 08:00 in both halves of the
+year. A schedule that is absent means always open: on a machine nobody
+monitors, an unconfigured field must not look like a broken sensor.
+
+At each transition the minute in progress is flushed — the last minute of
+service is not lost to the closure — and a `service-opened` or
+`service-closed` entry is journalled, so a flat afternoon can be told apart
+from an outage. The stream keeps being read while closed; only estimation
+stops, so sensor health stays observable to an installer working out of
+hours.
+
+`PUT /api/service-window` replaces the whole schedule, or clears it with
+`null`. It is never patched field by field: intervals of a day must not
+overlap and a closure must not end before it begins, so validating one field
+against a stored remainder would check half a thing. A refusal names the day
+at fault, since seven days are edited on one screen, and the stored schedule
+is left untouched. Service state travels with every status response and
+every live event, so the dashboard can say *closed* instead of showing an
+estimate that has stopped moving for reasons it cannot explain.
 
 ### Journal
 

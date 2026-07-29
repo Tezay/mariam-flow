@@ -154,7 +154,13 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
     let kit_id = config.identity.kit_id.clone();
     let config_for_pipeline = config.clone();
     let journal = Journal::open(&args.data_dir)?;
-    let state = EdgeState::new(config, credential, model_installed, journal);
+    let state = EdgeState::new(
+        config,
+        args.config.clone(),
+        credential,
+        model_installed,
+        journal,
+    );
 
     if reset_applied {
         state.record(Event::new(EventKind::CredentialReset));
