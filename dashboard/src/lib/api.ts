@@ -32,6 +32,40 @@ export type Uplink = {
   ssid?: string;
 };
 
+/** The days of the week, in the order they are stored and shown. */
+export const WEEKDAYS = [
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+  'sunday',
+] as const;
+
+export type Weekday = (typeof WEEKDAYS)[number];
+
+/** One serving interval, `HH:MM`, with `to` exclusive. */
+export type Interval = { from: string; to: string };
+
+/** A closed period, `YYYY-MM-DD`, both ends inclusive. */
+export type Closure = { from: string; to: string };
+
+/** When a site serves. */
+export type ServiceWindow = {
+  timezone: string;
+  weekly: Record<Weekday, Interval[]>;
+  closures: Closure[];
+};
+
+/**
+ * Whether the site is serving, and when that next changes.
+ *
+ * `changes_at_us` is absent when no change falls within the appliance's
+ * horizon — a schedule that never reopens, for instance.
+ */
+export type ServiceState = { open: boolean; changes_at_us?: number };
+
 export type Status = {
   kit_id: string;
   site_name: string | null;
@@ -39,6 +73,7 @@ export type Status = {
   readiness: Readiness;
   runtime: RuntimeMode;
   model_installed: boolean;
+  service: ServiceState;
   sensor_ap: { ssid: string; channel: number };
   uplink: Uplink;
   nodes: SensingNode[];
@@ -80,6 +115,7 @@ export type Estimate = {
 export type LiveSnapshot = {
   estimate?: Estimate;
   stream: StreamHealth;
+  service: ServiceState;
   now_us: number;
 };
 
@@ -169,6 +205,50 @@ export async function fetchHistory(minutes: number): Promise<MinuteSummary[]> {
     return (await response.json()) as MinuteSummary[];
   } catch {
     return [];
+  }
+}
+
+/** Reads the stored service schedule, or `null` when none is declared. */
+export async function fetchServiceWindow(): Promise<ServiceWindow | null | 'unreachable'> {
+  try {
+    const response = await fetch('/api/service-window');
+    if (!response.ok) {
+      return 'unreachable';
+    }
+    return (await response.json()) as ServiceWindow | null;
+  } catch {
+    return 'unreachable';
+  }
+}
+
+/**
+ * How a save ended.
+ *
+ * `refused` carries the appliance's own words. The schedule is validated in
+ * the browser before it is sent, so reaching this means the two disagree —
+ * and the appliance is the one that decides. Rewording its answer here would
+ * be inventing a second opinion.
+ */
+export type SaveOutcome = { kind: 'ok' } | { kind: 'refused'; message: string } | { kind: 'error' };
+
+/** Replaces the stored schedule, or clears it when given `null`. */
+export async function saveServiceWindow(window: ServiceWindow | null): Promise<SaveOutcome> {
+  try {
+    const response = await fetch('/api/service-window', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(window),
+    });
+    if (response.ok) {
+      return { kind: 'ok' };
+    }
+    if (response.status === 400) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      return { kind: 'refused', message: body?.error ?? '' };
+    }
+    return { kind: 'error' };
+  } catch {
+    return { kind: 'error' };
   }
 }
 

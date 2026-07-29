@@ -566,9 +566,26 @@ hours.
 overlap and a closure must not end before it begins, so validating one field
 against a stored remainder would check half a thing. A refusal names the day
 at fault, since seven days are edited on one screen, and the stored schedule
-is left untouched. Service state travels with every status response and
-every live event, so the dashboard can say *closed* instead of showing an
-estimate that has stopped moving for reasons it cannot explain.
+is left untouched. `GET` on the same path returns the stored schedule for
+the screen that edits it; every other caller wants the resulting state,
+which the status already carries.
+
+Service state travels with every status response and every live event. The
+live view reports *closed* by replacing the waiting time rather than dimming
+it: a duration shown for a hall that is shut is the falsehood the schedule
+exists to prevent, and a greyed figure is still a figure someone reads.
+Closed is taken from the reported state and never inferred from a missing
+estimate — outside service hours there is no estimate *and* nothing wrong,
+which is not what a missing estimate means anywhere else on that screen.
+
+The settings screen edits the week as seven rows of intervals, with one
+action that copies a day onto all of them, since most sites keep the same
+hours from Monday to Friday. It validates against the same rules as the
+appliance before sending anything. The duplication is deliberate: the
+appliance remains the authority, but an editor that only learns of a mistake
+after a round trip cannot point at the row that caused it while the operator
+is still looking at it. The two differ on purpose in one respect — the API
+answers with the first problem it finds, the screen shows every one at once.
 
 ### Journal
 
