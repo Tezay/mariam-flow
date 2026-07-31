@@ -53,6 +53,7 @@ mod secret;
 mod session;
 mod state;
 mod store;
+mod system;
 mod throttle;
 
 pub use api::{EdgeState, router};

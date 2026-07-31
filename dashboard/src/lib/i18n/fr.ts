@@ -105,11 +105,11 @@ export const fr: Messages = {
   'ask.joinable': 'Le boîtier peut rejoindre ce réseau par lui-même.',
   'ask.needsAdmin':
     'Le boîtier ne peut pas rejoindre ce réseau sans aide. Transmettez la demande ci-dessous au service réseau du site ; en attendant, il peut utiliser une prise filaire ou fonctionner hors ligne.',
+  'ask.recorded': 'Réponse enregistrée',
   'ask.handout': 'Ouvrir la demande pour le service réseau',
 
   'handout.title': 'Demande pour le service réseau du site',
   'handout.forWhom': 'À transmettre au service réseau du site',
-  'ask.recorded': 'Réponse enregistrée',
   'handout.lead': 'Tout ce dont le service réseau a besoin pour traiter la demande.',
   'handout.print': 'Imprimer',
   'handout.download': 'Télécharger en Markdown',
@@ -137,6 +137,16 @@ export const fr: Messages = {
   'handout.privacy':
     "Seules des valeurs agrégées quittent le site — temps d'attente, niveau de densité, confiance, horodatage. Aucune mesure radio brute ne sort du boîtier.",
 
+  'system.model': 'Carte',
+  'system.os': "Système d'exploitation",
+  'system.kernel': 'Noyau',
+  'system.uptime': 'En service depuis',
+  'system.load': 'Charge',
+  'system.memory': 'Mémoire',
+  'system.temperature': 'Température',
+  'system.unknown': 'Non rapporté',
+  'system.unknownLead': "Cette machine ne le rapporte pas. Attendu en dehors d'un Raspberry Pi.",
+  'system.memoryValue': '{available} Mo libres sur {total} Mo',
   'settings.site': 'Site',
   'settings.nodes': 'Capteurs',
   'settings.network': 'Réseau',

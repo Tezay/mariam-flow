@@ -107,11 +107,11 @@ export const en = {
   'ask.joinable': 'The appliance can join this network on its own.',
   'ask.needsAdmin':
     'The appliance cannot join this network unaided. Hand the request below to the site network team; meanwhile it can use a wired port, or run offline.',
+  'ask.recorded': 'Answer recorded',
   'ask.handout': 'Open the request for the network team',
 
   'handout.title': 'Request for the site network team',
   'handout.forWhom': 'Hand this to the site network team',
-  'ask.recorded': 'Answer recorded',
   'handout.lead': 'Everything the network team needs in order to act on this appliance.',
   'handout.print': 'Print',
   'handout.download': 'Download as Markdown',
@@ -138,6 +138,16 @@ export const en = {
   'handout.privacy':
     'Only aggregated values ever leave the site — waiting time, density level, confidence, timestamp. No raw radio measurement leaves the appliance.',
 
+  'system.model': 'Board',
+  'system.os': 'Operating system',
+  'system.kernel': 'Kernel',
+  'system.uptime': 'Up for',
+  'system.load': 'Load',
+  'system.memory': 'Memory',
+  'system.temperature': 'Temperature',
+  'system.unknown': 'Not reported',
+  'system.unknownLead': 'This machine does not report it. Expected off a Raspberry Pi.',
+  'system.memoryValue': '{available} MB free of {total} MB',
   'settings.site': 'Site',
   'settings.nodes': 'Sensors',
   'settings.network': 'Network',

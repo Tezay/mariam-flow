@@ -43,6 +43,7 @@ use crate::pipeline::StreamHealth;
 use crate::schedule::{ServiceState, ServiceWindow};
 use crate::session::{ABSOLUTE_LIFETIME_US, SessionStore};
 use crate::state::{Phase, Readiness, Runtime, RuntimeMode, Stage};
+use crate::system::SystemReport;
 use crate::throttle::Throttle;
 use flow_ingest::SenderObservation;
 
@@ -474,6 +475,7 @@ pub fn router(state: EdgeState) -> Router {
         .route("/api/live", get(live))
         .route("/api/estimates", get(estimates))
         .route("/api/discovery", get(discovery))
+        .route("/api/system", get(system))
         .route("/api/site", put(set_site))
         .route("/api/nodes", put(set_nodes))
         .route("/api/uplink", put(set_uplink))
@@ -655,6 +657,14 @@ async fn estimates(
         .clamp(1, MAX_HISTORY_MINUTES);
     let since = now_us().saturating_sub(minutes * MINUTE_US);
     Json(state.minutes(since, usize::try_from(minutes).unwrap_or(usize::MAX)))
+}
+
+/// Reports what the machine says about itself.
+///
+/// Read on each request rather than cached: uptime, load and temperature are
+/// the point, and a stale temperature is worse than none.
+async fn system() -> Json<SystemReport> {
+    Json(SystemReport::read())
 }
 
 /// Reports what is streaming that no node mapping claims.
