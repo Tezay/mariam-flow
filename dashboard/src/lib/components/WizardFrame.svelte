@@ -60,6 +60,7 @@
             <PairingStep onupdated={accept} />
           {:else if stage === 'network'}
             <NetworkStep
+              {status}
               initialMode={status.uplink.mode}
               initialSsid={status.uplink.ssid ?? null}
               onupdated={accept}

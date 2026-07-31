@@ -33,3 +33,4 @@ Conventions:
 | [0015](0015-declared-service-hours.md) | Declared service hours | accepted |
 | [0016](0016-node-pairing-from-the-observed-stream.md) | Node pairing from the observed stream | accepted |
 | [0017](0017-intake-independent-of-inference.md) | Intake independent of inference | accepted |
+| [0018](0018-network-interview-and-administrator-request.md) | Network interview and administrator request | accepted |

@@ -59,5 +59,9 @@
     onupdated={(next) => (screen = { view: 'ready', status: next })}
   />
 {:else}
-  <TabShell status={screen.status} onsignout={() => void signOut()} />
+  <TabShell
+    status={screen.status}
+    onsignout={() => void signOut()}
+    onupdated={(next) => (screen = { view: 'ready', status: next })}
+  />
 {/if}

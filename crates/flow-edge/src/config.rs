@@ -100,6 +100,60 @@ pub struct NetworkConfig {
     /// question has not been answered.
     #[serde(default)]
     pub uplink: Option<Uplink>,
+    /// What the site's network was found to ask of a device joining it.
+    ///
+    /// Kept apart from `uplink`, which says what the appliance will do: the
+    /// survey stays true when the appliance is left offline because the site
+    /// demands something it cannot yet offer, and it is what the request sent
+    /// to the site's network administrator is built from.
+    #[serde(default)]
+    pub survey: Option<NetworkSurvey>,
+}
+
+/// What a device is asked for when it joins the site's network.
+///
+/// Phrased as the installer experiences it rather than by protocol, because
+/// that is the question they can answer: what a phone asks when it joins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SiteAuthentication {
+    /// Nothing at all.
+    Nothing,
+    /// One password, shared by everyone.
+    SharedPassword,
+    /// A personal account — a name and a password (802.1X with EAP).
+    Account,
+    /// A certificate installed on the device beforehand (EAP-TLS).
+    Certificate,
+    /// A web page to sign in on after joining (a captive portal).
+    SignInPage,
+    /// The installer could not say.
+    Unknown,
+}
+
+impl SiteAuthentication {
+    /// Whether an appliance can join a network that asks this, today.
+    ///
+    /// The three it cannot need the site's network administrator to act
+    /// (ADR 0018), which is why the survey records the answer even when the
+    /// appliance ends up offline.
+    #[must_use]
+    pub fn joinable(self) -> bool {
+        matches!(self, Self::Nothing | Self::SharedPassword)
+    }
+}
+
+/// What the installer found out about the site's network.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkSurvey {
+    /// What joining the network asks for.
+    pub authentication: SiteAuthentication,
+    /// Devices must be declared before they are allowed on.
+    #[serde(default)]
+    pub registration_required: bool,
+    /// The site hands out a fixed address rather than using DHCP.
+    #[serde(default)]
+    pub fixed_address: bool,
 }
 
 /// The access point hosted for the sensing nodes.
@@ -301,6 +355,7 @@ impl ApplianceConfig {
                     channel: DEFAULT_SENSOR_CHANNEL,
                 },
                 uplink: None,
+                survey: None,
             },
             nodes: Vec::new(),
             site: None,

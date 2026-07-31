@@ -511,6 +511,42 @@ itself, which also lets it show steps satisfied out of order. Each screen is
 one question, with a reserved frame beside it on a wide screen and above it on
 a phone; the frame holds its space whether or not it has artwork in it.
 
+The settings screen is a list of sections resolving to one detail — Site,
+Sensors, Network, Service hours, System. On a phone the list is the screen
+until a section is chosen; on a wide screen it is a rail beside the detail.
+One component, two shapes, so a section added later lands somewhere rather
+than lengthening a single page.
+
+### Reaching the site network
+
+Sites differ enormously, and the two people involved cannot do each other's
+job: the installer is present but does not know what the network requires, the
+network administrator knows but is not there. So the appliance **interviews the
+installer** about what joining the network does — nothing, a shared password, a
+personal account, a certificate, a sign-in page, or "I do not know" — and
+derives the rest (ADR 0018).
+
+What that survey found is stored **apart from the uplink**: one says what the
+site demands, the other what the appliance will do, and a site requiring 802.1X
+leaves the appliance offline precisely because of what was found. Answers record
+themselves as they are given, being statements about the site rather than a
+value being composed; the one Save button on the screen belongs to the
+credentials.
+
+When the site has to act, the dashboard derives a **request for its network
+administrator** — printable, and downloadable as Markdown to paste into a
+ticket. It is produced only when action is actually required: an ordinary
+password-protected network needs nothing, and a request issued anyway would
+train people to ignore the ones that matter. Rendering belongs to the dashboard
+rather than the appliance, which has neither the memory for a document renderer
+nor any reason to hold two versions of the same text.
+
+Enterprise authentication is surveyed but not yet implemented: the request asks
+for the derogation the site handout already described. Credentials no code can
+act on are not collected.
+
+### Pairing on site
+
 The pairing screen polls what the intake has heard and offers the appliance's
 proposal for confirmation. Fewer receivers than the design expects is said,
 never enforced: a second receiver may be installed later, and refusing to

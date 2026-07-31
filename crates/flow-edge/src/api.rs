@@ -33,7 +33,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
 
-use crate::config::{ApplianceConfig, PairedNode, Uplink};
+use crate::config::{ApplianceConfig, NetworkSurvey, PairedNode, Uplink};
 use crate::credential::AdminCredential;
 use crate::discovery::Discovery;
 use crate::history::{MINUTE_US, MinuteSummary};
@@ -429,6 +429,7 @@ impl EdgeState {
                 channel: config.network.sensor_ap.channel,
             },
             uplink: UplinkView::of(config.network.uplink.as_ref()),
+            survey: config.network.survey,
             nodes: config
                 .nodes
                 .iter()
@@ -476,6 +477,7 @@ pub fn router(state: EdgeState) -> Router {
         .route("/api/site", put(set_site))
         .route("/api/nodes", put(set_nodes))
         .route("/api/uplink", put(set_uplink))
+        .route("/api/network-survey", put(set_network_survey))
         .route("/api/installation", put(set_installation))
         .route(
             "/api/service-window",
@@ -742,6 +744,34 @@ async fn set_uplink(
     }
 }
 
+/// Records what the site's network was found to ask for.
+///
+/// Separate from the uplink because it is a statement about the site rather
+/// than about the appliance: it stays true when the appliance is left offline
+/// precisely because the site asks for something it cannot yet offer, and the
+/// request sent to the network administrator is built from it.
+async fn set_network_survey(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(survey): Json<Option<NetworkSurvey>>,
+) -> Response {
+    let described = survey.map_or_else(
+        || "network survey cleared".to_owned(),
+        |survey| format!("network survey recorded ({:?})", survey.authentication),
+    );
+    match state.write_config(|config| config.network.survey = survey) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(described),
+            );
+            (StatusCode::OK, Json(state.status())).into_response()
+        }
+        Err(rejection) => refusal(&rejection),
+    }
+}
+
 #[derive(Deserialize)]
 struct InstallationBody {
     completed: bool,
@@ -965,6 +995,8 @@ struct StatusResponse {
     service: ServiceState,
     sensor_ap: SensorApView,
     uplink: UplinkView,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    survey: Option<NetworkSurvey>,
     nodes: Vec<NodeView>,
 }
 
@@ -1686,6 +1718,69 @@ mod tests {
             !details.contains(UPLINK_PASSPHRASE),
             "the journal carries the passphrase"
         );
+    }
+
+    #[tokio::test]
+    async fn the_survey_outlives_the_decision_it_led_to() {
+        // A site that demands 802.1X leaves the appliance offline. The reason
+        // has to survive that, or the request sent to its network
+        // administrator cannot be rebuilt later.
+        let (state, _dir) = writable_with(factory(), false);
+        let cookie = session_of(&state).await;
+
+        let (status, body) = put(
+            &state,
+            "/api/network-survey",
+            &cookie,
+            json!({ "authentication": "account", "registration_required": true }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["survey"]["authentication"], "account");
+
+        let (status, body) =
+            put(&state, "/api/uplink", &cookie, json!({ "mode": "offline" })).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["uplink"]["mode"], "offline");
+        assert_eq!(body["survey"]["authentication"], "account");
+
+        let stored = stored(&state).network.survey.unwrap();
+        assert!(stored.registration_required);
+        assert!(!stored.authentication.joinable());
+    }
+
+    #[tokio::test]
+    async fn a_survey_of_an_ordinary_network_reports_it_as_joinable() {
+        let (state, _dir) = writable_with(factory(), false);
+        let cookie = session_of(&state).await;
+
+        put(
+            &state,
+            "/api/network-survey",
+            &cookie,
+            json!({ "authentication": "shared-password" }),
+        )
+        .await;
+
+        let survey = stored(&state).network.survey.unwrap();
+        assert!(survey.authentication.joinable());
+        assert!(!survey.registration_required);
+        assert!(!survey.fixed_address);
+    }
+
+    #[tokio::test]
+    async fn the_survey_cannot_be_written_without_a_session() {
+        let (state, _dir) = writable();
+        let (status, _, _) = send(
+            &state,
+            "PUT",
+            "/api/network-survey",
+            None,
+            Some(json!({ "authentication": "nothing" }).to_string()),
+            10,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
