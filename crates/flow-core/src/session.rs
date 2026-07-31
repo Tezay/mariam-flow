@@ -61,7 +61,7 @@ pub struct NodePlacement {
 /// restaurant queue it may mean "queue past the door". For sessions labeled
 /// from reference-sensor counts, these descriptions record the count
 /// thresholds used to derive each class (e.g. `"12-25 people in zone"`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassMapping {
     /// Meaning of [`DensityClass::Empty`] at this site.
     pub empty: String,

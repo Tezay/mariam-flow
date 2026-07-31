@@ -157,6 +157,7 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
     let state = EdgeState::new(
         config,
         args.config.clone(),
+        args.data_dir.clone(),
         credential,
         model_installed,
         journal,

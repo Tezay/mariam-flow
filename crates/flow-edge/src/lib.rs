@@ -41,6 +41,7 @@
 
 mod api;
 mod assets;
+mod calibration;
 mod config;
 mod credential;
 mod discovery;

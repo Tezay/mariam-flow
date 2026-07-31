@@ -69,22 +69,34 @@ pub struct Readiness {
     /// The uplink question has been answered — including a deliberate
     /// choice to stay offline.
     pub uplink_decided: bool,
+    /// A calibration session has been recorded at this site.
+    ///
+    /// This, and not the model, is what finishes an installation: recording
+    /// produces the data, and the model comes back from training days later.
+    /// Holding the wizard open until then would lock the site out of every
+    /// other screen in the meantime.
+    pub site_captured: bool,
     /// A density model is installed and the site is tuned, so live
     /// inference can actually run.
+    ///
+    /// Reported but not required to finish installing — the live view says
+    /// what is missing, and the model is imported from the settings.
     pub model_ready: bool,
 }
 
 impl Readiness {
     /// Reads the facts off the stored configuration.
     ///
-    /// `model_installed` is a filesystem fact (is there an active model
-    /// artifact?), which the configuration alone cannot answer.
+    /// `model_installed` and `site_captured` are filesystem facts — is there
+    /// an active model artifact, is there a sealed session — which the
+    /// configuration alone cannot answer.
     #[must_use]
-    pub fn evaluate(config: &ApplianceConfig, model_installed: bool) -> Self {
+    pub fn evaluate(config: &ApplianceConfig, model_installed: bool, site_captured: bool) -> Self {
         Self {
             site_named: config.identity.site_name.is_some(),
             nodes_paired: config.transmitter().is_some() && !config.rx_node_ids().is_empty(),
             uplink_decided: config.network.uplink.is_some(),
+            site_captured,
             model_ready: model_installed && config.site.is_some(),
         }
     }
@@ -98,7 +110,7 @@ impl Readiness {
             Stage::Nodes
         } else if !self.uplink_decided {
             Stage::Network
-        } else if !self.model_ready {
+        } else if !self.site_captured {
             Stage::Calibration
         } else {
             Stage::Complete
@@ -296,7 +308,7 @@ mod tests {
     #[test]
     fn a_factory_appliance_starts_at_the_first_step() {
         let config = ApplianceConfig::factory("KIT-0001", "ssid-0001", "passphrase");
-        let readiness = Readiness::evaluate(&config, false);
+        let readiness = Readiness::evaluate(&config, false, false);
         assert_eq!(readiness.stage(), Stage::Site);
         assert_eq!(
             Phase::of(readiness, config.onboarding_completed),
@@ -309,57 +321,79 @@ mod tests {
         let full = configured();
 
         let mut config = ApplianceConfig::factory("KIT-0001", "ssid-0001", "passphrase");
-        assert_eq!(Readiness::evaluate(&config, true).stage(), Stage::Site);
-
-        config.identity.site_name = full.identity.site_name.clone();
-        assert_eq!(Readiness::evaluate(&config, true).stage(), Stage::Nodes);
-
-        config.nodes = full.nodes.clone();
-        assert_eq!(Readiness::evaluate(&config, true).stage(), Stage::Network);
-
-        config.network.uplink = full.network.uplink.clone();
         assert_eq!(
-            Readiness::evaluate(&config, true).stage(),
-            Stage::Calibration,
-            "no site tuning yet"
+            Readiness::evaluate(&config, true, true).stage(),
+            Stage::Site
         );
 
+        config.identity.site_name = full.identity.site_name.clone();
+        assert_eq!(
+            Readiness::evaluate(&config, true, true).stage(),
+            Stage::Nodes
+        );
+
+        config.nodes = full.nodes.clone();
+        assert_eq!(
+            Readiness::evaluate(&config, true, true).stage(),
+            Stage::Network
+        );
+
+        config.network.uplink = full.network.uplink.clone();
         config.site = full.site;
-        assert_eq!(Readiness::evaluate(&config, true).stage(), Stage::Complete);
+        assert_eq!(
+            Readiness::evaluate(&config, true, false).stage(),
+            Stage::Calibration,
+            "nothing captured at this site yet"
+        );
+
+        // Recording is what finishes an installation, not the model: the
+        // model comes back from training days later, and holding the wizard
+        // open until then would lock the site out of every other screen.
+        assert_eq!(
+            Readiness::evaluate(&config, false, true).stage(),
+            Stage::Complete,
+            "captured, model still to come"
+        );
     }
 
     #[test]
     fn staying_offline_counts_as_answering_the_network_question() {
         let mut config = configured();
         config.network.uplink = None;
-        assert_eq!(Readiness::evaluate(&config, true).stage(), Stage::Network);
+        assert_eq!(
+            Readiness::evaluate(&config, true, true).stage(),
+            Stage::Network
+        );
 
         config.network.uplink = Some(Uplink::Offline);
-        assert!(Readiness::evaluate(&config, true).is_complete());
+        assert!(Readiness::evaluate(&config, true, true).is_complete());
     }
 
     #[test]
     fn a_tuned_site_without_a_model_artifact_is_not_ready() {
         let config = configured();
         assert_eq!(
-            Readiness::evaluate(&config, false).stage(),
+            Readiness::evaluate(&config, false, false).stage(),
             Stage::Calibration
         );
-        assert!(Readiness::evaluate(&config, true).is_complete());
+        assert!(Readiness::evaluate(&config, true, true).is_complete());
     }
 
     #[test]
     fn receivers_alone_do_not_count_as_paired() {
         let mut config = configured();
         config.nodes.retain(|node| node.role == NodeRole::Rx);
-        assert_eq!(Readiness::evaluate(&config, true).stage(), Stage::Nodes);
+        assert_eq!(
+            Readiness::evaluate(&config, true, true).stage(),
+            Stage::Nodes
+        );
     }
 
     #[test]
     fn onboarding_cannot_be_closed_early_and_names_the_missing_step() {
         let mut config = configured();
         config.identity.site_name = None;
-        let readiness = Readiness::evaluate(&config, true);
+        let readiness = Readiness::evaluate(&config, true, true);
         assert_eq!(
             readiness.ensure_complete(),
             Err(TransitionError::Incomplete { stage: Stage::Site })
@@ -372,7 +406,7 @@ mod tests {
         config.onboarding_completed = true;
         // A node is unplugged after the installation was closed.
         config.nodes.clear();
-        let readiness = Readiness::evaluate(&config, true);
+        let readiness = Readiness::evaluate(&config, true, true);
 
         assert_eq!(readiness.stage(), Stage::Nodes, "the fact is reported");
         assert_eq!(

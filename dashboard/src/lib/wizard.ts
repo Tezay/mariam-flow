@@ -20,7 +20,7 @@ export function completion(status: Status): Record<Stage, boolean> {
     site: status.readiness.site_named,
     nodes: status.readiness.nodes_paired,
     network: status.readiness.uplink_decided,
-    calibration: status.readiness.model_ready,
+    calibration: status.readiness.site_captured,
     complete: false,
   };
 }

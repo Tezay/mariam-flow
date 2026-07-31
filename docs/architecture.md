@@ -524,6 +524,34 @@ until a section is chosen; on a wide screen it is a rail beside the detail.
 One component, two shapes, so a section added later lands somewhere rather
 than lengthening a single page.
 
+### Calibration recording
+
+A site cannot be estimated before it has been calibrated, and the capture that
+trains it is now recorded from the appliance itself (ADR 0019). Recording is
+another stage of the intake loop, exclusive of estimation by the runtime's
+one-consumer rule — so estimation resumes on its own when a capture ends,
+because the estimator was never torn down, only skipped.
+
+The session directory is created by the handler that starts the capture, so a
+full card or a name already taken is answered to the caller rather than failing
+on the intake thread; the frames are written by that thread. Labels are stamped
+by the appliance clock: the phone doing the labelling and the appliance
+recording the frames are two machines, and a label has to land on the same
+timeline as the frames it describes.
+
+**A recorded session finishes the installation; the model does not.** Recording
+produces data, which is exported, trained off site and imported back days
+later. Gating the wizard on a model would keep the appliance in its full-frame
+installation screen for that whole time, with no access to the live view,
+service hours or network settings. Readiness therefore carries `site_captured`,
+which the wizard waits on, separately from `model_ready`, which is reported and
+satisfied later from the settings.
+
+Session metadata is derived from the configuration wherever it can be — site,
+paired nodes, radio channel, software version. Only what the appliance cannot
+know is asked for: where each node sits, and what the density classes mean
+here.
+
 ### The machine underneath
 
 The appliance reports what the machine it runs on says about itself — board
