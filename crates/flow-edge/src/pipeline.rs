@@ -394,7 +394,19 @@ fn run(
             }
         }
 
-        if let (Some(frame), true, Some(pipeline)) = (frame, open, estimator.as_mut()) {
+        // Recording is the other thing a frame can be for, and the two are
+        // exclusive by the runtime's own rule: a capture takes the stream, and
+        // the estimator simply resumes when it gives it back.
+        let recording = state.is_recording();
+        if let Some(frame) = frame.as_ref()
+            && recording
+        {
+            state.record_frame(frame);
+        }
+
+        if let (Some(frame), true, false, Some(pipeline)) =
+            (frame, open, recording, estimator.as_mut())
+        {
             match pipeline.push(frame) {
                 Ok(Some(estimate)) => {
                     estimates += 1;

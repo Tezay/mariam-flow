@@ -18,6 +18,7 @@ function status(readiness: Partial<Readiness>, stage: Stage): Status {
     site_named: false,
     nodes_paired: false,
     uplink_decided: false,
+    site_captured: false,
     model_ready: false,
     ...readiness,
   };
@@ -65,7 +66,7 @@ describe('visibleStage', () => {
 
   it('reports completion when the installation is closed', () => {
     const done = status(
-      { site_named: true, nodes_paired: true, uplink_decided: true, model_ready: true },
+      { site_named: true, nodes_paired: true, uplink_decided: true, site_captured: true },
       'complete',
     );
     expect(visibleStage(done, null)).toBe('complete');

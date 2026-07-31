@@ -33,6 +33,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
 
+use crate::calibration::{SessionRequest, session_id, session_meta};
 use crate::config::{ApplianceConfig, NetworkSurvey, PairedNode, Uplink};
 use crate::credential::AdminCredential;
 use crate::discovery::Discovery;
@@ -45,7 +46,9 @@ use crate::session::{ABSOLUTE_LIFETIME_US, SessionStore};
 use crate::state::{Phase, Readiness, Runtime, RuntimeMode, Stage};
 use crate::system::SystemReport;
 use crate::throttle::Throttle;
+use flow_core::{DensityClass, Label};
 use flow_ingest::SenderObservation;
+use flow_ingest::SessionWriter;
 
 /// Name of the cookie carrying the session token.
 const SESSION_COOKIE: &str = "mf_session";
@@ -75,6 +78,10 @@ fn refusal(rejection: &WriteRejection) -> Response {
 
 struct Inner {
     config: ApplianceConfig,
+    /// Where sessions and the active model live.
+    data_dir: std::path::PathBuf,
+    /// Whether a calibration session has ever been sealed here.
+    site_captured: bool,
     /// Bumped on every accepted write, so the intake can notice that the
     /// configuration it was built from is no longer the current one.
     config_generation: u64,
@@ -115,6 +122,13 @@ struct Live {
     health: Mutex<StreamHealth>,
     /// Senders the intake has seen that no node mapping claims.
     observations: Mutex<Vec<SenderObservation>>,
+    /// The session being recorded, if one is.
+    ///
+    /// Opened by the handler that starts it, so a directory that cannot be
+    /// created is reported in the response rather than failing silently on
+    /// the intake thread; written to by that thread, which is where the
+    /// frames are.
+    recorder: Mutex<Option<SessionWriter>>,
 }
 
 impl EdgeState {
@@ -126,6 +140,7 @@ impl EdgeState {
     pub fn new(
         config: ApplianceConfig,
         config_path: std::path::PathBuf,
+        data_dir: std::path::PathBuf,
         credential: AdminCredential,
         model_installed: bool,
         journal: Journal,
@@ -133,6 +148,8 @@ impl EdgeState {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 config,
+                site_captured: crate::calibration::has_sealed_session(&data_dir.join("sessions")),
+                data_dir,
                 config_generation: 0,
                 config_path,
                 credential,
@@ -147,6 +164,7 @@ impl EdgeState {
                 estimates: tokio::sync::watch::Sender::new(None),
                 health: Mutex::new(StreamHealth::default()),
                 observations: Mutex::new(Vec::new()),
+                recorder: Mutex::new(None),
             }),
         }
     }
@@ -202,6 +220,73 @@ impl EdgeState {
             Err(poisoned) => poisoned.into_inner(),
         };
         *held = observations;
+    }
+
+    fn lock_recorder(&self) -> MutexGuard<'_, Option<SessionWriter>> {
+        match self.live.recorder.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    /// Writes a frame to the session being recorded, if there is one.
+    ///
+    /// A rejected frame is counted by the writer and reported, never fatal:
+    /// losing the rest of a capture over one malformed frame would cost far
+    /// more than the frame.
+    pub fn record_frame(&self, frame: &flow_core::CsiFrame) {
+        let mut held = self.lock_recorder();
+        if let Some(writer) = held.as_mut()
+            && let Err(err) = writer.write_frame(frame)
+        {
+            eprintln!("session frame: {err}");
+        }
+    }
+
+    /// Claims the stream for a capture, or says why it cannot be claimed.
+    ///
+    /// # Errors
+    ///
+    /// The transition the runtime refused.
+    pub fn begin_calibration(&self, session_id: &str) -> Result<(), crate::error::TransitionError> {
+        self.lock().runtime.start_calibration(session_id)
+    }
+
+    /// Records that a usable session now exists at this site.
+    pub fn mark_site_captured(&self) {
+        self.lock().site_captured = true;
+    }
+
+    /// Releases the stream, whatever it was doing.
+    pub fn end_calibration(&self) {
+        self.lock().runtime.stop();
+    }
+
+    /// Hands the open session to the intake thread.
+    pub fn attach_recorder(&self, writer: SessionWriter) {
+        *self.lock_recorder() = Some(writer);
+    }
+
+    /// Takes the session back, leaving nothing recording.
+    pub fn detach_recorder(&self) -> Option<SessionWriter> {
+        self.lock_recorder().take()
+    }
+
+    /// Annotates the capture in progress.
+    ///
+    /// # Errors
+    ///
+    /// A message when no capture is running, or when the writer refused it.
+    pub fn record_label(&self, label: &Label) -> Result<(), String> {
+        let mut held = self.lock_recorder();
+        let writer = held.as_mut().ok_or("no capture is running")?;
+        writer.write_label(label).map_err(|err| err.to_string())
+    }
+
+    /// Whether a capture is being recorded.
+    #[must_use]
+    pub fn is_recording(&self) -> bool {
+        self.lock_recorder().is_some()
     }
 
     /// What is streaming unpaired, with the pairing offered for it.
@@ -335,7 +420,7 @@ impl EdgeState {
     #[must_use]
     pub fn readiness(&self) -> Readiness {
         let inner = self.lock();
-        Readiness::evaluate(&inner.config, inner.model_installed)
+        Readiness::evaluate(&inner.config, inner.model_installed, inner.site_captured)
     }
 
     /// What the appliance is doing at the product level.
@@ -343,7 +428,7 @@ impl EdgeState {
     pub fn phase(&self) -> Phase {
         let inner = self.lock();
         Phase::of(
-            Readiness::evaluate(&inner.config, inner.model_installed),
+            Readiness::evaluate(&inner.config, inner.model_installed, inner.site_captured),
             inner.config.onboarding_completed,
         )
     }
@@ -414,7 +499,8 @@ impl EdgeState {
         // Read before taking the lock: `service_state` takes it too.
         let service = self.service_state();
         let inner = self.lock();
-        let readiness = Readiness::evaluate(&inner.config, inner.model_installed);
+        let readiness =
+            Readiness::evaluate(&inner.config, inner.model_installed, inner.site_captured);
         let config = &inner.config;
         StatusResponse {
             kit_id: config.identity.kit_id.clone(),
@@ -480,6 +566,11 @@ pub fn router(state: EdgeState) -> Router {
         .route("/api/nodes", put(set_nodes))
         .route("/api/uplink", put(set_uplink))
         .route("/api/network-survey", put(set_network_survey))
+        .route(
+            "/api/calibration",
+            post(start_calibration).delete(stop_calibration),
+        )
+        .route("/api/calibration/label", post(add_label))
         .route("/api/installation", put(set_installation))
         .route(
             "/api/service-window",
@@ -751,6 +842,111 @@ async fn set_uplink(
             (StatusCode::OK, Json(state.status())).into_response()
         }
         Err(rejection) => refusal(&rejection),
+    }
+}
+
+/// Starts recording a labeled capture session.
+///
+/// The session directory is created here rather than on the intake thread, so
+/// a full card or a name already taken is answered to the caller instead of
+/// failing out of sight.
+///
+/// Estimation is not torn down: the intake skips that stage while a capture is
+/// running and resumes on its own when the capture ends, which is why nothing
+/// has to remember whether it was estimating beforehand.
+async fn start_calibration(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(request): Json<SessionRequest>,
+) -> Response {
+    let (config, data_dir) = {
+        let inner = state.lock();
+        (inner.config.clone(), inner.data_dir.clone())
+    };
+    if config.rx_node_ids().is_empty() {
+        return error_response(StatusCode::CONFLICT, "no receiver is paired");
+    }
+
+    let id = session_id(now_us(), &config.identity.kit_id);
+    if let Err(err) = state.begin_calibration(&id) {
+        return error_response(StatusCode::CONFLICT, &err.to_string());
+    }
+
+    let meta = session_meta(&config, &request, id.clone());
+    match SessionWriter::create(&data_dir.join("sessions"), &meta) {
+        Ok(writer) => {
+            state.attach_recorder(writer);
+            state.record(
+                Event::new(EventKind::CalibrationStarted)
+                    .from_client(peer.ip())
+                    .with_detail(id.clone()),
+            );
+            (StatusCode::OK, Json(state.status())).into_response()
+        }
+        Err(err) => {
+            // The runtime was claimed a moment ago; releasing it here keeps a
+            // failed start from leaving the appliance unable to try again.
+            state.end_calibration();
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("could not open the session: {err}"),
+            )
+        }
+    }
+}
+
+/// Ends the capture and seals its directory.
+async fn stop_calibration(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Response {
+    let Some(writer) = state.detach_recorder() else {
+        return error_response(StatusCode::CONFLICT, "no capture is running");
+    };
+    state.end_calibration();
+
+    match writer.finalize() {
+        Ok(summary) => {
+            // The site counts as captured from here, not from the next boot:
+            // sealing is what makes the session usable, and the installation
+            // waits on exactly that.
+            state.mark_site_captured();
+            state.record(
+                Event::new(EventKind::CalibrationStopped)
+                    .from_client(peer.ip())
+                    .with_detail(format!(
+                        "{} frames, {} labels",
+                        summary.frames, summary.labels
+                    )),
+            );
+            (StatusCode::OK, Json(state.status())).into_response()
+        }
+        Err(err) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("could not seal the session: {err}"),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct LabelBody {
+    class: DensityClass,
+}
+
+/// Annotates the capture with what is being observed right now.
+///
+/// Stamped by the appliance clock, never by the caller's: the phone doing the
+/// labeling and the appliance recording the frames are two machines, and a
+/// label has to land on the same timeline as the frames it describes.
+async fn add_label(State(state): State<EdgeState>, Json(body): Json<LabelBody>) -> Response {
+    let label = Label {
+        ts_us: now_us(),
+        class: body.class,
+        count: None,
+    };
+    match state.record_label(&label) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(message) => error_response(StatusCode::CONFLICT, &message),
     }
 }
 
@@ -1126,6 +1322,7 @@ mod tests {
         EdgeState::new(
             config,
             std::path::PathBuf::from("/nonexistent/appliance.json"),
+            std::path::PathBuf::from("/nonexistent"),
             credential,
             model_installed,
             journal,
@@ -1603,7 +1800,14 @@ mod tests {
         let secret = DeviceSecret::parse(SECRET).unwrap();
         let credential = AdminCredential::establish(&secret, now_us()).unwrap();
         let journal = Journal::open_in_memory().unwrap();
-        let state = EdgeState::new(config, path, credential, model_installed, journal);
+        let state = EdgeState::new(
+            config,
+            path,
+            dir.path().to_path_buf(),
+            credential,
+            model_installed,
+            journal,
+        );
         (state, dir)
     }
 
@@ -1730,6 +1934,130 @@ mod tests {
         );
     }
 
+    async fn post(
+        state: &EdgeState,
+        path: &str,
+        cookie: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        let (status, _, value) = send(
+            state,
+            "POST",
+            path,
+            Some(cookie),
+            Some(body.to_string()),
+            10,
+        )
+        .await;
+        (status, value)
+    }
+
+    #[tokio::test]
+    async fn a_capture_claims_the_stream_and_seals_its_directory() {
+        let (state, dir) = writable();
+        let cookie = session_of(&state).await;
+
+        let (status, body) = post(&state, "/api/calibration", &cookie, json!({})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["runtime"]["mode"], "calibrating");
+        assert!(state.is_recording());
+
+        // While recording, the directory carries the suffix that tells a
+        // truncated capture from a clean one.
+        let sessions = dir.path().join("sessions");
+        let recording: Vec<_> = std::fs::read_dir(&sessions)
+            .unwrap()
+            .filter_map(|entry| Some(entry.ok()?.file_name().to_string_lossy().into_owned()))
+            .collect();
+        assert_eq!(recording.len(), 1);
+        assert!(recording[0].ends_with(".recording"), "{recording:?}");
+
+        let (status, _, body) = send(
+            &state,
+            "DELETE",
+            "/api/calibration",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["runtime"]["mode"], "idle");
+        assert!(!state.is_recording());
+
+        let sealed: Vec<_> = std::fs::read_dir(&sessions)
+            .unwrap()
+            .filter_map(|entry| Some(entry.ok()?.file_name().to_string_lossy().into_owned()))
+            .collect();
+        assert!(!sealed[0].ends_with(".recording"), "{sealed:?}");
+    }
+
+    #[tokio::test]
+    async fn a_second_capture_is_refused_while_one_is_running() {
+        // The stream has one consumer at a time; the refusal is what keeps a
+        // running capture from being cut short by a stray request.
+        let (state, _dir) = writable();
+        let cookie = session_of(&state).await;
+        post(&state, "/api/calibration", &cookie, json!({})).await;
+
+        let (status, _) = post(&state, "/api/calibration", &cookie, json!({})).await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(state.is_recording(), "the running capture survived");
+    }
+
+    #[tokio::test]
+    async fn a_capture_needs_a_receiver_to_record_anything() {
+        let (state, _dir) = writable_with(factory(), false);
+        let cookie = session_of(&state).await;
+
+        let (status, body) = post(&state, "/api/calibration", &cookie, json!({})).await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(body["error"].as_str().unwrap().contains("receiver"));
+    }
+
+    #[tokio::test]
+    async fn labels_are_stamped_by_the_appliance_and_refused_without_a_capture() {
+        let (state, _dir) = writable();
+        let cookie = session_of(&state).await;
+
+        // Classes travel as the integers the canonical label format freezes,
+        // not as names. The labelling phone and the appliance are also two
+        // machines, so the timestamp is the appliance's.
+        let (status, _) = post(
+            &state,
+            "/api/calibration/label",
+            &cookie,
+            json!({ "class": 1 }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+
+        post(&state, "/api/calibration", &cookie, json!({})).await;
+        let (status, _) = post(
+            &state,
+            "/api/calibration/label",
+            &cookie,
+            json!({ "class": 1 }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn calibration_is_closed_to_anonymous_callers() {
+        let (state, _dir) = writable();
+        for (method, path) in [
+            ("POST", "/api/calibration"),
+            ("DELETE", "/api/calibration"),
+            ("POST", "/api/calibration/label"),
+        ] {
+            let (status, _, _) = send(&state, method, path, None, Some("{}".to_owned()), 10).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path} is open");
+        }
+    }
+
     #[tokio::test]
     async fn the_survey_outlives_the_decision_it_led_to() {
         // A site that demands 802.1X leaves the appliance offline. The reason
@@ -1834,6 +2162,19 @@ mod tests {
         config.onboarding_completed = false;
         let (state, _dir) = writable_with(config, true);
         let cookie = session_of(&state).await;
+
+        // Recording a session is what finishes the installation; the model is
+        // imported later, from the settings.
+        post(&state, "/api/calibration", &cookie, json!({})).await;
+        send(
+            &state,
+            "DELETE",
+            "/api/calibration",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
 
         let (status, body) = put(
             &state,

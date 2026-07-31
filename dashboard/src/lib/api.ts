@@ -17,6 +17,10 @@ export type Readiness = {
   site_named: boolean;
   nodes_paired: boolean;
   uplink_decided: boolean;
+  /** A calibration session has been recorded — what finishes an installation. */
+  site_captured: boolean;
+  /** Reported, but not required to finish installing: the model is trained
+   *  off site and imported days later. */
   model_ready: boolean;
 };
 
