@@ -158,18 +158,6 @@ pub struct JournalError(#[from] rusqlite::Error);
 /// reason and keeps serving.
 #[derive(Debug, Error)]
 pub enum PipelineError {
-    /// The site has no calibrated wait-estimation parameters.
-    #[error("the site is not calibrated yet")]
-    NoSiteTuning,
-    /// No density model is installed.
-    #[error("no density model at {path}")]
-    NoModel {
-        /// Where a model was expected.
-        path: PathBuf,
-    },
-    /// No receiving node is paired, or none carries a reserved address.
-    #[error("no receiving node with a reserved address")]
-    NoReceivers,
     /// The frame source could not be opened.
     ///
     /// The cause is carried as text rather than as a nested error: it comes

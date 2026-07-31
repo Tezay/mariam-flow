@@ -186,9 +186,9 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
         );
     }
 
-    // An appliance that cannot estimate yet is a normal stage of an
-    // installation, not a failure: the reason is reported and the daemon
-    // serves regardless, so the dashboard can explain what is missing.
+    // Only an unreadable stream is reported here. Having nothing to estimate
+    // with is a stage of an installation, and the readiness the dashboard
+    // already shows says which step is outstanding.
     let tx_mac = args.tx_mac.as_deref().map(str::parse).transpose()?;
     let options = LiveOptions {
         input: args.input.clone(),
@@ -196,8 +196,8 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
         tx_mac,
     };
     match spawn_pipeline(state.clone(), &config_for_pipeline, &args.data_dir, options) {
-        Ok(()) => eprintln!("estimating from {}", args.input),
-        Err(err) => eprintln!("not estimating: {err}"),
+        Ok(()) => eprintln!("reading {}", args.input),
+        Err(err) => eprintln!("stream unavailable: {err}"),
     }
 
     let runtime = tokio::runtime::Runtime::new()?;

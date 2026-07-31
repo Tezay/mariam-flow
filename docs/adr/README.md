@@ -31,3 +31,5 @@ Conventions:
 | [0013](0013-svelte-dashboard-embedded-in-the-daemon.md) | Svelte single-page dashboard embedded in the daemon | accepted |
 | [0014](0014-minute-resolution-estimate-history.md) | Minute-resolution estimate history | accepted |
 | [0015](0015-declared-service-hours.md) | Declared service hours | accepted |
+| [0016](0016-node-pairing-from-the-observed-stream.md) | Node pairing from the observed stream | accepted |
+| [0017](0017-intake-independent-of-inference.md) | Intake independent of inference | accepted |

@@ -397,6 +397,33 @@ A single stored flag records that the installer closed the installation, so
 a finished setup does not fall back into the wizard because a node is
 temporarily unplugged.
 
+### Node pairing
+
+An installer arrives with pre-flashed nodes and an appliance that knows
+nothing about them, and the firmware only streams. Identity is therefore read
+off the stream, with the two roles found in different places (ADR 0016): a
+**receiver** is a source address sending CSI datagrams, while the
+**transmitter** never joins the access point at all and appears only as the MAC
+*inside* those datagrams.
+
+The transmitter is found by agreement. A receiver reports every transmitter it
+sensed, so one receiver's list may hold a passing laptop; the MAC several
+receivers share is the one lighting up the room they both watch. How many
+agreed travels with the offer.
+
+What comes out is a proposal the installer confirms, because which physical box
+is `rx-1` is not something the stream can say — and it is what matters when one
+of them later goes quiet. Identifiers are offered in the order the senders were
+first heard, skipping any already in use, so a node replaced on a running
+installation gets the first free one.
+
+Observation is passive and permanent rather than a mode: `GET /api/discovery`
+answers at any time, so re-pairing never means stopping the estimation. The
+table is bounded — sixteen senders, a fixed number of datagrams parsed per
+sender — because anyone reaching the intake socket can create an entry. A
+receiver's MAC is optional, being known only from a DHCP lease; a
+transmitter's is required, being the only thing it can be known by.
+
 ### Stream arbitration
 
 Calibration and live inference both consume the single UDP stream from the
@@ -413,6 +440,18 @@ open: `GET /health`, a liveness probe that reveals nothing, and
 `POST /api/session`, the login itself. Protected routes sit behind the
 session guard as a group, so a route added there is protected by
 construction rather than by remembering to protect it.
+
+Writes follow one rule: the candidate configuration is validated before the
+save that would validate it anyway, because only that error names the field at
+fault — saving reports that the configuration as a whole was refused and names
+the file it was refused for, which is useless to the caller and hands out a
+server path. The in-memory copy is replaced only once the write succeeded.
+`PUT /api/site`, `/api/nodes`, `/api/uplink`, `/api/installation` and
+`/api/service-window` all go through it. Closing the installation is refused
+while any step is outstanding, naming that step: the flag exists so a finished
+setup does not fall back into the wizard when a node is unplugged, and setting
+it early would leave an operational screen the appliance cannot honour.
+Reopening is always allowed.
 
 `GET /api/status` reports the appliance identity, installation progress,
 current activity, sensor access point, uplink *shape* and paired nodes. Two
@@ -481,10 +520,23 @@ dedicated thread — a blocking loop that must not tie up the async runtime —
 and each estimate is published through a `watch` channel, so the server never
 waits on the pipeline and a slow browser cannot back-pressure sensing.
 
-Starting requires a model, a tuned site and a receiver: exactly the facts the
-installation readiness already tracks. An appliance missing one of them is not
-reporting a fault, it is an installation that has not reached calibration; the
-daemon names what is missing and serves regardless. The frame source is the
+**Reading the stream and estimating from it are separate concerns**
+(ADR 0017). The intake opens its source and reads whatever the installation
+stage; an estimator is attached only when a model, a tuned site and a receiver
+exist, and the loop skips that stage when there is none — the same way it skips
+it outside service hours. So an appliance still being installed listens, which
+is what makes pairing from the stream possible at all.
+
+Consequently `running` and `estimating` are reported separately, and the
+absence of an estimator is not an error: the readiness already says which step
+is outstanding. A model that exists but cannot be loaded *is* reported, since
+that is a fault rather than a step left to do.
+
+The intake is rebuilt whenever the configuration changes, because the sender
+mapping, the model and the site tuning are exactly what the installation
+writes. It also ticks on a read timeout that bounds how long a read call may
+take, so its periodic work — stream health, the senders it has heard — does not
+wait for traffic that may not be arriving yet. The frame source is the
 UDP socket the receivers stream to, or a recorded capture — which is how the
 whole chain is exercised on a machine with no sensors attached:
 
