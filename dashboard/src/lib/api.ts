@@ -32,6 +32,18 @@ export type SensingNode = {
 export type SiteAuthentication =
   'nothing' | 'shared-password' | 'account' | 'certificate' | 'sign-in-page' | 'unknown';
 
+/** What the machine the appliance runs on says about itself. */
+export type SystemReport = {
+  model?: string;
+  os?: string;
+  kernel?: string;
+  uptime_s?: number;
+  load_1m?: number;
+  memory_total_kb?: number;
+  memory_available_kb?: number;
+  temperature_c?: number;
+};
+
 /** What the installer found out about the site's network. */
 export type NetworkSurvey = {
   authentication: SiteAuthentication;
@@ -142,6 +154,16 @@ async function put(path: string, body: unknown): Promise<WriteOutcome> {
     return { kind: 'error' };
   } catch {
     return { kind: 'error' };
+  }
+}
+
+/** Reads what the machine says about itself. */
+export async function fetchSystem(): Promise<SystemReport | null> {
+  try {
+    const response = await fetch('/api/system');
+    return response.ok ? ((await response.json()) as SystemReport) : null;
+  } catch {
+    return null;
   }
 }
 

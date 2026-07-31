@@ -361,6 +361,13 @@ in isolation and are unaffected.
 
 ### Network topology
 
+The edge runs on any Raspberry Pi board that is Cortex-A53 ARM64 under
+Raspberry Pi OS Lite 64-bit — Zero 2 W, 3 Model A+, 3 Model B+ — from one
+`aarch64-unknown-linux-gnu` artifact. Nothing in the edge touches GPIO, I²C, a
+camera or a GPU, so the board is chosen on availability. Interfaces are
+therefore discovered rather than named: a dongle is `wlan1` on one board and
+the built-in Ethernet is `eth0` on another.
+
 The appliance hosts the access point the sensing nodes join, on a fixed
 2.4 GHz channel matching the transmitter's — a station only senses CSI on
 the channel it is associated with, so that channel cannot be allowed to
@@ -516,6 +523,20 @@ Sensors, Network, Service hours, System. On a phone the list is the screen
 until a section is chosen; on a wide screen it is a rail beside the detail.
 One component, two shapes, so a section added later lands somewhere rather
 than lengthening a single page.
+
+### The machine underneath
+
+The appliance reports what the machine it runs on says about itself — board
+model, operating system, kernel, uptime, load, memory and CPU temperature —
+read straight from `/proc` and `/sys` rather than through a crate, those files
+being the interface Linux offers and the appliance having to stay small.
+
+Every field is optional and an absent one is reported as absent. The same
+binary is developed on a laptop that reports none of them, and the settings
+screen says so rather than showing a blank where a value belongs.
+
+Temperature is the figure worth watching: a board throttles long before it
+stops, and a slow appliance with no other symptom is usually a hot one.
 
 ### Reaching the site network
 
