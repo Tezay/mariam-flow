@@ -4,8 +4,9 @@
 //! firmware sends exactly what it prints on serial. The **receiving node's
 //! identity is the datagram's source address** — the MAC inside the line
 //! identifies the *transmitter* of the sensed packet, never the receiver.
-//! Senders are mapped to node ids explicitly; unknown senders are counted
-//! and dropped.
+//! Senders are mapped to node ids explicitly; their frames are attributed by
+//! that mapping. Unmapped senders yield no frames but are *recorded*, which
+//! is how a node still to be paired is found.
 //!
 //! Frames are timestamped at reception by the edge clock. Because both RX
 //! nodes land on one socket stamped by one clock, the merged stream is
@@ -67,6 +68,9 @@ pub struct UdpStats {
     pub frames: u64,
     /// Datagrams from unmapped senders.
     pub unknown_sender: u64,
+    /// Datagrams from unmapped senders left unrecorded, the observation
+    /// table being full.
+    pub observations_dropped: u64,
     /// Datagrams without the `CSI_DATA` marker.
     pub skipped: u64,
     /// Malformed `CSI_DATA` lines.
@@ -79,6 +83,43 @@ pub struct UdpStats {
     pub seq_resets: u64,
 }
 
+/// Senders kept under observation at once.
+///
+/// Anyone able to reach the intake socket can create an entry, so this is a
+/// bound on attacker-controlled memory, not a tuning knob. An installation
+/// has a handful of nodes; a hundred distinct sources means something other
+/// than sensing is happening.
+const MAX_OBSERVED_SENDERS: usize = 16;
+
+/// Distinct transmitter MACs remembered per observed sender.
+const MAX_OBSERVED_MACS: usize = 4;
+
+/// Datagrams parsed per observed sender before sampling stops.
+///
+/// Reading a MAC costs a parse, which an unmapped sender would otherwise
+/// command without limit. Several samples are needed because a receiver
+/// reports every transmitter it sensed, not only ours.
+const MAC_SAMPLES: u32 = 32;
+
+/// What an unmapped sender has been seen doing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SenderObservation {
+    /// Address the datagrams come from. Keyed by IP rather than by socket:
+    /// a node that restarts draws a new ephemeral port and must not appear
+    /// as a second candidate.
+    pub source: IpAddr,
+    /// Transmitter MACs seen in this sender's frames.
+    pub tx_macs: Vec<MacAddr>,
+    /// CSI datagrams counted from it.
+    pub datagrams: u64,
+    /// Edge time of the first datagram.
+    pub first_seen_us: u64,
+    /// Edge time of the most recent one.
+    pub last_seen_us: u64,
+    /// Datagrams parsed so far, bounding the sampling above.
+    pub sampled: u32,
+}
+
 /// Blocking UDP frame source. See the module documentation.
 #[derive(Debug)]
 pub struct UdpSource {
@@ -89,26 +130,25 @@ pub struct UdpSource {
     last_seq: HashMap<String, u32>,
     last_ts_us: u64,
     buf: Vec<u8>,
+    observed: HashMap<IpAddr, SenderObservation>,
+    read_timeout: Option<Duration>,
 }
 
 impl UdpSource {
     /// Binds the intake socket and registers the sender mapping.
     ///
+    /// An empty mapping is allowed: an appliance still being installed has no
+    /// nodes yet, and every datagram it hears is then a candidate to pair
+    /// rather than something wasted.
+    ///
     /// # Errors
     ///
-    /// Socket binding failures, or an empty mapping (rejected: every frame
-    /// would be dropped).
+    /// Socket binding failures.
     pub fn bind(
         addr: impl ToSocketAddrs,
         nodes: HashMap<SenderKey, String>,
         tx_mac: Option<MacAddr>,
     ) -> io::Result<Self> {
-        if nodes.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "UDP intake needs at least one node mapping",
-            ));
-        }
         Ok(Self {
             socket: UdpSocket::bind(addr)?,
             nodes,
@@ -117,6 +157,8 @@ impl UdpSource {
             last_seq: HashMap::new(),
             last_ts_us: 0,
             buf: vec![0u8; DATAGRAM_BUF],
+            observed: HashMap::new(),
+            read_timeout: None,
         })
     }
 
@@ -129,12 +171,19 @@ impl UdpSource {
         self.socket.local_addr()
     }
 
-    /// Sets a receive timeout (mainly for tests); `None` blocks forever.
+    /// Bounds how long a [`Self::next_frame`] call may take; `None` blocks
+    /// until a frame can be yielded.
+    ///
+    /// The bound is on the call, not on the wait for a datagram. Datagrams
+    /// that yield no frame — an unmapped sender, noise — are consumed in a
+    /// loop, so a busy stream would otherwise keep a caller inside one call
+    /// indefinitely and starve whatever periodic work it has.
     ///
     /// # Errors
     ///
     /// The underlying socket error.
-    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+    pub fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        self.read_timeout = timeout;
         self.socket.set_read_timeout(timeout)
     }
 
@@ -153,7 +202,54 @@ impl UdpSource {
         self.stats
     }
 
-    /// Blocks until the next valid frame from a mapped sender.
+    /// Senders that are streaming but are not in the mapping, oldest first.
+    ///
+    /// The order nodes were powered in, which is the order identifiers are
+    /// then offered in.
+    #[must_use]
+    pub fn observations(&self) -> Vec<SenderObservation> {
+        let mut observations: Vec<SenderObservation> = self.observed.values().cloned().collect();
+        observations.sort_by_key(|observation| (observation.first_seen_us, observation.source));
+        observations
+    }
+
+    /// Records a datagram from a sender that is not in the mapping.
+    fn observe(&mut self, from: SocketAddr, len: usize, now: u64) {
+        let source = from.ip();
+        if !self.observed.contains_key(&source) && self.observed.len() >= MAX_OBSERVED_SENDERS {
+            self.stats.observations_dropped += 1;
+            return;
+        }
+
+        let observation = self
+            .observed
+            .entry(source)
+            .or_insert_with(|| SenderObservation {
+                source,
+                tx_macs: Vec::new(),
+                datagrams: 0,
+                first_seen_us: now,
+                last_seen_us: now,
+                sampled: 0,
+            });
+        observation.datagrams += 1;
+        observation.last_seen_us = now;
+
+        if observation.sampled >= MAC_SAMPLES {
+            return;
+        }
+        observation.sampled += 1;
+        let text = String::from_utf8_lossy(&self.buf[..len]);
+        if let Ok(raw) = parse_line(&text) {
+            if !observation.tx_macs.contains(&raw.mac)
+                && observation.tx_macs.len() < MAX_OBSERVED_MACS
+            {
+                observation.tx_macs.push(raw.mac);
+            }
+        }
+    }
+
+    /// Returns the next valid frame from a mapped sender.
     ///
     /// Robustness policy mirrors the line reader: unknown senders,
     /// non-frame datagrams and malformed lines are counted and skipped,
@@ -162,9 +258,21 @@ impl UdpSource {
     ///
     /// # Errors
     ///
-    /// Only socket-level I/O errors (including a configured timeout).
+    /// Socket-level I/O errors, and [`io::ErrorKind::WouldBlock`] once a
+    /// configured read timeout has elapsed without a frame to yield.
     pub fn next_frame(&mut self) -> io::Result<CsiFrame> {
+        let deadline = self.read_timeout.map(|timeout| {
+            now_us().saturating_add(timeout.as_micros().try_into().unwrap_or(u64::MAX))
+        });
         loop {
+            if let Some(deadline) = deadline
+                && now_us() >= deadline
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "no frame within the read timeout",
+                ));
+            }
             let (len, from) = self.socket.recv_from(&mut self.buf)?;
             self.stats.datagrams += 1;
 
@@ -172,6 +280,8 @@ impl UdpSource {
                 Some(node_id) => node_id,
                 None => {
                     self.stats.unknown_sender += 1;
+                    let now = now_us();
+                    self.observe(from, len, now);
                     continue;
                 }
             };
@@ -242,7 +352,7 @@ mod tests {
                 (*name).to_owned(),
             );
         }
-        let source = UdpSource::bind("127.0.0.1:0", nodes, None).unwrap();
+        let mut source = UdpSource::bind("127.0.0.1:0", nodes, None).unwrap();
         source
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
@@ -285,6 +395,146 @@ mod tests {
         let frame = source.next_frame().unwrap();
         assert_eq!(frame.node_id, "rx-1");
         assert_eq!(source.stats().unknown_sender, 1);
+    }
+
+    #[test]
+    fn an_unmapped_sender_is_recorded_with_the_transmitter_it_reports() {
+        let known = sender();
+        let stranger = sender();
+        let mut source = source_for(&[(&known, "rx-1")]);
+        let target = source.local_addr().unwrap();
+
+        stranger.send_to(c6_line(1).as_bytes(), target).unwrap();
+        known.send_to(c6_line(1).as_bytes(), target).unwrap();
+        source.next_frame().unwrap();
+
+        let observations = source.observations();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].source, stranger.local_addr().unwrap().ip());
+        assert_eq!(observations[0].datagrams, 1);
+        // The MAC in the line is the transmitter's: this is what lets the
+        // appliance name a transmitter that never joins the network itself.
+        assert_eq!(
+            observations[0].tx_macs,
+            vec!["1a:2b:3c:4d:5e:6f".parse::<MacAddr>().unwrap()]
+        );
+    }
+
+    #[test]
+    fn a_mapped_sender_is_never_offered_for_pairing() {
+        let known = sender();
+        let mut source = source_for(&[(&known, "rx-1")]);
+        let target = source.local_addr().unwrap();
+
+        known.send_to(c6_line(1).as_bytes(), target).unwrap();
+        source.next_frame().unwrap();
+
+        assert!(source.observations().is_empty());
+    }
+
+    #[test]
+    fn one_node_that_restarts_is_one_candidate_not_two() {
+        // Two sockets on one address: the same node having drawn a new
+        // ephemeral port. Keying observations by IP is what keeps it from
+        // being offered twice.
+        let known = sender();
+        let before = sender();
+        let after = sender();
+        let mut source = source_for(&[(&known, "rx-1")]);
+        let target = source.local_addr().unwrap();
+        assert_eq!(
+            before.local_addr().unwrap().ip(),
+            after.local_addr().unwrap().ip(),
+            "the test needs both strangers on one address"
+        );
+
+        before.send_to(c6_line(1).as_bytes(), target).unwrap();
+        after.send_to(c6_line(2).as_bytes(), target).unwrap();
+        known.send_to(c6_line(1).as_bytes(), target).unwrap();
+        source.next_frame().unwrap();
+
+        let observations = source.observations();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].datagrams, 2);
+    }
+
+    #[test]
+    fn counting_outlives_sampling() {
+        let known = sender();
+        let stranger = sender();
+        let mut source = source_for(&[(&known, "rx-1")]);
+        let target = source.local_addr().unwrap();
+
+        let bursts = MAC_SAMPLES + 5;
+        for seq in 0..bursts {
+            stranger.send_to(c6_line(seq).as_bytes(), target).unwrap();
+        }
+        known.send_to(c6_line(1).as_bytes(), target).unwrap();
+        source.next_frame().unwrap();
+
+        let observations = source.observations();
+        // Counting outlives sampling: the rate is how a node shows it is
+        // alive.
+        assert_eq!(observations[0].datagrams, u64::from(bursts));
+        assert_eq!(observations[0].sampled, MAC_SAMPLES);
+        assert_eq!(observations[0].tx_macs.len(), 1);
+    }
+
+    #[test]
+    fn the_observation_table_is_bounded_and_still_updates_what_it_holds() {
+        // Driven directly: distinct source addresses are not portable on
+        // loopback.
+        let known = sender();
+        let mut source = source_for(&[(&known, "rx-1")]);
+        let line = c6_line(1);
+        let len = line.len();
+        source.buf[..len].copy_from_slice(line.as_bytes());
+
+        let addr_of = |n: u16| SocketAddr::from(([10, 0, 0, u8::try_from(n).unwrap()], 5000 + n));
+        for n in 0..u16::try_from(MAX_OBSERVED_SENDERS).unwrap() + 4 {
+            source.observe(addr_of(n), len, 1_000 + u64::from(n));
+        }
+
+        assert_eq!(source.observations().len(), MAX_OBSERVED_SENDERS);
+        assert_eq!(source.stats().observations_dropped, 4);
+
+        // A node already being observed must keep updating while the table
+        // is full, or a flood would freeze the pairing screen.
+        source.observe(addr_of(0), len, 9_000);
+        let first = source
+            .observations()
+            .into_iter()
+            .find(|observation| observation.source == addr_of(0).ip())
+            .unwrap();
+        assert_eq!(first.datagrams, 2);
+        assert_eq!(first.last_seen_us, 9_000);
+    }
+
+    #[test]
+    fn observations_are_offered_in_the_order_the_nodes_were_powered() {
+        let known = sender();
+        let mut source = source_for(&[(&known, "rx-1")]);
+        let line = c6_line(1);
+        let len = line.len();
+        source.buf[..len].copy_from_slice(line.as_bytes());
+
+        source.observe(SocketAddr::from(([10, 0, 0, 3], 5000)), len, 3_000);
+        source.observe(SocketAddr::from(([10, 0, 0, 1], 5000)), len, 1_000);
+        source.observe(SocketAddr::from(([10, 0, 0, 2], 5000)), len, 2_000);
+
+        let sources: Vec<IpAddr> = source
+            .observations()
+            .into_iter()
+            .map(|observation| observation.source)
+            .collect();
+        assert_eq!(
+            sources,
+            vec![
+                IpAddr::from([10, 0, 0, 1]),
+                IpAddr::from([10, 0, 0, 2]),
+                IpAddr::from([10, 0, 0, 3]),
+            ]
+        );
     }
 
     #[test]
@@ -345,9 +595,47 @@ mod tests {
     }
 
     #[test]
-    fn empty_mapping_is_rejected() {
-        let error = UdpSource::bind("127.0.0.1:0", HashMap::new(), None).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    fn a_busy_stream_that_yields_nothing_still_returns_to_the_caller() {
+        // The datagrams of an unmapped sender are consumed in an inner loop.
+        // Without bounding the *call*, a node streaming continuously keeps the
+        // caller inside one `next_frame` for good — and the periodic work that
+        // publishes what has been heard never runs.
+        let stranger = sender();
+        let mut source = UdpSource::bind("127.0.0.1:0", HashMap::new(), None).unwrap();
+        source
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let target = source.local_addr().unwrap();
+        for seq in 0..400 {
+            stranger.send_to(c6_line(seq).as_bytes(), target).unwrap();
+        }
+
+        let error = source.next_frame().unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert!(
+            !source.observations().is_empty(),
+            "datagrams were still read"
+        );
+    }
+
+    #[test]
+    fn an_appliance_with_no_nodes_yet_still_listens() {
+        // An installation begins with nothing paired. Refusing to bind would
+        // leave the socket closed exactly when every datagram is a candidate.
+        let stranger = sender();
+        let mut source = UdpSource::bind("127.0.0.1:0", HashMap::new(), None).unwrap();
+        source
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .unwrap();
+        let target = source.local_addr().unwrap();
+
+        stranger.send_to(c6_line(1).as_bytes(), target).unwrap();
+        assert!(source.next_frame().is_err());
+
+        let observations = source.observations();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].datagrams, 1);
     }
 
     #[test]

@@ -193,13 +193,16 @@ pub struct PairedNode {
     /// Whether the node transmits or receives.
     pub role: NodeRole,
     /// Hardware address, as seen on the sensor access point.
-    pub mac: String,
+    ///
+    /// Required of a transmitter, which is known by nothing else. A receiver
+    /// is identified by its source address at intake (ADR 0007), so its MAC is
+    /// recorded only when a DHCP lease has revealed it.
+    #[serde(default)]
+    pub mac: Option<String>,
     /// Address reserved for this node on the sensor network.
     ///
-    /// Receivers are identified by their source address at UDP intake
-    /// (ADR 0007), so a receiver without a reserved address cannot be told
-    /// apart from its sibling. The transmitter never joins the access
-    /// point and therefore has none.
+    /// A receiver without one cannot be told apart from its sibling. The
+    /// transmitter never joins the access point and therefore has none.
     #[serde(default)]
     pub address: Option<IpAddr>,
 }
@@ -367,12 +370,21 @@ impl ApplianceConfig {
             if !ids.insert(node.node_id.as_str()) {
                 return Err(ConfigError::DuplicateNodeId(node.node_id.clone()));
             }
-            let mac = MacAddr::from_str(&node.mac).map_err(|_| ConfigError::NodeMac {
-                node_id: node.node_id.clone(),
-                mac: node.mac.clone(),
-            })?;
-            if !macs.insert(mac) {
-                return Err(ConfigError::DuplicateNodeMac(mac.to_string()));
+            match &node.mac {
+                Some(text) => {
+                    let mac = MacAddr::from_str(text).map_err(|_| ConfigError::NodeMac {
+                        node_id: node.node_id.clone(),
+                        mac: text.clone(),
+                    })?;
+                    if !macs.insert(mac) {
+                        return Err(ConfigError::DuplicateNodeMac(mac.to_string()));
+                    }
+                }
+                // A transmitter has no other identity to be known by.
+                None if node.role == NodeRole::Tx => {
+                    return Err(ConfigError::Empty { field: "tx mac" });
+                }
+                None => {}
             }
             if let Some(address) = node.address
                 && !addresses.insert(address)
@@ -508,9 +520,33 @@ mod tests {
         PairedNode {
             node_id: node_id.into(),
             role,
-            mac: mac.into(),
+            mac: Some(mac.into()),
             address: address.map(|a| a.parse().unwrap()),
         }
+    }
+
+    #[test]
+    fn a_receiver_needs_no_mac_but_a_transmitter_does() {
+        let mut config = factory();
+        config.nodes = vec![PairedNode {
+            node_id: "rx-1".into(),
+            role: NodeRole::Rx,
+            mac: None,
+            address: Some("192.168.4.51".parse().unwrap()),
+        }];
+        config.validate().unwrap();
+
+        config.nodes.push(PairedNode {
+            node_id: "tx-1".into(),
+            role: NodeRole::Tx,
+            mac: None,
+            address: None,
+        });
+        let error = config.validate().unwrap_err();
+        assert!(
+            matches!(error, ConfigError::Empty { field } if field.contains("mac")),
+            "{error}"
+        );
     }
 
     fn tuning() -> SiteTuning {

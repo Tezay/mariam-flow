@@ -81,6 +81,9 @@ fn run(args: &Args) -> Result<(), Box<dyn Error>> {
         nodes,
         tx_mac,
         start_ts_us: None,
+        // A tool reads until the stream ends; it has no periodic work
+        // that a heartbeat would serve.
+        read_timeout: None,
     })?;
 
     for node_id in source.rx_node_ids() {

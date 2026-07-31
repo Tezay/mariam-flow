@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
+use std::time::Duration;
 
 use flow_core::{CsiFrame, FrameError};
 use thiserror::Error;
@@ -21,7 +22,7 @@ use crate::clock::now_us;
 use crate::esp_csi::MacAddr;
 use crate::reader::CsiReader;
 use crate::timeline::Timeline;
-use crate::udp::{SenderKey, UdpSource};
+use crate::udp::{SenderKey, SenderObservation, UdpSource};
 
 /// Prefix selecting the UDP transport in an input specification.
 pub const UDP_SCHEME: &str = "udp://";
@@ -39,6 +40,12 @@ pub struct SourceConfig {
     pub tx_mac: Option<MacAddr>,
     /// Timestamp of the first frame for line-based inputs (default: now).
     pub start_ts_us: Option<u64>,
+    /// How long a UDP read waits before reporting that nothing arrived.
+    ///
+    /// `None` blocks until a datagram comes, which is what a tool reading a
+    /// stream wants. A long-running service sets it so its own periodic work
+    /// does not depend on traffic arriving.
+    pub read_timeout: Option<Duration>,
 }
 
 /// Failure while opening or reading a frame source.
@@ -84,12 +91,11 @@ impl FrameSource {
     /// underlying I/O error.
     pub fn open(config: SourceConfig) -> Result<Self, SourceError> {
         if let Some(addr) = config.input.strip_prefix(UDP_SCHEME) {
-            if config.nodes.is_empty() {
-                return Err(SourceError::Config(
-                    "udp:// input requires at least one --node <id>=<ip[:port]> mapping".into(),
-                ));
-            }
-            let source = UdpSource::bind(addr, config.nodes, config.tx_mac)?;
+            // An empty mapping is a legitimate state, not a mistake: an
+            // appliance still being installed has no nodes, and the socket has
+            // to be open for the ones it is about to pair to be heard.
+            let mut source = UdpSource::bind(addr, config.nodes, config.tx_mac)?;
+            source.set_read_timeout(config.read_timeout)?;
             return Ok(Self::Udp(source));
         }
 
@@ -116,6 +122,18 @@ impl FrameSource {
         match self {
             Self::Lines { node_id, .. } => vec![node_id.clone()],
             Self::Udp(source) => source.rx_node_ids(),
+        }
+    }
+
+    /// Senders streaming to this source that no node mapping claims.
+    ///
+    /// Only a UDP source can have any: a line-based stream is attributed to
+    /// the node it was recorded from, so nothing about it is unidentified.
+    #[must_use]
+    pub fn observations(&self) -> Vec<SenderObservation> {
+        match self {
+            Self::Lines { .. } => Vec::new(),
+            Self::Udp(source) => source.observations(),
         }
     }
 
@@ -235,12 +253,17 @@ mod tests {
     }
 
     #[test]
-    fn udp_source_requires_a_mapping() {
-        let result = FrameSource::open(SourceConfig {
+    fn a_udp_source_opens_before_any_node_is_paired() {
+        // The socket has to be listening for the nodes an installer is about
+        // to pair to be heard at all.
+        let source = FrameSource::open(SourceConfig {
             input: "udp://127.0.0.1:0".into(),
             ..SourceConfig::default()
-        });
-        assert!(matches!(result, Err(SourceError::Config(_))));
+        })
+        .unwrap();
+
+        assert!(source.rx_node_ids().is_empty());
+        assert!(source.observations().is_empty());
     }
 
     #[test]

@@ -23,7 +23,8 @@ export type Readiness = {
 export type SensingNode = {
   node_id: string;
   role: 'tx' | 'rx';
-  mac: string;
+  /** Known from a DHCP lease; a receiver may be paired without one. */
+  mac?: string;
   address?: string;
 };
 
@@ -94,6 +95,8 @@ export type NodeHealth = {
 /** How the frames are arriving. */
 export type StreamHealth = {
   running: boolean;
+  /** Separate from `running`: an appliance can read without estimating. */
+  estimating: boolean;
   frames: number;
   estimates: number;
   last_frame_us?: number;

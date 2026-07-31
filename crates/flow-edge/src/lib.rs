@@ -43,6 +43,7 @@ mod api;
 mod assets;
 mod config;
 mod credential;
+mod discovery;
 mod error;
 mod history;
 mod journal;

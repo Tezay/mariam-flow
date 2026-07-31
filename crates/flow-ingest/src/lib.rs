@@ -26,4 +26,4 @@ pub use reader::{CsiReader, StreamStats};
 pub use session::{SessionError, SessionSummary, SessionWriter};
 pub use source::{FrameSource, SourceConfig, SourceError, UDP_SCHEME};
 pub use timeline::Timeline;
-pub use udp::{SenderKey, UdpSource, UdpStats, parse_node_mapping};
+pub use udp::{SenderKey, SenderObservation, UdpSource, UdpStats, parse_node_mapping};

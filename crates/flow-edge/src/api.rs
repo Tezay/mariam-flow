@@ -28,27 +28,55 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
 
-use crate::config::{ApplianceConfig, Uplink};
+use crate::config::{ApplianceConfig, PairedNode, Uplink};
 use crate::credential::AdminCredential;
+use crate::discovery::Discovery;
 use crate::history::{MINUTE_US, MinuteSummary};
 use crate::journal::{Event, EventKind, Journal, RecordedEvent};
 use crate::now_us;
 use crate::pipeline::StreamHealth;
 use crate::schedule::{ServiceState, ServiceWindow};
 use crate::session::{ABSOLUTE_LIFETIME_US, SessionStore};
-use crate::state::{Phase, Readiness, Runtime, RuntimeMode};
+use crate::state::{Phase, Readiness, Runtime, RuntimeMode, Stage};
 use crate::throttle::Throttle;
+use flow_ingest::SenderObservation;
 
 /// Name of the cookie carrying the session token.
 const SESSION_COOKIE: &str = "mf_session";
 
+/// Why a configuration write was refused.
+pub enum WriteRejection {
+    /// The result would not be a usable configuration. Carries the reason,
+    /// which names the field at fault and never a path on the appliance.
+    Invalid(String),
+    /// A sound change could not be recorded — a read-only card, a full disk.
+    Storage,
+}
+
+/// Answers a refused write.
+///
+/// A storage failure is not the caller's to fix by sending something else, so
+/// it is reported as the appliance's fault rather than theirs.
+fn refusal(rejection: &WriteRejection) -> Response {
+    match rejection {
+        WriteRejection::Invalid(reason) => error_response(StatusCode::BAD_REQUEST, reason),
+        WriteRejection::Storage => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the appliance could not store the change",
+        ),
+    }
+}
+
 struct Inner {
     config: ApplianceConfig,
+    /// Bumped on every accepted write, so the intake can notice that the
+    /// configuration it was built from is no longer the current one.
+    config_generation: u64,
     /// Where the configuration is persisted, so a write can be durable.
     config_path: std::path::PathBuf,
     credential: AdminCredential,
@@ -84,6 +112,8 @@ pub struct EdgeState {
 struct Live {
     estimates: tokio::sync::watch::Sender<Option<flow_infer::WaitEstimate>>,
     health: Mutex<StreamHealth>,
+    /// Senders the intake has seen that no node mapping claims.
+    observations: Mutex<Vec<SenderObservation>>,
 }
 
 impl EdgeState {
@@ -102,6 +132,7 @@ impl EdgeState {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 config,
+                config_generation: 0,
                 config_path,
                 credential,
                 model_installed,
@@ -114,6 +145,7 @@ impl EdgeState {
             live: Arc::new(Live {
                 estimates: tokio::sync::watch::Sender::new(None),
                 health: Mutex::new(StreamHealth::default()),
+                observations: Mutex::new(Vec::new()),
             }),
         }
     }
@@ -146,15 +178,39 @@ impl EdgeState {
         *self.lock_health() = health;
     }
 
-    /// Marks the pipeline as running or stopped.
+    /// Marks the intake as reading or stopped.
     pub fn set_stream_running(&self, running: bool) {
         self.lock_health().running = running;
+    }
+
+    /// Marks whether an estimator is attached to the stream.
+    pub fn set_estimating(&self, estimating: bool) {
+        self.lock_health().estimating = estimating;
     }
 
     /// How the stream is feeding the pipeline.
     #[must_use]
     pub fn stream_health(&self) -> StreamHealth {
         self.lock_health().clone()
+    }
+
+    /// Replaces what the intake has seen from unmapped senders.
+    pub fn set_observations(&self, observations: Vec<SenderObservation>) {
+        let mut held = match self.live.observations.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *held = observations;
+    }
+
+    /// What is streaming unpaired, with the pairing offered for it.
+    fn discovery(&self) -> Discovery {
+        let observations = match self.live.observations.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
+        let paired = self.lock().config.rx_node_ids();
+        crate::discovery::discover(&observations, &paired, now_us())
     }
 
     /// Stores one folded minute, reporting rather than propagating failure.
@@ -216,24 +272,43 @@ impl EdgeState {
 
     /// Applies a change to the configuration and persists it.
     ///
-    /// Validation happens inside `save`, before anything reaches the disk,
-    /// and the in-memory copy is only replaced once the write succeeded —
-    /// so a rejected change leaves the running appliance exactly as it was.
+    /// The candidate is validated before the save that would validate it
+    /// anyway, because only this error names the field at fault rather than
+    /// the file. The in-memory copy is replaced only once the write
+    /// succeeded.
     ///
     /// # Errors
     ///
-    /// [`StoreError`] if the new configuration is unusable or cannot be
-    /// written.
-    pub fn update_config(
+    /// [`WriteRejection::Invalid`] with the reason, or
+    /// [`WriteRejection::Storage`] when a sound change cannot be recorded.
+    pub fn write_config(
         &self,
         change: impl FnOnce(&mut ApplianceConfig),
-    ) -> Result<(), crate::error::StoreError> {
+    ) -> Result<(), WriteRejection> {
         let mut inner = self.lock();
         let mut candidate = inner.config.clone();
         change(&mut candidate);
-        candidate.save(&inner.config_path)?;
+        candidate
+            .validate()
+            .map_err(|err| WriteRejection::Invalid(err.to_string()))?;
+        candidate
+            .save(&inner.config_path)
+            .map_err(|_| WriteRejection::Storage)?;
         inner.config = candidate;
+        inner.config_generation += 1;
         Ok(())
+    }
+
+    /// How many times the configuration has been replaced.
+    #[must_use]
+    pub fn config_generation(&self) -> u64 {
+        self.lock().config_generation
+    }
+
+    /// A copy of the configuration as it now stands.
+    #[must_use]
+    pub fn config_snapshot(&self) -> ApplianceConfig {
+        self.lock().config.clone()
     }
 
     /// Whether the site is serving, and when that next changes.
@@ -397,6 +472,11 @@ pub fn router(state: EdgeState) -> Router {
         .route("/api/events", get(events))
         .route("/api/live", get(live))
         .route("/api/estimates", get(estimates))
+        .route("/api/discovery", get(discovery))
+        .route("/api/site", put(set_site))
+        .route("/api/nodes", put(set_nodes))
+        .route("/api/uplink", put(set_uplink))
+        .route("/api/installation", put(set_installation))
         .route(
             "/api/service-window",
             get(service_window).put(set_service_window),
@@ -575,6 +655,137 @@ async fn estimates(
     Json(state.minutes(since, usize::try_from(minutes).unwrap_or(usize::MAX)))
 }
 
+/// Reports what is streaming that no node mapping claims.
+///
+/// Always available, never a mode: replacing a node on a running
+/// installation must not mean stopping the estimation to find it again.
+async fn discovery(State(state): State<EdgeState>) -> Json<Discovery> {
+    Json(state.discovery())
+}
+
+#[derive(Deserialize)]
+struct SiteBody {
+    site_name: String,
+}
+
+/// Names the site this appliance is installed at.
+async fn set_site(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(body): Json<SiteBody>,
+) -> Response {
+    let name = body.site_name.trim().to_owned();
+    match state.write_config(|config| config.identity.site_name = Some(name.clone())) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(format!("site named {name:?}")),
+            );
+            (StatusCode::OK, Json(state.status())).into_response()
+        }
+        Err(rejection) => refusal(&rejection),
+    }
+}
+
+/// Replaces the paired nodes with the set the installer confirmed.
+///
+/// The whole list at once: identifiers, addresses and MACs must be unique
+/// across it and only one node may transmit, so checking an addition against
+/// a stored remainder would be checking half a thing.
+async fn set_nodes(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(nodes): Json<Vec<PairedNode>>,
+) -> Response {
+    let described = format!("{} node(s) paired", nodes.len());
+    match state.write_config(|config| config.nodes = nodes) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(described),
+            );
+            (StatusCode::OK, Json(state.status())).into_response()
+        }
+        Err(rejection) => refusal(&rejection),
+    }
+}
+
+/// Records how the appliance reaches the site network, or that it will not.
+///
+/// `null` returns the question to unanswered, which is a different state from
+/// a deliberate `offline` and is what the installation progress reads.
+async fn set_uplink(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(uplink): Json<Option<Uplink>>,
+) -> Response {
+    // Named by shape, never by secret: the journal is readable by anyone who
+    // can read the appliance, and a passphrase must not travel into it.
+    let described = match uplink.as_ref() {
+        None => "uplink question reopened".to_owned(),
+        Some(Uplink::Offline) => "uplink set offline".to_owned(),
+        Some(Uplink::Wifi { ssid, .. }) => format!("uplink set to Wi-Fi {ssid:?}"),
+        Some(Uplink::Ethernet { .. }) => "uplink set to wired".to_owned(),
+    };
+    match state.write_config(|config| config.network.uplink = uplink) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(described),
+            );
+            (StatusCode::OK, Json(state.status())).into_response()
+        }
+        Err(rejection) => refusal(&rejection),
+    }
+}
+
+#[derive(Deserialize)]
+struct InstallationBody {
+    completed: bool,
+}
+
+/// Closes the installation, or reopens it.
+///
+/// Closing is refused while any step is outstanding: the flag only stops the
+/// wizard reappearing, so setting it early would leave an operational screen
+/// the appliance cannot honour. Reopening is always allowed.
+async fn set_installation(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(body): Json<InstallationBody>,
+) -> Response {
+    if body.completed {
+        let readiness = state.readiness();
+        let stage = readiness.stage();
+        if stage != Stage::Complete {
+            return error_response(
+                StatusCode::CONFLICT,
+                &format!("{stage} is not finished yet"),
+            );
+        }
+    }
+
+    let described = if body.completed {
+        "installation closed"
+    } else {
+        "installation reopened"
+    };
+    match state.write_config(|config| config.onboarding_completed = body.completed) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(described.to_owned()),
+            );
+            (StatusCode::OK, Json(state.status())).into_response()
+        }
+        Err(rejection) => refusal(&rejection),
+    }
+}
+
 /// Returns the stored service schedule, or `null` when none is declared.
 ///
 /// The schedule is read here rather than from `/api/status` because only the
@@ -598,18 +809,12 @@ async fn set_service_window(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(window): Json<Option<ServiceWindow>>,
 ) -> Response {
-    if let Some(window) = window.as_ref() {
-        if let Err(err) = window.validate() {
-            return error_response(StatusCode::BAD_REQUEST, &err.to_string());
-        }
-    }
-
     let described = window.as_ref().map_or_else(
         || "service schedule cleared".to_owned(),
         |window| format!("service schedule set ({})", window.timezone),
     );
 
-    match state.update_config(|config| config.service = window) {
+    match state.write_config(|config| config.service = window) {
         Ok(()) => {
             state.record(
                 Event::new(EventKind::ConfigurationChanged)
@@ -618,20 +823,7 @@ async fn set_service_window(
             );
             (StatusCode::OK, Json(state.service_state())).into_response()
         }
-        // The schedule was already found sound, so what remains is the
-        // appliance failing to record it — a read-only card, a full disk. That
-        // is not something the caller can correct by sending something else.
-        Err(err) => {
-            state.record(
-                Event::new(EventKind::ConfigurationChanged)
-                    .from_client(peer.ip())
-                    .with_detail(format!("service schedule rejected: {err}")),
-            );
-            error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "the appliance could not store the schedule",
-            )
-        }
+        Err(rejection) => refusal(&rejection),
     }
 }
 
@@ -817,7 +1009,8 @@ impl UplinkView {
 struct NodeView {
     node_id: String,
     role: flow_core::NodeRole,
-    mac: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mac: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     address: Option<String>,
 }
@@ -828,6 +1021,7 @@ mod tests {
 
     use flow_core::NodeRole;
     use http_body_util::BodyExt;
+    use serde_json::json;
     use tower::util::ServiceExt;
 
     use super::*;
@@ -851,13 +1045,13 @@ mod tests {
             PairedNode {
                 node_id: "tx-1".into(),
                 role: NodeRole::Tx,
-                mac: "1a:00:00:00:00:00".into(),
+                mac: Some("1a:00:00:00:00:00".into()),
                 address: None,
             },
             PairedNode {
                 node_id: "rx-1".into(),
                 role: NodeRole::Rx,
-                mac: "aa:bb:cc:00:00:01".into(),
+                mac: Some("aa:bb:cc:00:00:01".into()),
                 address: Some("192.168.4.51".parse().unwrap()),
             },
         ];
@@ -1353,16 +1547,224 @@ mod tests {
     /// An appliance whose configuration can actually be written, with the
     /// directory kept alive for the duration of the test.
     fn writable() -> (EdgeState, tempfile::TempDir) {
+        writable_with(installed(), true)
+    }
+
+    fn writable_with(
+        config: ApplianceConfig,
+        model_installed: bool,
+    ) -> (EdgeState, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("appliance.json");
-        let config = installed();
         config.save(&path).unwrap();
 
         let secret = DeviceSecret::parse(SECRET).unwrap();
         let credential = AdminCredential::establish(&secret, now_us()).unwrap();
         let journal = Journal::open_in_memory().unwrap();
-        let state = EdgeState::new(config, path, credential, true, journal);
+        let state = EdgeState::new(config, path, credential, model_installed, journal);
         (state, dir)
+    }
+
+    async fn put(
+        state: &EdgeState,
+        path: &str,
+        cookie: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        let (status, _, value) =
+            send(state, "PUT", path, Some(cookie), Some(body.to_string()), 10).await;
+        (status, value)
+    }
+
+    fn stored(state: &EdgeState) -> ApplianceConfig {
+        let path = state.lock().config_path.clone();
+        ApplianceConfig::load(&path).unwrap()
+    }
+
+    fn journal_details(state: &EdgeState) -> String {
+        // The journal batches writes for the SD card's sake, so a reader has
+        // to ask for them the way the housekeeping task does.
+        state.flush_journal();
+        state
+            .recent_events(50)
+            .into_iter()
+            .filter_map(|event| event.detail)
+            .collect::<Vec<String>>()
+            .join(" | ")
+    }
+
+    #[tokio::test]
+    async fn naming_the_site_is_stored_and_journalled() {
+        let (state, _dir) = writable_with(factory(), false);
+        let cookie = session_of(&state).await;
+
+        let (status, body) = put(
+            &state,
+            "/api/site",
+            &cookie,
+            json!({ "site_name": "  RU EFREI  " }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["site_name"], "RU EFREI");
+        assert_eq!(
+            stored(&state).identity.site_name.as_deref(),
+            Some("RU EFREI")
+        );
+        assert!(journal_details(&state).contains("RU EFREI"));
+    }
+
+    #[tokio::test]
+    async fn a_blank_site_name_is_refused_and_nothing_is_stored() {
+        let (state, _dir) = writable_with(factory(), false);
+        let cookie = session_of(&state).await;
+
+        let (status, body) = put(&state, "/api/site", &cookie, json!({ "site_name": "   " })).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"].as_str().unwrap().contains("site_name"));
+        assert!(stored(&state).identity.site_name.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_confirmed_pairing_replaces_the_node_list() {
+        let (state, _dir) = writable_with(factory(), false);
+        let cookie = session_of(&state).await;
+        let nodes = json!([
+            { "node_id": "tx-1", "role": "tx", "mac": "1a:00:00:00:00:00" },
+            { "node_id": "rx-1", "role": "rx", "mac": "aa:bb:cc:00:00:01", "address": "192.168.4.51" },
+        ]);
+
+        let (status, body) = put(&state, "/api/nodes", &cookie, nodes).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["readiness"]["nodes_paired"], true);
+        assert_eq!(stored(&state).nodes.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_pairing_the_appliance_cannot_use_is_refused_by_its_reason() {
+        let (state, _dir) = writable_with(factory(), false);
+        let cookie = session_of(&state).await;
+        let two_transmitters = json!([
+            { "node_id": "tx-1", "role": "tx", "mac": "1a:00:00:00:00:00" },
+            { "node_id": "tx-2", "role": "tx", "mac": "1a:00:00:00:00:01" },
+        ]);
+
+        let (status, body) = put(&state, "/api/nodes", &cookie, two_transmitters).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let message = body["error"].as_str().unwrap();
+        assert!(message.contains("transmitter"), "unhelpful: {message}");
+        assert!(!message.contains('/'), "leaks a path: {message}");
+        assert!(stored(&state).nodes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_uplink_is_journalled_by_shape_never_by_passphrase() {
+        // The journal is readable by anyone who can read the appliance, and
+        // the status surface already refuses to report secrets. A write must
+        // not be the way one escapes.
+        let (state, _dir) = writable_with(factory(), false);
+        let cookie = session_of(&state).await;
+        let uplink = json!({
+            "mode": "wifi",
+            "ssid": "campus",
+            "security": { "type": "wpa-personal", "passphrase": UPLINK_PASSPHRASE },
+            "addressing": { "method": "dhcp" },
+        });
+
+        let (status, body) = put(&state, "/api/uplink", &cookie, uplink).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["readiness"]["uplink_decided"], true);
+        assert_eq!(body["uplink"]["mode"], "wifi");
+        let details = journal_details(&state);
+        assert!(details.contains("campus"));
+        assert!(
+            !details.contains(UPLINK_PASSPHRASE),
+            "the journal carries the passphrase"
+        );
+    }
+
+    #[tokio::test]
+    async fn reopening_the_uplink_question_is_not_the_same_as_going_offline() {
+        let (state, _dir) = writable();
+        let cookie = session_of(&state).await;
+
+        let (status, body) = put(&state, "/api/uplink", &cookie, serde_json::Value::Null).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["readiness"]["uplink_decided"], false);
+        assert!(stored(&state).network.uplink.is_none());
+    }
+
+    #[tokio::test]
+    async fn an_unfinished_installation_cannot_be_closed() {
+        let (state, _dir) = writable_with(factory(), false);
+        let cookie = session_of(&state).await;
+
+        let (status, body) = put(
+            &state,
+            "/api/installation",
+            &cookie,
+            json!({ "completed": true }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("site identification")
+        );
+        assert!(!stored(&state).onboarding_completed);
+    }
+
+    #[tokio::test]
+    async fn a_finished_installation_closes_and_can_be_reopened() {
+        let mut config = installed();
+        config.onboarding_completed = false;
+        let (state, _dir) = writable_with(config, true);
+        let cookie = session_of(&state).await;
+
+        let (status, body) = put(
+            &state,
+            "/api/installation",
+            &cookie,
+            json!({ "completed": true }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["phase"]["phase"], "operational");
+        assert!(stored(&state).onboarding_completed);
+
+        let (status, body) = put(
+            &state,
+            "/api/installation",
+            &cookie,
+            json!({ "completed": false }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["phase"]["phase"], "onboarding");
+        assert!(!stored(&state).onboarding_completed);
+    }
+
+    #[tokio::test]
+    async fn the_onboarding_writes_are_closed_to_anonymous_callers() {
+        let (state, _dir) = writable();
+        for (path, body) in [
+            ("/api/site", json!({ "site_name": "x" })),
+            ("/api/nodes", json!([])),
+            ("/api/uplink", serde_json::Value::Null),
+            ("/api/installation", json!({ "completed": false })),
+        ] {
+            let (status, _, _) = send(&state, "PUT", path, None, Some(body.to_string()), 10).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{path} is open");
+        }
     }
 
     fn always_open() -> serde_json::Value {
@@ -1400,6 +1802,37 @@ mod tests {
         let path = state.lock().config_path.clone();
         let stored = ApplianceConfig::load(&path).unwrap();
         assert_eq!(stored.service.unwrap().timezone, "Europe/Paris");
+    }
+
+    #[tokio::test]
+    async fn discovery_is_closed_to_anonymous_callers() {
+        let state = state_for(installed(), true);
+        let (status, _, _) = send(&state, "GET", "/api/discovery", None, None, 10).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn discovery_offers_what_the_intake_has_seen() {
+        let state = state_for(installed(), true);
+        let cookie = session_of(&state).await;
+        state.set_observations(vec![flow_ingest::SenderObservation {
+            source: std::net::IpAddr::from([192, 168, 4, 53]),
+            tx_macs: vec!["1a:00:00:00:00:00".parse().unwrap()],
+            datagrams: 900,
+            first_seen_us: now_us() - 9_000_000,
+            last_seen_us: now_us(),
+            sampled: 32,
+        }]);
+
+        let (status, _, body) =
+            send(&state, "GET", "/api/discovery", Some(&cookie), None, 10).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["candidates"][0]["address"], "192.168.4.53");
+        // rx-1 is already configured, so the box just plugged in is offered
+        // the next free identifier rather than a colliding one.
+        assert_eq!(body["proposal"]["receivers"][0]["node_id"], "rx-2");
+        assert_eq!(body["proposal"]["tx_mac"], "1a:00:00:00:00:00");
     }
 
     #[tokio::test]
