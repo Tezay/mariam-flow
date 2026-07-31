@@ -22,7 +22,7 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
 
-use flow_core::NodeRole;
+use flow_core::{ClassMapping, NodeRole};
 use flow_infer::{WaitConfig, WaitEstimator};
 use flow_ingest::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,15 @@ pub struct ApplianceConfig {
     /// calibrated.
     #[serde(default)]
     pub site: Option<SiteTuning>,
+    /// What each density class means at this site.
+    ///
+    /// Decided once per site rather than per capture: two people labelling
+    /// the same queue must place the boundaries in the same place, and
+    /// re-answering the question every session is how they drift apart. Each
+    /// recorded session carries a copy, so the stored format stays readable
+    /// on its own.
+    #[serde(default)]
+    pub classes: Option<ClassMapping>,
     /// When the site serves, or `None` while no schedule is set.
     ///
     /// Absent means always open: an appliance whose hours have not been
@@ -357,6 +366,7 @@ impl ApplianceConfig {
                 uplink: None,
                 survey: None,
             },
+            classes: None,
             nodes: Vec::new(),
             site: None,
             service: None,

@@ -33,7 +33,9 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
 
-use crate::calibration::{SessionRequest, session_id, session_meta};
+use crate::calibration::{
+    RecordedSession, SessionRequest, recorded_sessions, session_id, session_meta, write_archive,
+};
 use crate::config::{ApplianceConfig, NetworkSurvey, PairedNode, Uplink};
 use crate::credential::AdminCredential;
 use crate::discovery::Discovery;
@@ -248,8 +250,14 @@ impl EdgeState {
     /// # Errors
     ///
     /// The transition the runtime refused.
-    pub fn begin_calibration(&self, session_id: &str) -> Result<(), crate::error::TransitionError> {
-        self.lock().runtime.start_calibration(session_id)
+    pub fn begin_calibration(
+        &self,
+        session_id: &str,
+        started_us: u64,
+    ) -> Result<(), crate::error::TransitionError> {
+        self.lock()
+            .runtime
+            .start_calibration(session_id, started_us)
     }
 
     /// Records that a usable session now exists at this site.
@@ -517,6 +525,7 @@ impl EdgeState {
             },
             uplink: UplinkView::of(config.network.uplink.as_ref()),
             survey: config.network.survey,
+            classes: config.classes.clone(),
             nodes: config
                 .nodes
                 .iter()
@@ -566,11 +575,18 @@ pub fn router(state: EdgeState) -> Router {
         .route("/api/nodes", put(set_nodes))
         .route("/api/uplink", put(set_uplink))
         .route("/api/network-survey", put(set_network_survey))
+        .route("/api/classes", put(set_classes))
         .route(
             "/api/calibration",
             post(start_calibration).delete(stop_calibration),
         )
         .route("/api/calibration/label", post(add_label))
+        .route("/api/sessions", get(sessions))
+        .route(
+            "/api/sessions/{session_id}",
+            axum::routing::delete(delete_session),
+        )
+        .route("/api/sessions/{session_id}/archive", get(session_archive))
         .route("/api/installation", put(set_installation))
         .route(
             "/api/service-window",
@@ -716,8 +732,19 @@ impl EdgeState {
 async fn live(
     State(state): State<EdgeState>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
-    let receiver = state.watch_estimates();
-    let stream = tokio_stream::wrappers::WatchStream::new(receiver).map(move |_| {
+    // Driven by a tick as well as by new estimates. On estimates alone, the
+    // stream falls silent in exactly the situations a watcher needs to hear
+    // about: every sensor gone quiet produces no estimate, so the screen
+    // would freeze on its last good state instead of reporting the silence —
+    // and a capture, which suspends estimation entirely, would show a clock
+    // that never advances.
+    let estimates = tokio_stream::wrappers::WatchStream::new(state.watch_estimates()).map(|_| ());
+    let ticks = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(
+        std::time::Duration::from_secs(1),
+    ))
+    .map(|_| ());
+
+    let stream = estimates.merge(ticks).map(move |()| {
         let event = SseEvent::default()
             .json_data(state.live_snapshot())
             .unwrap_or_else(|_| SseEvent::default().comment("snapshot unavailable"));
@@ -845,6 +872,137 @@ async fn set_uplink(
     }
 }
 
+/// Lists the captures recorded at this site, newest first.
+async fn sessions(State(state): State<EdgeState>) -> Json<Vec<RecordedSession>> {
+    let root = state.lock().data_dir.join("sessions");
+    Json(recorded_sessions(&root))
+}
+
+/// Removes a recorded capture.
+///
+/// Offered because a truncated or mistaken capture is dead weight on a card
+/// shared with everything else the appliance stores.
+async fn delete_session(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Response {
+    let root = state.lock().data_dir.join("sessions");
+    let Some(dir) = session_dir(&root, &session_id) else {
+        return error_response(StatusCode::BAD_REQUEST, "not a session identifier");
+    };
+    if !dir.is_dir() {
+        return error_response(StatusCode::NOT_FOUND, "no such session");
+    }
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::CalibrationStopped)
+                    .from_client(peer.ip())
+                    .with_detail(format!("session deleted: {session_id}")),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(err) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("could not delete the session: {err}"),
+        ),
+    }
+}
+
+/// The directory a session identifier names, or nothing if it names anything
+/// else.
+///
+/// Refused rather than sanitised: the identifier is a directory name, and a
+/// value that could climb out of the sessions root is not a mistyped session,
+/// it is not a session at all.
+fn session_dir(root: &std::path::Path, session_id: &str) -> Option<std::path::PathBuf> {
+    if session_id.is_empty() || session_id.contains(['/', '\\']) || session_id.contains("..") {
+        return None;
+    }
+    Some(root.join(session_id))
+}
+
+/// Sends one capture as a gzipped tar, for training elsewhere.
+///
+/// Written to a temporary file and streamed from it, rather than assembled in
+/// memory: a capture runs to tens of megabytes, on a machine with 512 MB.
+async fn session_archive(
+    State(state): State<EdgeState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Response {
+    let root = state.lock().data_dir.join("sessions");
+    let Some(session_dir) = session_dir(&root, &session_id) else {
+        return error_response(StatusCode::BAD_REQUEST, "not a session identifier");
+    };
+    if !session_dir.is_dir() {
+        return error_response(StatusCode::NOT_FOUND, "no such session");
+    }
+
+    let archive_path = root.join(format!("{session_id}.tar.gz"));
+    let built = {
+        let (dir, id, path) = (
+            session_dir.clone(),
+            session_id.clone(),
+            archive_path.clone(),
+        );
+        tokio::task::spawn_blocking(move || write_archive(&dir, &id, &path)).await
+    };
+    if !matches!(built, Ok(Ok(()))) {
+        let _ = std::fs::remove_file(&archive_path);
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not build the archive",
+        );
+    }
+
+    let Ok(file) = tokio::fs::File::open(&archive_path).await else {
+        let _ = std::fs::remove_file(&archive_path);
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not read the archive",
+        );
+    };
+    // Removed now: the open handle keeps it readable until the body is sent,
+    // so no half-built archive survives a client that walks away.
+    let _ = std::fs::remove_file(&archive_path);
+
+    let body = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(file));
+    (
+        [
+            (header::CONTENT_TYPE, "application/gzip".to_owned()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{session_id}.tar.gz\""),
+            ),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// Records what each density class means at this site.
+///
+/// A property of the queue rather than of one capture, so it is answered once
+/// and copied into every session recorded afterwards.
+async fn set_classes(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(classes): Json<Option<flow_core::ClassMapping>>,
+) -> Response {
+    match state.write_config(|config| config.classes = classes) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail("density classes described".to_owned()),
+            );
+            (StatusCode::OK, Json(state.status())).into_response()
+        }
+        Err(rejection) => refusal(&rejection),
+    }
+}
+
 /// Starts recording a labeled capture session.
 ///
 /// The session directory is created here rather than on the intake thread, so
@@ -866,9 +1024,18 @@ async fn start_calibration(
     if config.rx_node_ids().is_empty() {
         return error_response(StatusCode::CONFLICT, "no receiver is paired");
     }
+    // Refused rather than started empty: a capture recorded while nothing is
+    // being read produces a session with labels and no frames, and the person
+    // labelling would spend the hour finding out afterwards.
+    if !state.stream_health().running {
+        return error_response(
+            StatusCode::CONFLICT,
+            "the appliance is not reading any stream",
+        );
+    }
 
     let id = session_id(now_us(), &config.identity.kit_id);
-    if let Err(err) = state.begin_calibration(&id) {
+    if let Err(err) = state.begin_calibration(&id, now_us()) {
         return error_response(StatusCode::CONFLICT, &err.to_string());
     }
 
@@ -1203,6 +1370,8 @@ struct StatusResponse {
     uplink: UplinkView,
     #[serde(skip_serializing_if = "Option::is_none")]
     survey: Option<NetworkSurvey>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    classes: Option<flow_core::ClassMapping>,
     nodes: Vec<NodeView>,
 }
 
@@ -1586,7 +1755,7 @@ mod tests {
         let state = state_for(installed(), true);
         let cookie = session_of(&state).await;
         state
-            .with_runtime(|runtime| runtime.start_calibration("s-001"))
+            .with_runtime(|runtime| runtime.start_calibration("s-001", 0))
             .unwrap();
 
         let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
@@ -1789,6 +1958,13 @@ mod tests {
         writable_with(installed(), true)
     }
 
+    /// A state whose intake is reading, which starting a capture requires.
+    fn recording_ready() -> (EdgeState, tempfile::TempDir) {
+        let (state, dir) = writable();
+        state.set_stream_running(true);
+        (state, dir)
+    }
+
     fn writable_with(
         config: ApplianceConfig,
         model_installed: bool,
@@ -1954,7 +2130,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_capture_claims_the_stream_and_seals_its_directory() {
-        let (state, dir) = writable();
+        let (state, dir) = recording_ready();
         let cookie = session_of(&state).await;
 
         let (status, body) = post(&state, "/api/calibration", &cookie, json!({})).await;
@@ -1993,10 +2169,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn what_the_classes_mean_travels_with_the_session() {
+        // Answered once for the site, but each recorded session carries a
+        // copy: the stored format has to stay readable on its own, long after
+        // the appliance that produced it.
+        let (state, dir) = recording_ready();
+        let cookie = session_of(&state).await;
+        put(
+            &state,
+            "/api/classes",
+            &cookie,
+            json!({
+                "empty": "personne",
+                "low": "quelques personnes",
+                "medium": "file constituée",
+                "saturated": "file au-delà de la porte",
+            }),
+        )
+        .await;
+
+        post(&state, "/api/calibration", &cookie, json!({})).await;
+        send(
+            &state,
+            "DELETE",
+            "/api/calibration",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+
+        let session = std::fs::read_dir(dir.path().join("sessions"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let meta: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(session.join("meta.json")).unwrap()).unwrap();
+        assert_eq!(
+            meta["class_mapping"]["saturated"],
+            "file au-delà de la porte"
+        );
+    }
+
+    #[tokio::test]
     async fn a_second_capture_is_refused_while_one_is_running() {
         // The stream has one consumer at a time; the refusal is what keeps a
         // running capture from being cut short by a stray request.
-        let (state, _dir) = writable();
+        let (state, _dir) = recording_ready();
         let cookie = session_of(&state).await;
         post(&state, "/api/calibration", &cookie, json!({})).await;
 
@@ -2004,6 +2225,21 @@ mod tests {
 
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(state.is_recording(), "the running capture survived");
+    }
+
+    #[tokio::test]
+    async fn a_capture_is_refused_while_nothing_is_being_read() {
+        // A capture started with no stream records labels against no frames,
+        // and whoever is labelling finds out an hour later.
+        let (state, _dir) = writable();
+        let cookie = session_of(&state).await;
+        state.set_stream_running(false);
+
+        let (status, body) = post(&state, "/api/calibration", &cookie, json!({})).await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(body["error"].as_str().unwrap().contains("stream"));
+        assert!(!state.is_recording());
     }
 
     #[tokio::test]
@@ -2019,7 +2255,7 @@ mod tests {
 
     #[tokio::test]
     async fn labels_are_stamped_by_the_appliance_and_refused_without_a_capture() {
-        let (state, _dir) = writable();
+        let (state, _dir) = recording_ready();
         let cookie = session_of(&state).await;
 
         // Classes travel as the integers the canonical label format freezes,
@@ -2043,6 +2279,119 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn a_session_identifier_that_leaves_the_sessions_root_is_refused() {
+        // The identifier names a directory. A value that could climb out of
+        // the root is not a mistyped session, it is not a session at all —
+        // refused rather than sanitised into something that looks fine.
+        let (state, _dir) = recording_ready();
+        let cookie = session_of(&state).await;
+
+        for hostile in ["..", "../../etc", "a/b", "..%2Fetc"] {
+            let path = format!("/api/sessions/{hostile}/archive");
+            let (status, _, _) = send(&state, "GET", &path, Some(&cookie), None, 10).await;
+            assert_ne!(status, StatusCode::OK, "{hostile} was served");
+
+            let path = format!("/api/sessions/{hostile}");
+            let (status, _, _) = send(&state, "DELETE", &path, Some(&cookie), None, 10).await;
+            assert_ne!(status, StatusCode::NO_CONTENT, "{hostile} was deleted");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unknown_session_is_not_found_rather_than_an_error() {
+        let (state, _dir) = recording_ready();
+        let cookie = session_of(&state).await;
+
+        let (status, _, _) = send(
+            &state,
+            "GET",
+            "/api/sessions/kit-0042-20260731T140000Z/archive",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn a_recorded_session_is_listed_then_downloadable_then_removable() {
+        let (state, dir) = recording_ready();
+        let cookie = session_of(&state).await;
+        post(
+            &state,
+            "/api/calibration",
+            &cookie,
+            json!({ "environment": "midi" }),
+        )
+        .await;
+        send(
+            &state,
+            "DELETE",
+            "/api/calibration",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+
+        let (_, _, listed) = send(&state, "GET", "/api/sessions", Some(&cookie), None, 10).await;
+        let id = listed[0]["session_id"].as_str().unwrap().to_owned();
+        assert_eq!(listed[0]["environment"], "midi");
+        assert_eq!(listed[0]["sealed"], true);
+
+        let (status, headers, _) = send(
+            &state,
+            "GET",
+            &format!("/api/sessions/{id}/archive"),
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers.get(header::CONTENT_TYPE).unwrap(),
+            "application/gzip"
+        );
+        // The archive is streamed from a file that is unlinked immediately, so
+        // nothing half-built survives in the sessions directory.
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path().join("sessions"))
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "gz"))
+            .collect();
+        assert!(leftovers.is_empty(), "an archive was left behind");
+
+        let (status, _, _) = send(
+            &state,
+            "DELETE",
+            &format!("/api/sessions/{id}"),
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, _, listed) = send(&state, "GET", "/api/sessions", Some(&cookie), None, 10).await;
+        assert_eq!(listed.as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn the_session_surface_is_closed_to_anonymous_callers() {
+        let (state, _dir) = writable();
+        for (method, path) in [
+            ("GET", "/api/sessions"),
+            ("GET", "/api/sessions/s-001/archive"),
+            ("DELETE", "/api/sessions/s-001"),
+        ] {
+            let (status, _, _) = send(&state, method, path, None, None, 10).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path} is open");
+        }
     }
 
     #[tokio::test]
@@ -2161,6 +2510,7 @@ mod tests {
         let mut config = installed();
         config.onboarding_completed = false;
         let (state, _dir) = writable_with(config, true);
+        state.set_stream_running(true);
         let cookie = session_of(&state).await;
 
         // Recording a session is what finishes the installation; the model is

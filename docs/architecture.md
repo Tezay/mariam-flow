@@ -550,7 +550,23 @@ satisfied later from the settings.
 Session metadata is derived from the configuration wherever it can be — site,
 paired nodes, radio channel, software version. Only what the appliance cannot
 know is asked for: where each node sits, and what the density classes mean
-here.
+here. The class meanings are settled once per site and copied into every
+session, so the stored format stays readable on its own; asking again each
+time is how two people labelling one queue drift apart.
+
+A capture is **refused while nothing is being read**. Started with no stream,
+it records labels against no frames, and whoever is labelling finds out an
+hour later — the same failure the silent-sensor warning exists for, one level
+worse.
+
+Recorded sessions are listed newest first, sorted on the identifier itself so
+no filesystem timestamp is consulted and the order is the same everywhere.
+Each sealed one can be downloaded as a gzipped tar for training elsewhere,
+built into a temporary file and streamed from it — a capture runs to tens of
+megabytes on a machine with 512 MB — and unlinked as soon as it is open, so
+nothing half-built survives a client that walks away. A session identifier
+that could climb out of the sessions root is refused rather than sanitised: it
+names a directory, and a value that could escape is not a mistyped session.
 
 ### The machine underneath
 
@@ -647,7 +663,13 @@ flow-edge serve --config … --data-dir … \
 `EventSource` reconnects on its own when a phone's Wi-Fi drops. Each event
 carries the estimate **and** the stream health, because a missing estimate
 means one thing while the nodes are streaming and another once they have gone
-silent. Per-node frame counts and rates are measured on stream time rather
+silent.
+
+The stream is driven by a **one-second tick as well as by new estimates**. On
+estimates alone it falls silent in exactly the situations a watcher needs to
+hear about: every sensor gone quiet produces no estimate, so the screen would
+freeze on its last good state rather than report the silence, and a capture —
+which suspends estimation entirely — would show a clock that never advances. Per-node frame counts and rates are measured on stream time rather
 than the wall clock, so a replayed capture reports the rate it was recorded
 at.
 

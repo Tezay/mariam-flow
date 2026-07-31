@@ -599,6 +599,7 @@ dependencies = [
  "argon2",
  "axum",
  "clap",
+ "flate2",
  "flow-core",
  "flow-infer",
  "flow-ingest",
@@ -608,10 +609,12 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "tar",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tower",
 ]
 

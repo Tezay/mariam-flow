@@ -7,6 +7,7 @@
 
   import type { Status } from '$lib/api';
   import { hour12, locale, t, toggleHourCycle, toggleLocale } from '$lib/i18n/i18n.svelte';
+  import CalibrationPanel from '$components/CalibrationPanel.svelte';
   import LivePanel from '$components/LivePanel.svelte';
   import SettingsShell from '$components/SettingsShell.svelte';
 
@@ -92,6 +93,8 @@
     <main class="flex-1 px-4 pb-6">
       {#if active === 'live'}
         <LivePanel />
+      {:else if active === 'calibration'}
+        <CalibrationPanel {status} {onupdated} />
       {:else if active === 'settings'}
         <SettingsShell {status} {onupdated} />
       {:else}

@@ -174,6 +174,9 @@ pub enum RuntimeMode {
     Calibrating {
         /// Session being recorded.
         session_id: String,
+        /// When the capture began, so a screen reloaded mid-capture still
+        /// shows how long it has been running.
+        started_us: u64,
     },
     /// The live pipeline is producing wait-time estimates.
     Live,
@@ -228,10 +231,12 @@ impl Runtime {
     pub fn start_calibration(
         &mut self,
         session_id: impl Into<String>,
+        started_us: u64,
     ) -> Result<(), TransitionError> {
         self.ensure_idle()?;
         self.mode = RuntimeMode::Calibrating {
             session_id: session_id.into(),
+            started_us,
         };
         Ok(())
     }
@@ -421,7 +426,7 @@ mod tests {
         let mut runtime = Runtime::new();
         assert_eq!(*runtime.mode(), RuntimeMode::Idle);
 
-        runtime.start_calibration("s-001").unwrap();
+        runtime.start_calibration("s-001", 0).unwrap();
         assert_eq!(
             runtime.start_live(true),
             Err(TransitionError::StreamBusy {
@@ -429,7 +434,7 @@ mod tests {
             })
         );
         assert_eq!(
-            runtime.start_calibration("s-002"),
+            runtime.start_calibration("s-002", 0),
             Err(TransitionError::StreamBusy {
                 current: "calibration"
             })
@@ -437,7 +442,8 @@ mod tests {
         assert_eq!(
             *runtime.mode(),
             RuntimeMode::Calibrating {
-                session_id: "s-001".into()
+                session_id: "s-001".into(),
+                started_us: 0,
             },
             "the running session is untouched by refused requests"
         );
@@ -448,12 +454,12 @@ mod tests {
         let mut runtime = Runtime::new();
         runtime.start_live(true).unwrap();
         assert_eq!(
-            runtime.start_calibration("s-001"),
+            runtime.start_calibration("s-001", 0),
             Err(TransitionError::StreamBusy { current: "live" })
         );
 
         assert_eq!(runtime.stop(), RuntimeMode::Live);
-        runtime.start_calibration("s-001").unwrap();
+        runtime.start_calibration("s-001", 0).unwrap();
         assert_eq!(runtime.mode().label(), "calibration");
     }
 
