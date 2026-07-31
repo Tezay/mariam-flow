@@ -54,7 +54,10 @@
 {:else if screen.view === 'login'}
   <LoginScreen onauthenticated={() => void refresh()} />
 {:else if screen.status.phase.phase === 'onboarding'}
-  <WizardFrame status={screen.status} stage={screen.status.phase.stage} />
+  <WizardFrame
+    status={screen.status}
+    onupdated={(next) => (screen = { view: 'ready', status: next })}
+  />
 {:else}
   <TabShell status={screen.status} onsignout={() => void signOut()} />
 {/if}
