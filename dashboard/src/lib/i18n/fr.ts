@@ -122,6 +122,46 @@ export const fr: Messages = {
   'weekday.saturday': 'Samedi',
   'weekday.sunday': 'Dimanche',
 
+  'wizard.back': 'Revenir à {step}',
+  'wizard.saving': 'Enregistrement…',
+  'wizard.failed': "Le boîtier est injoignable. Rien n'a été enregistré.",
+  'wizard.refused': 'Le boîtier a refusé : {message}',
+
+  'site.label': 'Nom du site',
+  'site.placeholder': 'Cantine rez-de-chaussée',
+  'site.hint': 'Un nom que vous reconnaîtrez plus tard, en support et dans les rapports.',
+  'site.submit': 'Continuer',
+
+  'pair.waiting': 'En attente des capteurs. Alimentez-les et laissez-les fonctionner.',
+  'pair.heard': '{count} capteur(s) entendu(s)',
+  'pair.transmitter': 'Émetteur',
+  'pair.transmitterAgreed': 'rapporté par {count} récepteur(s)',
+  'pair.transmitterMissing': "Aucun émetteur identifié pour l'instant.",
+  'pair.receivers': 'Récepteurs',
+  'pair.rate': '{value} trames/s',
+  'pair.shortfall':
+    "Seulement {found} récepteur(s) ont répondu ; cette installation en prévoit {expected}. Vous pouvez continuer et ajouter l'autre plus tard.",
+  'pair.confirm': 'Appairer ces capteurs',
+  'pair.paired': '{count} nœud(s) appairé(s)',
+
+  'net.lead':
+    "Choisissez comment le boîtier atteint le réseau du site. Il s'y connecte de lui-même une fois enregistré.",
+  'net.offline': 'Rester hors ligne',
+  'net.offlineHint':
+    'Tout fonctionne sur place ; seule la supervision à distance est indisponible.',
+  'net.wifi': 'Wi-Fi du site',
+  'net.wifiHint': "Rejoint par l'adaptateur USB du boîtier, jamais par la radio des capteurs.",
+  'net.ethernet': 'Filaire',
+  'net.ethernetHint': 'Par un adaptateur USB Ethernet.',
+  'net.ssid': 'Nom du réseau',
+  'net.passphrase': 'Clé',
+  'net.passphraseHint': 'Laissez vide pour un réseau ouvert.',
+  'net.submit': 'Continuer',
+
+  'done.lead': "Tout est prêt. Clôturer l'installation ouvre les écrans de supervision.",
+  'done.submit': "Terminer l'installation",
+  'done.blocked': 'Une étape reste à faire.',
+
   'wizard.progress': 'Étape {current} sur {total}',
   'wizard.stage.site': 'Nommer le site',
   'wizard.stage.nodes': 'Brancher les capteurs',

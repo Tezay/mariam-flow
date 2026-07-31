@@ -124,6 +124,45 @@ export const en = {
   'weekday.saturday': 'Saturday',
   'weekday.sunday': 'Sunday',
 
+  'wizard.back': 'Back to {step}',
+  'wizard.saving': 'Saving…',
+  'wizard.failed': 'Could not reach the appliance. Nothing was saved.',
+  'wizard.refused': 'The appliance refused this: {message}',
+
+  'site.label': 'Site name',
+  'site.placeholder': 'Ground-floor canteen',
+  'site.hint': 'A name you will recognise later, in support and in reports.',
+  'site.submit': 'Continue',
+
+  'pair.waiting': 'Waiting for the sensors to appear. Power them and leave them running.',
+  'pair.heard': '{count} sensor(s) heard',
+  'pair.transmitter': 'Transmitter',
+  'pair.transmitterAgreed': 'reported by {count} receiver(s)',
+  'pair.transmitterMissing': 'No transmitter identified yet.',
+  'pair.receivers': 'Receivers',
+  'pair.rate': '{value} frames/s',
+  'pair.shortfall':
+    'Only {found} receiver(s) answered; this installation is designed for {expected}. You can continue and add the other later.',
+  'pair.confirm': 'Pair these sensors',
+  'pair.paired': '{count} node(s) paired',
+
+  'net.lead':
+    'Choose how the appliance reaches the site network. It connects on its own once saved.',
+  'net.offline': 'Stay offline',
+  'net.offlineHint': 'Everything works on site; only remote supervision is unavailable.',
+  'net.wifi': 'Site Wi-Fi',
+  'net.wifiHint': 'Joined through the appliance USB adapter, never the sensor radio.',
+  'net.ethernet': 'Wired',
+  'net.ethernetHint': 'Through a USB Ethernet adapter.',
+  'net.ssid': 'Network name',
+  'net.passphrase': 'Passphrase',
+  'net.passphraseHint': 'Leave empty for an open network.',
+  'net.submit': 'Continue',
+
+  'done.lead': 'Everything is set. Closing the installation opens the supervision screens.',
+  'done.submit': 'Finish installation',
+  'done.blocked': 'One step is still outstanding.',
+
   'wizard.progress': 'Step {current} of {total}',
   'wizard.stage.site': 'Name the site',
   'wizard.stage.nodes': 'Connect the sensors',

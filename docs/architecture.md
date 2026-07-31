@@ -498,10 +498,23 @@ appliance with no uplink is a supported mode, and the dashboard must render
 identically there.
 
 The shell follows the appliance's phase rather than guessing: during
-installation it is a full-frame wizard with no navigation, and the tabbed
-shell appears only once the installation is closed. Translations are
-dictionaries in the repository — English is the reference, other locales are
-typed against it, so a missing key fails the build rather than the customer.
+installation it is a full-frame wizard, and the tabbed shell appears only once
+the installation is closed. Translations are dictionaries in the repository —
+English is the reference, other locales are typed against it, so a missing key
+fails the build rather than the customer.
+
+The wizard shows the first step the appliance's readiness leaves unsatisfied,
+never a position the browser advances: an installation interrupted mid-step
+resumes where the stored facts stand, whatever the browser was showing. Its
+stepper doubles as the only navigation — a finished step is a button back to
+itself, which also lets it show steps satisfied out of order. Each screen is
+one question, with a reserved frame beside it on a wide screen and above it on
+a phone; the frame holds its space whether or not it has artwork in it.
+
+The pairing screen polls what the intake has heard and offers the appliance's
+proposal for confirmation. Fewer receivers than the design expects is said,
+never enforced: a second receiver may be installed later, and refusing to
+continue would equally block repairing an installation that has lost one.
 
 Embedding sits behind an optional Cargo feature, off by default: the crate
 has to build, test and be developed on a machine with no Node installed, and
