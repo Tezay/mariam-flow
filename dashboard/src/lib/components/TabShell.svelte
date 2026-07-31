@@ -8,10 +8,13 @@
   import type { Status } from '$lib/api';
   import { hour12, locale, t, toggleHourCycle, toggleLocale } from '$lib/i18n/i18n.svelte';
   import LivePanel from '$components/LivePanel.svelte';
-  import ServiceHoursPanel from '$components/ServiceHoursPanel.svelte';
-  import StatusPanel from '$components/StatusPanel.svelte';
+  import SettingsShell from '$components/SettingsShell.svelte';
 
-  let { status, onsignout }: { status: Status; onsignout: () => void } = $props();
+  let {
+    status,
+    onsignout,
+    onupdated,
+  }: { status: Status; onsignout: () => void; onupdated: (status: Status) => void } = $props();
 
   type Tab = 'live' | 'nodes' | 'calibration' | 'settings';
   let active = $state<Tab>('live');
@@ -90,10 +93,7 @@
       {#if active === 'live'}
         <LivePanel />
       {:else if active === 'settings'}
-        <div class="space-y-4">
-          <StatusPanel {status} />
-          <ServiceHoursPanel />
-        </div>
+        <SettingsShell {status} {onupdated} />
       {:else}
         <p class="rounded-lg bg-white p-4 text-sm text-ink-500">{t('wizard.comingNext')}</p>
       {/if}

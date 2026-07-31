@@ -33,13 +33,10 @@ export const en = {
   'tab.settings': 'Settings',
 
   'status.kit': 'Kit',
-  'status.site': 'Site',
-  'status.siteUnnamed': 'Not named yet',
   'status.model': 'Model',
   'status.modelInstalled': 'Installed',
   'status.modelMissing': 'None',
   'status.activity': 'Activity',
-  'status.network': 'Network',
   'status.sensorAp': 'Sensor network',
   'status.channel': 'channel {channel}',
   'status.uplink': 'Site uplink',
@@ -52,8 +49,6 @@ export const en = {
   'runtime.idle': 'Idle',
   'runtime.calibrating': 'Calibrating',
   'runtime.live': 'Estimating',
-
-  'nodes.title': 'Sensing nodes',
   'nodes.none': 'No node paired yet.',
   'nodes.role.tx': 'Transmitter',
   'nodes.role.rx': 'Receiver',
@@ -88,6 +83,69 @@ export const en = {
   'class.low': 'Low',
   'class.medium': 'Medium',
   'class.saturated': 'Saturated',
+
+  'ask.title': 'What does the site network ask for?',
+  'ask.lead':
+    'Answer as if you were joining it with a phone. The appliance works out what that means.',
+  'ask.shared-password': 'A password, the same for everyone',
+  'ask.account': 'A username and a personal password',
+  'ask.sign-in-page': 'A web page to sign in on, after joining',
+  'ask.certificate': 'A certificate installed on the device first',
+  'ask.nothing': 'Nothing at all — it is open',
+  'ask.unknown': 'I do not know',
+  'ask.registration': 'A new device has to be declared before it can connect',
+  'ask.registrationHint':
+    'If you plug something in and it just works, leave this unticked. Ticking it asks for the appliance to be allowed onto the network.',
+  'ask.fixedAddress': 'The network team hands out an address to type in by hand',
+  'ask.fixedAddressHint':
+    'Most networks give one out automatically. Ticking this asks them for the address, mask, gateway and DNS instead.',
+  'ask.credentials': 'Network details',
+  'ask.credentialsPending':
+    'The network team has not answered yet. Come back and fill this in once they have, or leave the appliance offline meanwhile.',
+  'ask.unsupported':
+    'This kind of network is not supported yet, so there is nothing to fill in here. The request below is what unblocks it.',
+  'ask.joinable': 'The appliance can join this network on its own.',
+  'ask.needsAdmin':
+    'The appliance cannot join this network unaided. Hand the request below to the site network team; meanwhile it can use a wired port, or run offline.',
+  'ask.handout': 'Open the request for the network team',
+
+  'handout.title': 'Request for the site network team',
+  'handout.forWhom': 'Hand this to the site network team',
+  'ask.recorded': 'Answer recorded',
+  'handout.lead': 'Everything the network team needs in order to act on this appliance.',
+  'handout.print': 'Print',
+  'handout.download': 'Download as Markdown',
+  'handout.appliance': 'The appliance',
+  'handout.kit': 'Kit',
+  'handout.site': 'Site',
+  'handout.sensorAp': 'Sensor network (never bridged to yours)',
+  'handout.uplinkMac': 'Hardware address of the uplink adapter',
+  'handout.uplinkMacHint': 'To be filled in on site once the adapter is fitted.',
+  'handout.asks': 'What we ask for',
+  'handout.ask.wifi-access': 'Access to the site Wi-Fi, with its network name and password.',
+  'handout.ask.wired-port': 'An active network socket near the appliance, on an equipment VLAN.',
+  'handout.ask.allow-address': 'The hardware address above allowed onto the network.',
+  'handout.ask.reserve-address':
+    'A DHCP reservation on that address, so the administration interface stays reachable.',
+  'handout.ask.fixed-address': 'A fixed address, mask, gateway and DNS servers.',
+  'handout.ask.exempt-from-authentication':
+    'An exemption from 802.1X for that address, or a wired port on a VLAN without it.',
+  'handout.ask.exempt-from-portal':
+    'An exemption from the sign-in page for that address: the appliance has no browser.',
+  'handout.flows': 'Network flows',
+  'handout.flowsLead':
+    'No inbound flow from the internet is required, and no port forwarding. Outbound: NTP (123/UDP) and DNS (53). Volume is negligible.',
+  'handout.privacy':
+    'Only aggregated values ever leave the site — waiting time, density level, confidence, timestamp. No raw radio measurement leaves the appliance.',
+
+  'settings.site': 'Site',
+  'settings.nodes': 'Sensors',
+  'settings.network': 'Network',
+  'settings.hours': 'Service hours',
+  'settings.system': 'System',
+  'settings.back': 'Settings',
+  'settings.siteSaved': 'Site name saved.',
+  'settings.save': 'Save',
 
   'hours.title': 'Service hours',
   'hours.lead':
@@ -144,7 +202,6 @@ export const en = {
   'pair.shortfall':
     'Only {found} receiver(s) answered; this installation is designed for {expected}. You can continue and add the other later.',
   'pair.confirm': 'Pair these sensors',
-  'pair.paired': '{count} node(s) paired',
 
   'net.lead':
     'Choose how the appliance reaches the site network. It connects on its own once saved.',
@@ -161,7 +218,6 @@ export const en = {
 
   'done.lead': 'Everything is set. Closing the installation opens the supervision screens.',
   'done.submit': 'Finish installation',
-  'done.blocked': 'One step is still outstanding.',
 
   'wizard.progress': 'Step {current} of {total}',
   'wizard.stage.site': 'Name the site',

@@ -79,3 +79,28 @@
     }
   }
 }
+
+/*
+ * Printing the network request prints only the request.
+ *
+ * Visibility rather than display: an element kept visible inside hidden
+ * ancestors still lays out, so the sheet keeps its own margins instead of
+ * collapsing. Done in CSS because the appliance has 512 MB and no business
+ * carrying a document renderer.
+ */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .print-sheet,
+  .print-sheet * {
+    visibility: visible;
+  }
+
+  .print-sheet {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline: 0;
+  }
+}

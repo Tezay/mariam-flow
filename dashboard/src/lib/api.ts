@@ -28,6 +28,19 @@ export type SensingNode = {
   address?: string;
 };
 
+/** What joining the site's network asks of a device. */
+export type SiteAuthentication =
+  'nothing' | 'shared-password' | 'account' | 'certificate' | 'sign-in-page' | 'unknown';
+
+/** What the installer found out about the site's network. */
+export type NetworkSurvey = {
+  authentication: SiteAuthentication;
+  /** Devices must be declared before they are allowed on. */
+  registration_required: boolean;
+  /** The site hands out a fixed address rather than using DHCP. */
+  fixed_address: boolean;
+};
+
 export type Uplink = {
   mode: 'undecided' | 'offline' | 'wifi' | 'ethernet';
   ssid?: string;
@@ -77,6 +90,7 @@ export type Status = {
   service: ServiceState;
   sensor_ap: { ssid: string; channel: number };
   uplink: Uplink;
+  survey?: NetworkSurvey;
   nodes: SensingNode[];
 };
 
@@ -149,6 +163,11 @@ export function saveSite(siteName: string): Promise<WriteOutcome> {
 /** Replaces the paired nodes with the set the installer confirmed. */
 export function saveNodes(nodes: SensingNode[]): Promise<WriteOutcome> {
   return put('/api/nodes', nodes);
+}
+
+/** Records what the site's network was found to ask for. */
+export function saveNetworkSurvey(survey: NetworkSurvey | null): Promise<WriteOutcome> {
+  return put('/api/network-survey', survey);
 }
 
 /** Records how the appliance reaches the site network, or that it will not. */

@@ -31,13 +31,10 @@ export const fr: Messages = {
   'tab.settings': 'Réglages',
 
   'status.kit': 'Kit',
-  'status.site': 'Site',
-  'status.siteUnnamed': 'Pas encore nommé',
   'status.model': 'Modèle',
   'status.modelInstalled': 'Installé',
   'status.modelMissing': 'Aucun',
   'status.activity': 'Activité',
-  'status.network': 'Réseau',
   'status.sensorAp': 'Réseau des capteurs',
   'status.channel': 'canal {channel}',
   'status.uplink': 'Liaison au site',
@@ -50,8 +47,6 @@ export const fr: Messages = {
   'runtime.idle': 'En attente',
   'runtime.calibrating': 'Calibration',
   'runtime.live': 'Estimation',
-
-  'nodes.title': 'Capteurs',
   'nodes.none': 'Aucun capteur appairé pour le moment.',
   'nodes.role.tx': 'Émetteur',
   'nodes.role.rx': 'Récepteur',
@@ -86,6 +81,70 @@ export const fr: Messages = {
   'class.low': 'Faible',
   'class.medium': 'Moyenne',
   'class.saturated': 'Saturée',
+
+  'ask.title': 'Que demande le réseau du site ?',
+  'ask.lead':
+    'Répondez comme si vous vous y connectiez avec un téléphone. Le boîtier en déduit ce que ça implique.',
+  'ask.shared-password': 'Un mot de passe, le même pour tout le monde',
+  'ask.account': 'Un identifiant et un mot de passe personnels',
+  'ask.sign-in-page': 'Une page web de connexion, une fois connecté',
+  'ask.certificate': "Un certificat à installer sur l'appareil au préalable",
+  'ask.nothing': 'Rien du tout — il est ouvert',
+  'ask.unknown': 'Je ne sais pas',
+  'ask.registration': 'Un nouvel appareil doit être déclaré avant de pouvoir se connecter',
+  'ask.registrationHint':
+    "Si vous branchez un appareil et qu'il fonctionne tout seul, laissez décoché. Cocher ajoute une demande d'autorisation pour le boîtier.",
+  'ask.fixedAddress': 'Le service réseau fournit une adresse à saisir à la main',
+  'ask.fixedAddressHint':
+    "La plupart des réseaux en attribuent une automatiquement. Cocher demande à la place l'adresse, le masque, la passerelle et les DNS.",
+  'ask.credentials': 'Informations du réseau',
+  'ask.credentialsPending':
+    "Le service réseau n'a pas encore répondu. Revenez remplir ceci quand ce sera le cas, ou laissez le boîtier hors ligne en attendant.",
+  'ask.unsupported':
+    "Ce type de réseau n'est pas encore pris en charge : il n'y a rien à renseigner ici. C'est la demande ci-dessous qui débloque la situation.",
+  'ask.joinable': 'Le boîtier peut rejoindre ce réseau par lui-même.',
+  'ask.needsAdmin':
+    'Le boîtier ne peut pas rejoindre ce réseau sans aide. Transmettez la demande ci-dessous au service réseau du site ; en attendant, il peut utiliser une prise filaire ou fonctionner hors ligne.',
+  'ask.handout': 'Ouvrir la demande pour le service réseau',
+
+  'handout.title': 'Demande pour le service réseau du site',
+  'handout.forWhom': 'À transmettre au service réseau du site',
+  'ask.recorded': 'Réponse enregistrée',
+  'handout.lead': 'Tout ce dont le service réseau a besoin pour traiter la demande.',
+  'handout.print': 'Imprimer',
+  'handout.download': 'Télécharger en Markdown',
+  'handout.appliance': "L'équipement",
+  'handout.kit': 'Kit',
+  'handout.site': 'Site',
+  'handout.sensorAp': 'Réseau des capteurs (jamais ponté avec le vôtre)',
+  'handout.uplinkMac': "Adresse matérielle de l'adaptateur de liaison",
+  'handout.uplinkMacHint': "À compléter sur place une fois l'adaptateur monté.",
+  'handout.asks': 'Ce que nous demandons',
+  'handout.ask.wifi-access': 'Un accès au Wi-Fi du site, avec son nom de réseau et sa clé.',
+  'handout.ask.wired-port':
+    'Une prise réseau active à proximité du boîtier, sur un VLAN équipements.',
+  'handout.ask.allow-address': "L'adresse matérielle ci-dessus autorisée sur le réseau.",
+  'handout.ask.reserve-address':
+    "Une réservation DHCP sur cette adresse, afin que l'interface d'administration reste joignable.",
+  'handout.ask.fixed-address': 'Une adresse fixe, un masque, une passerelle et des serveurs DNS.',
+  'handout.ask.exempt-from-authentication':
+    "Une dérogation au 802.1X pour cette adresse, ou une prise filaire sur un VLAN qui ne l'impose pas.",
+  'handout.ask.exempt-from-portal':
+    "Une dérogation à la page de connexion pour cette adresse : le boîtier n'a pas de navigateur.",
+  'handout.flows': 'Flux réseau',
+  'handout.flowsLead':
+    "Aucun flux entrant depuis internet n'est requis, ni aucune redirection de port. Sortant : NTP (123/UDP) et DNS (53). Volumétrie négligeable.",
+  'handout.privacy':
+    "Seules des valeurs agrégées quittent le site — temps d'attente, niveau de densité, confiance, horodatage. Aucune mesure radio brute ne sort du boîtier.",
+
+  'settings.site': 'Site',
+  'settings.nodes': 'Capteurs',
+  'settings.network': 'Réseau',
+  'settings.hours': 'Horaires de service',
+  'settings.system': 'Système',
+  'settings.back': 'Réglages',
+  'settings.siteSaved': 'Nom du site enregistré.',
+  'settings.save': 'Enregistrer',
 
   'hours.title': 'Horaires de service',
   'hours.lead':
@@ -142,7 +201,6 @@ export const fr: Messages = {
   'pair.shortfall':
     "Seulement {found} récepteur(s) ont répondu ; cette installation en prévoit {expected}. Vous pouvez continuer et ajouter l'autre plus tard.",
   'pair.confirm': 'Appairer ces capteurs',
-  'pair.paired': '{count} nœud(s) appairé(s)',
 
   'net.lead':
     "Choisissez comment le boîtier atteint le réseau du site. Il s'y connecte de lui-même une fois enregistré.",
@@ -160,7 +218,6 @@ export const fr: Messages = {
 
   'done.lead': "Tout est prêt. Clôturer l'installation ouvre les écrans de supervision.",
   'done.submit': "Terminer l'installation",
-  'done.blocked': 'Une étape reste à faire.',
 
   'wizard.progress': 'Étape {current} sur {total}',
   'wizard.stage.site': 'Nommer le site',
