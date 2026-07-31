@@ -26,10 +26,15 @@ http-body-util = "0.1"
 # Reads the system time-zone database on Unix, so no copy is carried in the
 # binary; Raspberry Pi OS ships one.
 jiff = "0.2"
+# Pure-Rust deflate (miniz_oxide backend), so the archive path cross-compiles
+# like the rest of the workspace.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+tar = "0.4"
+tokio-util = { version = "0.7", features = ["io"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time", "fs"] }
 tower = { version = "0.5", features = ["util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

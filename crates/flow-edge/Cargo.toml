@@ -23,7 +23,10 @@ clap.workspace = true
 flow-core.workspace = true
 flow-infer.workspace = true
 flow-ingest.workspace = true
+flate2.workspace = true
 jiff.workspace = true
+tar.workspace = true
+tokio-util.workspace = true
 rusqlite.workspace = true
 rust-embed = { workspace = true, optional = true }
 serde.workspace = true

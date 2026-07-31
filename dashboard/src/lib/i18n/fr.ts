@@ -137,6 +137,54 @@ export const fr: Messages = {
   'handout.privacy':
     "Seules des valeurs agrégées quittent le site — temps d'attente, niveau de densité, confiance, horodatage. Aucune mesure radio brute ne sort du boîtier.",
 
+  'cal.title': 'Calibration',
+  'cal.lead':
+    "Enregistrez à quoi ressemble la file, pour qu'un modèle puisse être entraîné pour ce site. L'enregistrement est exporté et entraîné ailleurs ; le modèle revient ensuite.",
+  'cal.classes': 'Ce que les niveaux signifient ici',
+  'cal.classesLead':
+    'Décidé une fois pour le site. Deux personnes qui labellisent la même file doivent placer les frontières au même endroit.',
+  'cal.classesSaved': 'Descriptions enregistrées.',
+  'cal.environment': "Ce qu'on enregistre",
+  'cal.environmentHint': 'Par exemple : hall principal, service du midi, jour de pluie.',
+  'cal.positions': 'Où sont les capteurs',
+  'cal.positionsHint': 'Facultatif, et repris du dernier enregistrement.',
+  'cal.start': "Démarrer l'enregistrement",
+  'cal.starting': 'Démarrage…',
+  'cal.notReady': "Appairez les capteurs avant d'enregistrer.",
+  'cal.recording': 'Enregistrement en cours',
+  'cal.stop': 'Arrêter et conserver',
+  'cal.stopping': 'Scellement…',
+  'cal.frames': '{value} trames',
+  'cal.labels': '{value} marques',
+  'cal.elapsed': 'Enregistre depuis {value}',
+  'cal.since': 'depuis {value}',
+  'cal.pressToBegin':
+    "Appuyez sur le niveau que vous voyez. Rien de ce qui précède le premier appui n'est conservé.",
+  'cal.discarding':
+    "Aucune marque pour l'instant : rien de ce qui est enregistré ne pourra servir à l'entraînement. Appuyez sur le niveau que vous voyez.",
+  'cal.silent': 'Un capteur est devenu silencieux. Vérifiez-le avant de continuer.',
+  'cal.done': 'Enregistrement conservé.',
+  'cal.history': 'Enregistrements',
+  'cal.historyEmpty': 'Rien enregistré ici pour le moment.',
+  'cal.export': 'Télécharger',
+  'cal.unfinished': 'Jamais terminé',
+  'cal.newRecording': 'Nouvel enregistrement',
+  'cal.confirmStop': 'Arrêter et conserver cet enregistrement ?',
+  'cal.confirmStopLead':
+    "L'enregistrement est scellé et ne peut pas reprendre. Vous pourrez en démarrer un autre.",
+  'cal.confirmYes': 'Arrêter et conserver',
+  'cal.confirmNo': "Continuer l'enregistrement",
+  'cal.size': '{value} Mo',
+  'cal.delete': 'Supprimer',
+  'cal.confirmDelete': 'Supprimer cet enregistrement ?',
+  'cal.confirmDeleteLead':
+    "Il ne pourra pas être récupéré. Téléchargez-le d'abord si vous en avez encore besoin.",
+  'cal.page': 'Page {current} sur {total}',
+  'cal.previous': 'Précédent',
+  'cal.next': 'Suivant',
+  'cal.noStream':
+    "Rien n'arrive des capteurs. Un enregistrement démarré maintenant ne contiendrait aucune donnée.",
+
   'system.model': 'Carte',
   'system.os': "Système d'exploitation",
   'system.kernel': 'Noyau',

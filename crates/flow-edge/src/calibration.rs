@@ -5,7 +5,7 @@
 //! cannot know is requested from the operator: where each node physically
 //! sits, and what the density classes mean at this site.
 
-use flow_core::{ClassMapping, NodePlacement, SessionMeta};
+use flow_core::{NodePlacement, SessionMeta};
 use serde::{Deserialize, Serialize};
 
 use crate::config::ApplianceConfig;
@@ -23,9 +23,6 @@ pub struct SessionRequest {
     /// empty position rather than blocking the session.
     #[serde(default)]
     pub positions: std::collections::BTreeMap<String, String>,
-    /// What each density class means at this site.
-    #[serde(default)]
-    pub class_mapping: ClassMapping,
 }
 
 /// Builds a session identifier from the appliance clock.
@@ -100,7 +97,9 @@ pub fn session_meta(
         // ask them; recorded as unknown rather than guessed.
         firmware_version: String::new(),
         software_version: env!("CARGO_PKG_VERSION").to_owned(),
-        class_mapping: request.class_mapping.clone(),
+        // Copied from the site rather than taken from the request: the
+        // meaning of a class is a property of the queue, not of one capture.
+        class_mapping: config.classes.clone().unwrap_or_default(),
     }
 }
 
@@ -115,7 +114,11 @@ pub fn has_sealed_session(sessions_root: &std::path::Path) -> bool {
         return false;
     };
     entries.flatten().any(|entry| {
-        entry.path().is_dir() && !entry.file_name().to_string_lossy().ends_with(".recording")
+        entry.path().is_dir()
+            && !entry
+                .file_name()
+                .to_string_lossy()
+                .ends_with(RECORDING_SUFFIX)
     })
 }
 
@@ -161,6 +164,91 @@ mod tests {
 
         std::fs::create_dir(sessions.join("kit-0042-20260731T120000Z")).unwrap();
         assert!(has_sealed_session(&sessions));
+    }
+
+    #[test]
+    fn sessions_are_listed_newest_first_with_the_unfinished_marked() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = dir.path().join("sessions");
+        for name in [
+            "kit-0042-20260731T090000Z",
+            "kit-0042-20260731T140000Z",
+            "kit-0042-20260731T180000Z.recording",
+        ] {
+            std::fs::create_dir_all(sessions.join(name)).unwrap();
+        }
+        std::fs::write(
+            sessions.join("kit-0042-20260731T140000Z/csi.ndjson"),
+            b"0123456789",
+        )
+        .unwrap();
+
+        let listed = recorded_sessions(&sessions);
+
+        // Newest first, read off the identifier itself: no filesystem
+        // timestamp is consulted, so the order is the same everywhere.
+        let ids: Vec<&str> = listed.iter().map(|s| s.session_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "kit-0042-20260731T180000Z",
+                "kit-0042-20260731T140000Z",
+                "kit-0042-20260731T090000Z"
+            ]
+        );
+        assert!(!listed[0].sealed, "a capture still running is not sealed");
+        assert!(listed[1].sealed);
+        assert_eq!(listed[1].bytes, 10);
+    }
+
+    #[test]
+    fn a_listing_reads_the_time_back_off_the_identifier() {
+        // Built from the clock, so it already carries the answer; a second
+        // stored copy could disagree with the directory it names.
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = dir.path().join("sessions");
+        std::fs::create_dir_all(sessions.join("kit-0042-20260731T140000Z")).unwrap();
+        std::fs::create_dir_all(sessions.join("hand-made")).unwrap();
+
+        let listed = recorded_sessions(&sessions);
+        let dated = listed
+            .iter()
+            .find(|s| s.session_id == "kit-0042-20260731T140000Z")
+            .unwrap();
+        assert_eq!(dated.recorded_at_us, Some(1_785_506_400_000_000));
+
+        // A directory that was not named by the appliance simply has no date.
+        let other = listed.iter().find(|s| s.session_id == "hand-made").unwrap();
+        assert!(other.recorded_at_us.is_none());
+    }
+
+    #[test]
+    fn nothing_recorded_lists_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(recorded_sessions(&dir.path().join("sessions")).is_empty());
+    }
+
+    #[test]
+    fn an_archive_holds_the_session_under_its_own_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("s-001");
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::write(session.join("meta.json"), b"{}").unwrap();
+        let archive = dir.path().join("s-001.tar.gz");
+
+        write_archive(&session, "s-001", &archive).unwrap();
+
+        // Extracting must not scatter files into the current directory: the
+        // archive carries its own top-level directory.
+        let file = std::fs::File::open(&archive).unwrap();
+        let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
+        let paths: Vec<String> = tar
+            .entries()
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(paths.iter().any(|p| p == "s-001/meta.json"), "{paths:?}");
     }
 
     #[test]
@@ -231,4 +319,113 @@ mod tests {
 
         assert_eq!(meta.software_version, env!("CARGO_PKG_VERSION"));
     }
+}
+
+/// One recorded session, as the dashboard lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RecordedSession {
+    /// Session identifier, which is also its directory name.
+    pub session_id: String,
+    /// Free-text description given when the capture was started.
+    pub environment: String,
+    /// Bytes the session occupies, so an operator can judge a transfer.
+    pub bytes: u64,
+    /// When the capture began, read back from the identifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded_at_us: Option<u64>,
+    /// Whether the capture was sealed. An unsealed one is a capture that
+    /// never finished, and is offered for deletion rather than for training.
+    pub sealed: bool,
+}
+
+/// Every session under `sessions_root`, newest first.
+///
+/// The identifier begins with a timestamp, so sorting it in reverse is
+/// sorting by time — no directory metadata is consulted, which keeps the
+/// listing the same whether or not a filesystem preserves creation times.
+#[must_use]
+pub fn recorded_sessions(sessions_root: &std::path::Path) -> Vec<RecordedSession> {
+    let Ok(entries) = std::fs::read_dir(sessions_root) else {
+        return Vec::new();
+    };
+
+    let mut sessions: Vec<RecordedSession> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let sealed = !name.ends_with(RECORDING_SUFFIX);
+            RecordedSession {
+                session_id: name.trim_end_matches(RECORDING_SUFFIX).to_owned(),
+                environment: read_environment(&entry.path()),
+                bytes: directory_bytes(&entry.path()),
+                recorded_at_us: recorded_at(&name),
+                sealed,
+            }
+        })
+        .collect();
+
+    sessions.sort_by(|a, b| b.session_id.cmp(&a.session_id));
+    sessions
+}
+
+/// Suffix a directory carries while its capture is still running.
+const RECORDING_SUFFIX: &str = ".recording";
+
+/// The instant an identifier encodes, if it still ends in one.
+///
+/// Read back rather than stored separately: the identifier is built from the
+/// clock, so it already carries the answer, and a second copy could disagree
+/// with the directory it names.
+fn recorded_at(name: &str) -> Option<u64> {
+    let stamp = name.trim_end_matches(RECORDING_SUFFIX).rsplit('-').next()?;
+    let parsed = jiff::civil::DateTime::strptime("%Y%m%dT%H%M%SZ", stamp).ok()?;
+    let seconds = parsed
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .ok()?
+        .timestamp()
+        .as_second();
+    u64::try_from(seconds).ok().map(|s| s * 1_000_000)
+}
+
+fn read_environment(dir: &std::path::Path) -> String {
+    std::fs::read(dir.join("meta.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<SessionMeta>(&bytes).ok())
+        .map(|meta| meta.environment)
+        .unwrap_or_default()
+}
+
+fn directory_bytes(dir: &std::path::Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entry.metadata().ok())
+        .filter(std::fs::Metadata::is_file)
+        .map(|metadata| metadata.len())
+        .sum()
+}
+
+/// Writes a session as a gzipped tar to `destination`.
+///
+/// Streamed through the archiver rather than assembled in memory: a capture
+/// runs to tens of megabytes of frames, which is not something to hold on an
+/// appliance with 512 MB.
+///
+/// # Errors
+///
+/// Any I/O failure while reading the session or writing the archive.
+pub fn write_archive(
+    session_dir: &std::path::Path,
+    session_id: &str,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
+    let file = std::fs::File::create(destination)?;
+    let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    let mut archive = tar::Builder::new(encoder);
+    archive.append_dir_all(session_id, session_dir)?;
+    archive.into_inner()?.finish()?;
+    Ok(())
 }
