@@ -5,6 +5,7 @@
   import { saveNetworkSurvey, type NetworkSurvey, type Status } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
   import { AUTHENTICATION_CHOICES, verdict } from '$lib/network';
+  import Saved from '$components/ui/Saved.svelte';
 
   let {
     survey = $bindable(),
@@ -92,19 +93,17 @@
   </div>
 </div>
 
-<div class="mt-4 min-h-5" aria-live="polite">
+<div class="mt-4">
   {#if failure}
-    <p class="text-sm text-density-saturated">{failure}</p>
-  {:else if confirmed}
-    <p class="flex items-center gap-1.5 text-xs text-ink-500">
-      <CircleCheck size={14} class="text-density-empty" aria-hidden="true" />{t('ask.recorded')}
-    </p>
+    <p role="status" class="text-sm text-danger">{failure}</p>
+  {:else}
+    <Saved shown={confirmed} message={t('ask.recorded')} />
   {/if}
 </div>
 
 {#if outcome.kind === 'joinable'}
   <p class="mt-2 flex items-start gap-2 rounded-md bg-ink-50 p-3 text-sm text-ink-700">
-    <CircleCheck size={16} class="mt-0.5 shrink-0 text-density-empty" aria-hidden="true" />
+    <CircleCheck size={16} class="mt-0.5 shrink-0 text-success" aria-hidden="true" />
     {t('ask.joinable')}
   </p>
 {:else if outcome.kind === 'needs-administrator'}

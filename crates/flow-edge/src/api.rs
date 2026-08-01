@@ -41,6 +41,7 @@ use crate::credential::AdminCredential;
 use crate::discovery::Discovery;
 use crate::history::{MINUTE_US, MinuteSummary};
 use crate::journal::{Event, EventKind, Journal, RecordedEvent};
+use crate::model;
 use crate::now_us;
 use crate::pipeline::StreamHealth;
 use crate::schedule::{ServiceState, ServiceWindow};
@@ -258,6 +259,19 @@ impl EdgeState {
         self.lock()
             .runtime
             .start_calibration(session_id, started_us)
+    }
+
+    /// Records whether an active model artifact is present.
+    pub fn set_model_installed(&self, installed: bool) {
+        self.lock().model_installed = installed;
+    }
+
+    /// Marks the configuration as changed without changing it.
+    ///
+    /// The intake is rebuilt from the configuration *and* the model on disk;
+    /// replacing the model alone still has to reach it.
+    pub fn bump_configuration(&self) {
+        self.lock().config_generation += 1;
     }
 
     /// Records that a usable session now exists at this site.
@@ -526,6 +540,7 @@ impl EdgeState {
             uplink: UplinkView::of(config.network.uplink.as_ref()),
             survey: config.network.survey,
             classes: config.classes.clone(),
+            active_model: inner.config.active_model.clone(),
             nodes: config
                 .nodes
                 .iter()
@@ -575,6 +590,17 @@ pub fn router(state: EdgeState) -> Router {
         .route("/api/nodes", put(set_nodes))
         .route("/api/uplink", put(set_uplink))
         .route("/api/network-survey", put(set_network_survey))
+        .route(
+            "/api/model",
+            post(import_model).layer(axum::extract::DefaultBodyLimit::max(MAX_BUNDLE_BYTES)),
+        )
+        .route("/api/models", get(models))
+        .route(
+            "/api/models/{model_id}",
+            axum::routing::delete(forget_model)
+                .post(use_model)
+                .patch(rename_model),
+        )
         .route("/api/classes", put(set_classes))
         .route(
             "/api/calibration",
@@ -584,7 +610,7 @@ pub fn router(state: EdgeState) -> Router {
         .route("/api/sessions", get(sessions))
         .route(
             "/api/sessions/{session_id}",
-            axum::routing::delete(delete_session),
+            axum::routing::delete(delete_session).patch(rename_session),
         )
         .route("/api/sessions/{session_id}/archive", get(session_archive))
         .route("/api/installation", put(set_installation))
@@ -872,6 +898,176 @@ async fn set_uplink(
     }
 }
 
+/// Largest bundle the appliance will read into memory.
+///
+/// A classical model is kilobytes. The cap is not about real models but about
+/// what an authenticated caller could otherwise ask a 512 MB machine to hold.
+const MAX_BUNDLE_BYTES: usize = 32 * 1024 * 1024;
+
+/// Takes a trained model into service.
+///
+/// Validated, then activated in one move: an import that left the appliance
+/// with a checked model it was not using would need a second visit to finish,
+/// and the person who did the import has already left.
+async fn import_model(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    body: axum::body::Bytes,
+) -> Response {
+    let (data_dir, rx_nodes) = {
+        let inner = state.lock();
+        (inner.data_dir.clone(), inner.config.rx_node_ids())
+    };
+    if rx_nodes.is_empty() {
+        return error_response(StatusCode::CONFLICT, "no receiver is paired");
+    }
+
+    let staging = data_dir.join("model.staging");
+    let staged = match model::stage(&body, &staging) {
+        Ok(staged) => staged,
+        Err(err) => return error_response(StatusCode::BAD_REQUEST, &err.to_string()),
+    };
+    if let Err(err) = model::check(&staged, rx_nodes) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return error_response(StatusCode::BAD_REQUEST, &err.to_string());
+    }
+    let stored = match model::store(&staged, &data_dir, now_us()) {
+        Ok(id) => id,
+        Err(err) => {
+            let _ = std::fs::remove_dir_all(&staging);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string());
+        }
+    };
+    let _ = std::fs::remove_dir_all(&staging);
+
+    let named = staged
+        .manifest
+        .as_ref()
+        .map_or_else(|| stored.clone(), |manifest| manifest.name.clone());
+    put_in_service(&state, peer.ip(), &data_dir, &stored, &named)
+}
+
+/// Puts a stored model into service and lets the intake know.
+///
+/// Writing the configuration bumps its generation, which is what makes the
+/// intake rebuild and pick the model up — the appliance starts estimating
+/// without being restarted.
+fn put_in_service(
+    state: &EdgeState,
+    peer: IpAddr,
+    data_dir: &std::path::Path,
+    id: &str,
+    named: &str,
+) -> Response {
+    let tuning = match model::activate(data_dir, id) {
+        Ok(tuning) => tuning,
+        Err(err) => return error_response(StatusCode::CONFLICT, &err.to_string()),
+    };
+    let handle = id.to_owned();
+    if let Err(rejection) = state.write_config(|config| {
+        config.site = Some(tuning);
+        config.active_model = Some(handle);
+    }) {
+        return refusal(&rejection);
+    }
+    state.set_model_installed(true);
+    state.record(
+        Event::new(EventKind::ModelActivated)
+            .from_client(peer)
+            .with_detail(named.to_owned()),
+    );
+    (StatusCode::OK, Json(state.status())).into_response()
+}
+
+/// Lists every model the appliance holds, newest first.
+async fn models(State(state): State<EdgeState>) -> Json<Vec<model::StoredModel>> {
+    let (data_dir, active) = {
+        let inner = state.lock();
+        (inner.data_dir.clone(), inner.config.active_model.clone())
+    };
+    Json(model::library(&data_dir, active.as_deref()))
+}
+
+/// Puts one of the stored models back into service.
+async fn use_model(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    axum::extract::Path(model_id): axum::extract::Path<String>,
+) -> Response {
+    let data_dir = state.lock().data_dir.clone();
+    put_in_service(&state, peer.ip(), &data_dir, &model_id, &model_id)
+}
+
+/// Removes a stored model.
+async fn forget_model(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    axum::extract::Path(model_id): axum::extract::Path<String>,
+) -> Response {
+    let (data_dir, active) = {
+        let inner = state.lock();
+        (inner.data_dir.clone(), inner.config.active_model.clone())
+    };
+    // Refused rather than allowed to leave the appliance estimating from a
+    // model nobody can name any more.
+    if active.as_deref() == Some(model_id.as_str()) {
+        return error_response(StatusCode::CONFLICT, "that model is in service");
+    }
+    match model::remove(&data_dir, &model_id) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(format!("model removed: {model_id}")),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(err) => error_response(StatusCode::NOT_FOUND, &err.to_string()),
+    }
+}
+
+/// A new name for something the appliance holds.
+#[derive(Debug, Deserialize)]
+struct Rename {
+    /// What it should be called from now on.
+    name: String,
+}
+
+impl Rename {
+    /// The trimmed name, or nothing if it says nothing.
+    ///
+    /// A blank name is refused rather than stored: a list of recordings where
+    /// one row is empty is a list nobody can act on.
+    fn trimmed(&self) -> Option<&str> {
+        let name = self.name.trim();
+        (!name.is_empty()).then_some(name)
+    }
+}
+
+/// Renames a stored model.
+async fn rename_model(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    axum::extract::Path(model_id): axum::extract::Path<String>,
+    Json(rename): Json<Rename>,
+) -> Response {
+    let Some(name) = rename.trimmed() else {
+        return error_response(StatusCode::BAD_REQUEST, "a name is required");
+    };
+    let data_dir = state.lock().data_dir.clone();
+    match model::rename(&data_dir, &model_id, name) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(format!("model renamed: {model_id}")),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(err) => error_response(StatusCode::NOT_FOUND, &err.to_string()),
+    }
+}
+
 /// Lists the captures recorded at this site, newest first.
 async fn sessions(State(state): State<EdgeState>) -> Json<Vec<RecordedSession>> {
     let root = state.lock().data_dir.join("sessions");
@@ -910,6 +1106,39 @@ async fn delete_session(
     }
 }
 
+/// Renames a recorded capture.
+async fn rename_session(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+    Json(rename): Json<Rename>,
+) -> Response {
+    let Some(name) = rename.trimmed() else {
+        return error_response(StatusCode::BAD_REQUEST, "a name is required");
+    };
+    let root = state.lock().data_dir.join("sessions");
+    let Some(dir) = session_dir(&root, &session_id) else {
+        return error_response(StatusCode::BAD_REQUEST, "not a session identifier");
+    };
+    if !dir.is_dir() {
+        return error_response(StatusCode::NOT_FOUND, "no such session");
+    }
+    match crate::calibration::rename_session(&dir, name) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(format!("session renamed: {session_id}")),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(err) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("could not rename the session: {err}"),
+        ),
+    }
+}
+
 /// The directory a session identifier names, or nothing if it names anything
 /// else.
 ///
@@ -939,6 +1168,14 @@ async fn session_archive(
         return error_response(StatusCode::NOT_FOUND, "no such session");
     }
 
+    let named = crate::calibration::archive_name(
+        &session_id,
+        &recorded_sessions(&root)
+            .into_iter()
+            .find(|session| session.session_id == session_id)
+            .map(|session| session.environment)
+            .unwrap_or_default(),
+    );
     let archive_path = root.join(format!("{session_id}.tar.gz"));
     let built = {
         let (dir, id, path) = (
@@ -973,7 +1210,7 @@ async fn session_archive(
             (header::CONTENT_TYPE, "application/gzip".to_owned()),
             (
                 header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{session_id}.tar.gz\""),
+                format!("attachment; filename=\"{named}\""),
             ),
         ],
         body,
@@ -1372,6 +1609,9 @@ struct StatusResponse {
     survey: Option<NetworkSurvey>,
     #[serde(skip_serializing_if = "Option::is_none")]
     classes: Option<flow_core::ClassMapping>,
+    /// Which stored model is estimating, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    active_model: Option<String>,
     nodes: Vec<NodeView>,
 }
 
@@ -2382,14 +2622,175 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_renamed_session_keeps_its_identifier_and_is_downloaded_under_its_new_name() {
+        let (state, _dir) = recording_ready();
+        let cookie = session_of(&state).await;
+        post(
+            &state,
+            "/api/calibration",
+            &cookie,
+            json!({ "environment": "midi" }),
+        )
+        .await;
+        send(
+            &state,
+            "DELETE",
+            "/api/calibration",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        let (_, _, listed) = send(&state, "GET", "/api/sessions", Some(&cookie), None, 10).await;
+        let id = listed[0]["session_id"].as_str().unwrap().to_owned();
+
+        let (status, _, _) = send(
+            &state,
+            "PATCH",
+            &format!("/api/sessions/{id}"),
+            Some(&cookie),
+            Some(json!({ "name": "Service du midi, pluie" }).to_string()),
+            10,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let (_, _, listed) = send(&state, "GET", "/api/sessions", Some(&cookie), None, 10).await;
+        assert_eq!(listed[0]["environment"], "Service du midi, pluie");
+        assert_eq!(
+            listed[0]["session_id"], id,
+            "the identifier is the handle and does not move"
+        );
+
+        let (status, headers, _) = send(
+            &state,
+            "GET",
+            &format!("/api/sessions/{id}/archive"),
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let disposition = headers
+            .get(header::CONTENT_DISPOSITION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        // Recognisable in a downloads folder, and still unique per capture.
+        assert!(
+            disposition.contains("service-du-midi-pluie-"),
+            "{disposition} does not carry the name"
+        );
+        assert!(disposition.ends_with(".tar.gz\""));
+    }
+
+    #[tokio::test]
+    async fn a_name_made_only_of_punctuation_cannot_reach_the_download_header() {
+        // The operator's own words land in a header; a quote or a newline
+        // there would be a header injection.
+        let (state, _dir) = recording_ready();
+        let cookie = session_of(&state).await;
+        post(&state, "/api/calibration", &cookie, json!({})).await;
+        send(
+            &state,
+            "DELETE",
+            "/api/calibration",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        let (_, _, listed) = send(&state, "GET", "/api/sessions", Some(&cookie), None, 10).await;
+        let id = listed[0]["session_id"].as_str().unwrap().to_owned();
+        send(
+            &state,
+            "PATCH",
+            &format!("/api/sessions/{id}"),
+            Some(&cookie),
+            Some(json!({ "name": "\"; rm -rf /\r\nX-Evil: 1" }).to_string()),
+            10,
+        )
+        .await;
+
+        let (status, headers, _) = send(
+            &state,
+            "GET",
+            &format!("/api/sessions/{id}/archive"),
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let disposition = headers
+            .get(header::CONTENT_DISPOSITION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(
+            disposition,
+            format!(
+                "attachment; filename=\"rm-rf-x-evil-1-{}.tar.gz\"",
+                id.rsplit('-').next().unwrap()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_blank_name_is_refused_rather_than_stored() {
+        let (state, _dir) = recording_ready();
+        let cookie = session_of(&state).await;
+        post(&state, "/api/calibration", &cookie, json!({})).await;
+        send(
+            &state,
+            "DELETE",
+            "/api/calibration",
+            Some(&cookie),
+            None,
+            10,
+        )
+        .await;
+        let (_, _, listed) = send(&state, "GET", "/api/sessions", Some(&cookie), None, 10).await;
+        let id = listed[0]["session_id"].as_str().unwrap().to_owned();
+
+        let (status, _, _) = send(
+            &state,
+            "PATCH",
+            &format!("/api/sessions/{id}"),
+            Some(&cookie),
+            Some(json!({ "name": "   " }).to_string()),
+            10,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn the_session_surface_is_closed_to_anonymous_callers() {
         let (state, _dir) = writable();
         for (method, path) in [
             ("GET", "/api/sessions"),
             ("GET", "/api/sessions/s-001/archive"),
             ("DELETE", "/api/sessions/s-001"),
+            ("PATCH", "/api/sessions/s-001"),
         ] {
             let (status, _, _) = send(&state, method, path, None, None, 10).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path} is open");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_model_surface_is_closed_to_anonymous_callers() {
+        let (state, _dir) = writable();
+        for (method, path) in [
+            ("GET", "/api/models"),
+            ("POST", "/api/models/m-001"),
+            ("PATCH", "/api/models/m-001"),
+            ("DELETE", "/api/models/m-001"),
+        ] {
+            let (status, _, _) = send(&state, method, path, None, Some("{}".to_owned()), 10).await;
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path} is open");
         }
     }

@@ -48,6 +48,7 @@ mod discovery;
 mod error;
 mod history;
 mod journal;
+mod model;
 mod pipeline;
 mod schedule;
 mod secret;

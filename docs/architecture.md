@@ -518,11 +518,37 @@ itself, which also lets it show steps satisfied out of order. Each screen is
 one question, with a reserved frame beside it on a wide screen and above it on
 a phone; the frame holds its space whether or not it has artwork in it.
 
+The tabbed shell is sized to the viewport and scrolls its content, not the
+document: the tabs are part of the frame rather than something the reader has
+to scroll back to. That is what pins them, rather than a fixed position paired
+with a padding that would have to agree with their height from somewhere else.
+Because a tab can now be reached while the content is scrolled, changing tab
+returns the surface to its own top. Printing neutralises the arrangement — a
+scroll container has no equivalent on paper, and the network request would
+otherwise print clipped to what happened to be on screen.
+
 The settings screen is a list of sections resolving to one detail — Site,
-Sensors, Network, Service hours, System. On a phone the list is the screen
-until a section is chosen; on a wide screen it is a rail beside the detail.
-One component, two shapes, so a section added later lands somewhere rather
-than lengthening a single page.
+Sensors, Network, Levels, Service hours, System. On a phone the list is the
+screen until a section is chosen; on a wide screen it is a rail beside the
+detail. One component, two shapes, so a section added later lands somewhere
+rather than lengthening a single page.
+
+The calibration screen holds the two ends of the training loop side by side on
+a wide screen and stacked on a phone: the models the appliance holds, and the
+recordings the next one will be trained from. Each carries its own history, so
+neither reads as a step of the other. The model in service is the head of the
+list it belongs to rather than a card above it — there is one collection, and
+one of its members is in use.
+
+Both histories page at the same length, through the same control, and the model
+library is held by the shell rather than fetched by each screen that shows it:
+renaming a model on one tab must not leave another naming it the old way.
+
+The shared pieces — the button, the surface, the section header, the pager, the
+save confirmation, the dialogs — are defined once under `components/ui` and
+used everywhere else. A screen that needs a control it does not have gains a
+variant there rather than a set of classes of its own, which is what keeps two
+screens built months apart from drifting apart.
 
 ### Calibration recording
 
@@ -568,6 +594,46 @@ nothing half-built survives a client that walks away. A session identifier
 that could climb out of the sessions root is refused rather than sanitised: it
 names a directory, and a value that could escape is not a mistyped session.
 
+### Models coming back
+
+A model returns from training as an archive carrying the model, the tuning it
+was trained under, and an optional manifest naming the run (ADR 0020). The
+tuning travels with the model because a window a model never saw produces
+estimates that are plausible and wrong; asking an operator to retype those
+numbers would make that mistake possible in silence.
+
+Nothing is trusted on arrival. Members that could be written outside the
+staging directory are refused, members that are simply not part of a bundle are
+skipped, sizes are capped against a decompression bomb, and compatibility is
+decided by **building the pipeline the bundle would run** rather than by a
+check of its own — the pipeline already knows what it requires. Only then are
+the files moved into the library, so a refused import leaves nothing behind.
+
+Every model is kept: a site recalibrated twice should be able to return to the
+one that was working, not only to the one immediately before. Activation copies
+the chosen model to the single path the pipeline loads from, and the
+configuration records the handle in service — so the intake never has to know a
+library exists, and the change is picked up through the generation counter that
+already drives configuration reloads. Removing a model removes the bundle
+alone; the recording it was trained on has its own lifetime.
+
+The library is listed newest first, sorted on the handle, which encodes the
+moment of import — the one date the appliance can vouch for. The training date
+comes from the manifest, which it cannot.
+
+**Renaming rewrites the name, never the handle.** A model and a recording each
+carry a dated directory name that other things point at — the configuration
+records which model is in service, and metadata written at recording time
+quotes the session identifier — while the name a reader sees lives in a
+metadata file inside. Renaming rewrites that file and nothing else, so no
+second write has to succeed for the appliance to stay consistent. A bundle that
+arrived anonymous gains a manifest the first time it is named. The one place
+the new name does travel is the downloaded archive's filename: that is what
+lands in someone's downloads folder, and the timestamp stays on it so two
+captures of the same service cannot overwrite each other. The name is reduced
+to `[a-z0-9-]` before it reaches the header, which is what keeps an operator's
+own words from being a header injection.
+
 ### The machine underneath
 
 The appliance reports what the machine it runs on says about itself — board
@@ -590,6 +656,14 @@ network administrator knows but is not there. So the appliance **interviews the
 installer** about what joining the network does — nothing, a shared password, a
 personal account, a certificate, a sign-in page, or "I do not know" — and
 derives the rest (ADR 0018).
+
+The two are never reconciled behind the reader's back. Choosing the site Wi-Fi
+on a network the survey says needs an administrator is **refused with the
+reason**, not saved as "offline": a form that stores something other than what
+it displays is worse than one that refuses, because the reader has no way to
+find out. The wizard and the settings ask the same questions from the same
+stored answers, so stepping back and returning shows what the appliance holds
+rather than a blank form.
 
 What that survey found is stored **apart from the uplink**: one says what the
 site demands, the other what the appliance will do, and a site requiring 802.1X

@@ -3,6 +3,8 @@
 
   import { saveSite, type Status } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
+  import Button from '$components/ui/Button.svelte';
+  import Saved from '$components/ui/Saved.svelte';
 
   let { status, onupdated }: { status: Status; onupdated: (status: Status) => void } = $props();
 
@@ -10,7 +12,8 @@
   // under whoever is typing.
   let name = $state(untrack(() => status.site_name) ?? '');
   let saving = $state(false);
-  let feedback = $state<{ tone: 'ok' | 'bad'; message: string } | null>(null);
+  let saved = $state(false);
+  let failure = $state<string | null>(null);
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -19,17 +22,17 @@
     saving = false;
 
     if (outcome.kind === 'ok') {
-      feedback = { tone: 'ok', message: t('settings.siteSaved') };
+      failure = null;
+      saved = true;
+      setTimeout(() => (saved = false), 2500);
       onupdated(outcome.status);
       return;
     }
-    feedback = {
-      tone: 'bad',
-      message:
-        outcome.kind === 'refused'
-          ? t('wizard.refused', { message: outcome.message })
-          : t('wizard.failed'),
-    };
+    saved = false;
+    failure =
+      outcome.kind === 'refused'
+        ? t('wizard.refused', { message: outcome.message })
+        : t('wizard.failed');
   }
 </script>
 
@@ -45,23 +48,19 @@
     />
   </label>
 
-  {#if feedback}
-    <p
-      role="status"
-      class="mt-3 text-sm {feedback.tone === 'ok' ? 'text-ink-500' : 'text-density-saturated'}"
-    >
-      {feedback.message}
-    </p>
+  {#if failure}
+    <p role="status" class="mt-3 text-sm text-danger">{failure}</p>
   {/if}
 
-  <button
-    type="submit"
-    disabled={saving || name.trim().length === 0 || name === status.site_name}
-    class="mt-4 rounded-md bg-mariam-600 px-3 py-2 text-sm font-medium text-white
-           transition-colors hover:bg-mariam-700 disabled:bg-ink-200 disabled:text-ink-500"
-  >
-    {saving ? t('wizard.saving') : t('settings.save')}
-  </button>
+  <div class="mt-3">
+    <Saved shown={saved} message={t('settings.siteSaved')} />
+    <Button
+      type="submit"
+      disabled={saving || name.trim().length === 0 || name === status.site_name}
+    >
+      {saving ? t('wizard.saving') : t('settings.save')}
+    </Button>
+  </div>
 </form>
 
 <dl class="mt-6 border-t border-ink-100 pt-4">

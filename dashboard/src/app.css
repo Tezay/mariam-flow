@@ -32,6 +32,7 @@
   --color-ink-50: #f6f6f6;
   --color-ink-100: #eeeeee;
   --color-ink-200: #dddddd;
+  --color-ink-300: #c4c4c4;
   --color-ink-500: #666666;
   --color-ink-700: #3a3a3a;
   --color-ink-900: #161616;
@@ -89,6 +90,15 @@
  * carrying a document renderer.
  */
 @media print {
+  /* The shell is sized to the viewport and scrolls its content internally,
+   * which paper has no equivalent of: left alone, the request would print
+   * clipped to whatever happened to be on screen. */
+  .app-shell,
+  .app-scroll {
+    height: auto;
+    overflow: visible;
+  }
+
   body * {
     visibility: hidden;
   }

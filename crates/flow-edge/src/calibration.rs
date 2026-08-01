@@ -9,6 +9,7 @@ use flow_core::{NodePlacement, SessionMeta};
 use serde::{Deserialize, Serialize};
 
 use crate::config::ApplianceConfig;
+use crate::error::StoreError;
 
 /// What the operator supplies when starting a session.
 ///
@@ -37,27 +38,26 @@ pub fn session_id(now_us: u64, kit_id: &str) -> String {
         |_| seconds.to_string(),
         |ts| ts.strftime("%Y%m%dT%H%M%SZ").to_string(),
     );
-    format!("{}-{stamp}", slug(kit_id))
+    let named = slug(kit_id);
+    let named = if named.is_empty() { "kit" } else { &named };
+    format!("{named}-{stamp}")
 }
 
-/// Keeps only what a directory name may safely carry.
-fn slug(text: &str) -> String {
-    let cleaned: String = text
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let trimmed = cleaned.trim_matches('-').to_owned();
-    if trimmed.is_empty() {
-        "kit".to_owned()
-    } else {
-        trimmed
+/// Keeps only what a directory name, and an HTTP header, may safely carry.
+///
+/// The result is `[a-z0-9-]` by construction, which is what makes it usable
+/// unquoted in a `Content-Disposition` filename: an operator's own words go
+/// into that header, and a quote or a newline there is a header injection.
+pub fn slug(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
     }
+    out.trim_matches('-').to_owned()
 }
 
 /// Assembles the metadata for a session about to be recorded.
@@ -394,6 +394,51 @@ fn read_environment(dir: &std::path::Path) -> String {
         .and_then(|bytes| serde_json::from_slice::<SessionMeta>(&bytes).ok())
         .map(|meta| meta.environment)
         .unwrap_or_default()
+}
+
+/// Gives a recorded session a new description.
+///
+/// The directory keeps its name. It encodes when the capture was taken, it is
+/// the handle every other endpoint takes, and it is quoted in metadata written
+/// at recording time — a rename that moved it would have to keep all three in
+/// step for no gain, since the identifier is never shown.
+///
+/// # Errors
+///
+/// [`StoreError`] if the metadata cannot be read, understood, or written back.
+pub fn rename_session(session_dir: &std::path::Path, environment: &str) -> Result<(), StoreError> {
+    let path = session_dir.join("meta.json");
+    let bytes = std::fs::read(&path).map_err(|source| StoreError::Read {
+        path: path.clone(),
+        source,
+    })?;
+    let mut meta: SessionMeta =
+        serde_json::from_slice(&bytes).map_err(|source| StoreError::Parse {
+            path: path.clone(),
+            source,
+        })?;
+    meta.environment = environment.to_owned();
+
+    let rendered = serde_json::to_vec_pretty(&meta).map_err(|source| StoreError::Parse {
+        path: path.clone(),
+        source,
+    })?;
+    std::fs::write(&path, rendered).map_err(|source| StoreError::Write { path, source })
+}
+
+/// What a downloaded session archive is called.
+///
+/// Named after the description the operator gave it, because that is what they
+/// will look for among everything else in a downloads folder. The timestamp is
+/// kept so that two captures of the same service do not overwrite one another.
+#[must_use]
+pub fn archive_name(session_id: &str, environment: &str) -> String {
+    let named = slug(environment);
+    if named.is_empty() {
+        return format!("{session_id}.tar.gz");
+    }
+    let stamp = session_id.rsplit('-').next().unwrap_or(session_id);
+    format!("{named}-{stamp}.tar.gz")
 }
 
 fn directory_bytes(dir: &std::path::Path) -> u64 {

@@ -11,6 +11,7 @@
     type Weekday,
   } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
+  import Button from '$components/ui/Button.svelte';
   import {
     browserTimeZone,
     cloneWindow,
@@ -127,7 +128,7 @@
   }
 </script>
 
-<section class="rounded-lg bg-white p-4">
+<section class="rounded-xl bg-white p-4 ring-1 ring-ink-100">
   <header>
     <h3 class="text-sm font-medium text-ink-900">{t('hours.title')}</h3>
     <p class="mt-1 text-sm text-ink-500">{t('hours.lead')}</p>
@@ -138,14 +139,9 @@
   {:else if draft === null}
     <div class="mt-4">
       <p class="text-sm text-ink-500">{t('hours.enableLead')}</p>
-      <button
-        type="button"
-        onclick={declare}
-        class="mt-3 rounded-md bg-mariam-600 px-3 py-2 text-sm font-medium text-white
-               transition-colors hover:bg-mariam-700"
-      >
-        {t('hours.enable')}
-      </button>
+      <div class="mt-3">
+        <Button onclick={declare}>{t('hours.enable')}</Button>
+      </div>
     </div>
   {:else}
     <div class="mt-4">
@@ -257,21 +253,18 @@
     {/if}
 
     <div class="mt-4 flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        onclick={() => save(draft)}
+      <Button
         disabled={phase === 'saving' || problems.length > 0 || !dirty}
-        class="rounded-md bg-mariam-600 px-3 py-2 text-sm font-medium text-white
-               transition-colors hover:bg-mariam-700 disabled:bg-ink-200 disabled:text-ink-500"
+        onclick={() => save(draft)}
       >
         {phase === 'saving' ? t('hours.saving') : t('hours.save')}
-      </button>
+      </Button>
       <button
         type="button"
         onclick={cancel}
         disabled={phase === 'saving' || !dirty}
-        class="rounded-md px-3 py-2 text-sm text-ink-500 transition-colors
-               hover:bg-ink-100 hover:text-ink-900 disabled:text-ink-200"
+        class="rounded-md px-4 py-2 text-sm text-ink-500 transition-colors
+               hover:bg-ink-100 hover:text-ink-900 disabled:text-ink-300"
       >
         {t('hours.cancel')}
       </button>

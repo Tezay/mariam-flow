@@ -5,6 +5,9 @@ import {
   GRACE_SECONDS,
   PAGE_SIZE,
   defaultEnvironment,
+  formatDay,
+  formatWindow,
+  modelName,
   page,
   pageCount,
   blankClasses,
@@ -137,5 +140,33 @@ describe('page', () => {
   it('survives an empty history', () => {
     expect(page([], 0)).toEqual([]);
     expect(pageCount(0)).toBe(1);
+  });
+});
+
+describe('modelName', () => {
+  it('prefers the name the training run declared', () => {
+    expect(modelName({ id: '20260801T120000Z-x', manifest: { name: 'campagne-juin' } })).toBe(
+      'campagne-juin',
+    );
+  });
+
+  it('falls back to the handle for an anonymous bundle', () => {
+    // A bundle predating the manifest still has to be nameable on screen.
+    expect(modelName({ id: '20260801T120000Z-model' })).toBe('20260801T120000Z-model');
+    expect(modelName({ id: 'handle', manifest: { name: '  ' } })).toBe('handle');
+  });
+});
+
+describe('formatWindow', () => {
+  it('speaks in seconds, which is how a window is discussed', () => {
+    expect(formatWindow(5_000_000)).toBe('5');
+    expect(formatWindow(2_500_000)).toBe('2.5');
+  });
+});
+
+describe('formatDay', () => {
+  it('spells the day out rather than abbreviating it', () => {
+    const rendered = formatDay(Date.UTC(2026, 7, 12, 10) * 1000, 'fr-FR');
+    expect(rendered).toMatch(/\p{L}{4,}/u);
   });
 });

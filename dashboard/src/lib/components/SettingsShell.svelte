@@ -4,6 +4,7 @@
 
   import type { Status } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
+  import ClassesSection from '$components/ClassesSection.svelte';
   import NetworkSection from '$components/NetworkSection.svelte';
   import NodesSection from '$components/NodesSection.svelte';
   import ServiceHoursPanel from '$components/ServiceHoursPanel.svelte';
@@ -12,7 +13,7 @@
 
   let { status, onupdated }: { status: Status; onupdated: (status: Status) => void } = $props();
 
-  const SECTIONS = ['site', 'nodes', 'network', 'hours', 'system'] as const;
+  const SECTIONS = ['site', 'nodes', 'network', 'levels', 'hours', 'system'] as const;
   type Section = (typeof SECTIONS)[number];
 
   /* Nothing is selected to begin with, which is what makes one component
@@ -27,8 +28,8 @@
        a permanent rail once there is room for it beside the detail. -->
   <nav class:hidden={chosen !== null} class="lg:block!" aria-label={t('tab.settings')}>
     <ul
-      class="divide-y divide-ink-100 overflow-hidden rounded-lg bg-white lg:divide-y-0
-               lg:bg-transparent lg:space-y-1"
+      class="divide-y divide-ink-100 overflow-hidden rounded-xl bg-white ring-1 ring-ink-100
+             lg:space-y-1 lg:divide-y-0 lg:bg-transparent lg:ring-0"
     >
       {#each SECTIONS as name (name)}
         <li>
@@ -38,7 +39,7 @@
             aria-current={chosen === name ? 'true' : undefined}
             class="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm
                    transition-colors lg:rounded-md lg:py-2 {section === name
-              ? 'lg:bg-white lg:font-medium lg:text-ink-900'
+              ? 'lg:bg-white lg:font-medium lg:text-ink-900 lg:ring-1 lg:ring-ink-100'
               : 'text-ink-900 hover:bg-ink-100 lg:text-ink-500'}"
           >
             {t(`settings.${name}` as const)}
@@ -59,7 +60,7 @@
       <ChevronLeft size={14} aria-hidden="true" />{t('settings.back')}
     </button>
 
-    <div class="rounded-lg bg-white p-4">
+    <div class="rounded-xl bg-white p-5 ring-1 ring-ink-100">
       <h2 class="text-sm font-medium text-ink-900">{t(`settings.${section}` as const)}</h2>
       <div class="mt-4">
         {#if section === 'site'}
@@ -68,6 +69,8 @@
           <NodesSection {status} />
         {:else if section === 'network'}
           <NetworkSection {status} {onupdated} />
+        {:else if section === 'levels'}
+          <ClassesSection {status} {onupdated} />
         {:else if section === 'hours'}
           <ServiceHoursPanel />
         {:else}

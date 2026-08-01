@@ -9,6 +9,7 @@ import {
   joinable,
   requiresAdministrator,
   verdict,
+  uplinkBlocked,
 } from './network';
 
 function survey(
@@ -221,5 +222,31 @@ describe('handoutMarkdown', () => {
 
   it('ends with a newline, as a file should', () => {
     expect(handoutMarkdown(doc).endsWith('\n')).toBe(true);
+  });
+});
+
+describe('uplinkBlocked', () => {
+  it('lets the site Wi-Fi through once the interview says the appliance can join', () => {
+    expect(uplinkBlocked('wifi', { kind: 'joinable', needsPassphrase: true })).toBeNull();
+  });
+
+  it('refuses the site Wi-Fi rather than quietly storing offline', () => {
+    // The defect this replaces: the form saved "offline" when the network
+    // needed an administrator, so the choice on screen was never stored and
+    // came back reset.
+    expect(uplinkBlocked('wifi', { kind: 'needs-administrator', reason: 'account' })).toBe(
+      'needs-administrator',
+    );
+    expect(uplinkBlocked('wifi', { kind: 'unanswered' })).toBe('unanswered');
+  });
+
+  it('never blocks the choices that need no network to be understood', () => {
+    for (const answer of [
+      { kind: 'unanswered' } as const,
+      { kind: 'needs-administrator', reason: 'certificate' } as const,
+    ]) {
+      expect(uplinkBlocked('offline', answer)).toBeNull();
+      expect(uplinkBlocked('ethernet', answer)).toBeNull();
+    }
   });
 });
