@@ -68,6 +68,13 @@ pub struct ApplianceConfig {
     /// on its own.
     #[serde(default)]
     pub classes: Option<ClassMapping>,
+    /// Which stored model is in service, by its handle.
+    ///
+    /// Kept in configuration rather than inferred from the files: a copy of a
+    /// model tells you nothing about which of the library it came from, and
+    /// the answer has to survive a restart.
+    #[serde(default)]
+    pub active_model: Option<String>,
     /// When the site serves, or `None` while no schedule is set.
     ///
     /// Absent means always open: an appliance whose hours have not been
@@ -367,6 +374,7 @@ impl ApplianceConfig {
                 survey: None,
             },
             classes: None,
+            active_model: None,
             nodes: Vec::new(),
             site: None,
             service: None,

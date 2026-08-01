@@ -4,6 +4,7 @@
 
   import { fetchDiscovery, saveNodes, type Discovery, type Status } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
+  import Button from '$components/ui/Button.svelte';
   import {
     EXPECTED_RECEIVERS,
     canConfirmPairing,
@@ -75,7 +76,7 @@
       {t('pair.heard', { count: discovery.candidates.length })}
     </p>
 
-    <div class="mt-3 rounded-lg bg-white p-4">
+    <div class="mt-3 rounded-xl bg-white p-4 ring-1 ring-ink-100">
       <h2 class="flex items-center gap-2 text-sm font-medium text-ink-900">
         <RadioTower size={16} aria-hidden="true" />{t('pair.transmitter')}
       </h2>
@@ -89,7 +90,7 @@
       {/if}
     </div>
 
-    <div class="mt-3 rounded-lg bg-white p-4">
+    <div class="mt-3 rounded-xl bg-white p-4 ring-1 ring-ink-100">
       <h2 class="flex items-center gap-2 text-sm font-medium text-ink-900">
         <Radio size={16} aria-hidden="true" />{t('pair.receivers')}
       </h2>
@@ -120,16 +121,12 @@
   {/if}
 
   {#if failure}
-    <p role="status" class="mt-3 text-sm text-density-saturated">{failure}</p>
+    <p role="status" class="mt-3 text-sm text-danger">{failure}</p>
   {/if}
 
-  <button
-    type="button"
-    onclick={() => void confirm()}
-    disabled={saving || !canConfirmPairing(proposal)}
-    class="mt-4 rounded-md bg-mariam-600 px-4 py-2 text-sm font-medium text-white
-           transition-colors hover:bg-mariam-700 disabled:bg-ink-200 disabled:text-ink-500"
-  >
-    {saving ? t('wizard.saving') : t('pair.confirm')}
-  </button>
+  <div class="mt-4">
+    <Button disabled={saving || !canConfirmPairing(proposal)} onclick={() => void confirm()}>
+      {saving ? t('wizard.saving') : t('pair.confirm')}
+    </Button>
+  </div>
 </div>

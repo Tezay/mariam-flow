@@ -5,6 +5,7 @@
 
   import type { NetworkSurvey, Status } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
+  import Button from '$components/ui/Button.svelte';
   import { applianceFacts, asksFor, handoutMarkdown, type Handout } from '$lib/network';
 
   let {
@@ -63,24 +64,12 @@
     </div>
     <!-- Hidden from the printed sheet: buttons on paper are noise. -->
     <div class="flex shrink-0 gap-2 print:hidden">
-      <button
-        type="button"
-        onclick={() => window.print()}
-        class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-ink-500
-               transition-colors hover:bg-ink-100 hover:text-ink-900
-               disabled:text-ink-300 disabled:hover:bg-transparent"
-      >
+      <Button variant="quiet" size="sm" onclick={() => window.print()}>
         <Printer size={14} aria-hidden="true" />{t('handout.print')}
-      </button>
-      <button
-        type="button"
-        onclick={download}
-        class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-mariam-600
-               transition-colors hover:bg-ink-100
-               disabled:text-ink-300 disabled:hover:bg-transparent"
-      >
+      </Button>
+      <Button variant="outline" size="sm" onclick={download}>
         <Download size={14} aria-hidden="true" />{t('handout.download')}
-      </button>
+      </Button>
     </div>
   </header>
 

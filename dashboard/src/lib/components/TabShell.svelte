@@ -5,7 +5,8 @@
   import Settings from '@lucide/svelte/icons/settings';
   import Target from '@lucide/svelte/icons/target';
 
-  import type { Status } from '$lib/api';
+  import { fetchModels, type Status, type StoredModel } from '$lib/api';
+  import { modelName } from '$lib/calibration';
   import { hour12, locale, t, toggleHourCycle, toggleLocale } from '$lib/i18n/i18n.svelte';
   import CalibrationPanel from '$components/CalibrationPanel.svelte';
   import LivePanel from '$components/LivePanel.svelte';
@@ -17,8 +18,33 @@
     onupdated,
   }: { status: Status; onsignout: () => void; onupdated: (status: Status) => void } = $props();
 
+  /* The library is held here rather than fetched by each screen that shows
+     it: renaming a model on one tab must not leave another naming it the old
+     way, and there is only one list to reload when it changes. */
+  let models = $state<StoredModel[]>([]);
+
+  $effect(() => {
+    void status.active_model;
+    void reloadModels();
+  });
+
+  async function reloadModels() {
+    models = await fetchModels();
+  }
+
+  const activeModel = $derived(models.find((model) => model.active) ?? null);
+
   type Tab = 'live' | 'nodes' | 'calibration' | 'settings';
   let active = $state<Tab>('live');
+  let surface = $state<HTMLElement | null>(null);
+
+  /* Tabs are reachable while the content is scrolled, which is the whole
+     point of pinning them — so a tab has to open at its own top rather than
+     wherever the previous one had been left. */
+  $effect(() => {
+    void active;
+    surface?.scrollTo({ top: 0 });
+  });
 
   const tabs = [
     { id: 'live' as const, icon: Activity },
@@ -29,12 +55,17 @@
 </script>
 
 <!-- Tabs sit at the bottom on a phone, where a thumb reaches them, and
-     become a side rail once there is room. One layout, two shapes. -->
-<div class="flex min-h-dvh flex-col bg-ink-50 sm:flex-row">
+     become a side rail once there is room. One layout, two shapes.
+
+     The shell is sized to the viewport and only the content beneath the tabs
+     scrolls, which is what keeps them in place without a fixed position and a
+     padding that would have to agree with their height from somewhere else. -->
+<div class="app-shell flex h-dvh flex-col bg-ink-50 sm:flex-row">
   <nav
     aria-label={t('app.name')}
     class="order-2 flex shrink-0 border-t border-ink-200 bg-white
-           sm:order-1 sm:w-24 sm:flex-col sm:border-t-0 sm:border-r"
+           pb-[env(safe-area-inset-bottom)] sm:order-1 sm:w-24 sm:flex-col sm:overflow-y-auto
+           sm:border-t-0 sm:border-r sm:pb-0"
   >
     {#each tabs as tab (tab.id)}
       {@const Icon = tab.icon}
@@ -53,7 +84,10 @@
     {/each}
   </nav>
 
-  <div class="order-1 flex min-w-0 flex-1 flex-col sm:order-2">
+  <div
+    bind:this={surface}
+    class="app-scroll order-1 min-h-0 min-w-0 flex-1 overflow-y-auto sm:order-2"
+  >
     <header class="flex items-center justify-between gap-3 px-4 py-3">
       <h1 class="truncate text-base font-semibold text-mariam-600">
         {status.site_name ?? t('app.name')}
@@ -90,15 +124,22 @@
       </div>
     </header>
 
-    <main class="flex-1 px-4 pb-6">
+    <main class="px-4 pb-6">
       {#if active === 'live'}
-        <LivePanel />
+        <LivePanel modelName={activeModel ? modelName(activeModel) : null} />
       {:else if active === 'calibration'}
-        <CalibrationPanel {status} {onupdated} />
+        <CalibrationPanel
+          {status}
+          {models}
+          {onupdated}
+          onlibrarychanged={() => void reloadModels()}
+        />
       {:else if active === 'settings'}
         <SettingsShell {status} {onupdated} />
       {:else}
-        <p class="rounded-lg bg-white p-4 text-sm text-ink-500">{t('wizard.comingNext')}</p>
+        <p class="rounded-xl bg-white p-4 text-sm text-ink-500 ring-1 ring-ink-100">
+          {t('wizard.comingNext')}
+        </p>
       {/if}
     </main>
   </div>

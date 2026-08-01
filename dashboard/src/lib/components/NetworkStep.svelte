@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+
   import type { NetworkSurvey, Status, Uplink } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
   import { requiresAdministrator, verdict } from '$lib/network';
@@ -18,14 +20,20 @@
     onupdated: (status: Status) => void;
   } = $props();
 
-  let survey = $state<NetworkSurvey>({
+  const BLANK: NetworkSurvey = {
     authentication: 'unknown',
     registration_required: false,
     fixed_address: false,
-  });
+  };
 
+  /* Seeded from what the appliance already holds: an installer who answered
+     these, stepped back and returned must not be asked again — and must not
+     be shown blanks while the appliance holds their answers. */
+  let survey = $state<NetworkSurvey>({ ...BLANK, ...untrack(() => status.survey) });
+
+  const offline = $derived(status.uplink.mode === 'offline');
   const answered = $derived(verdict(survey));
-  const needed = $derived(requiresAdministrator(survey, false));
+  const needed = $derived(requiresAdministrator(survey, offline));
 </script>
 
 <div class="space-y-6">
@@ -46,6 +54,6 @@
   </div>
 
   {#if needed}
-    <NetworkHandout {status} {survey} offline={false} />
+    <NetworkHandout {status} {survey} {offline} />
   {/if}
 </div>

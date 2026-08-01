@@ -98,7 +98,7 @@
     <div class="flex flex-wrap items-baseline justify-between gap-3 py-2">
       <dt class="text-sm text-ink-500">{row.label}</dt>
       <dd
-        class="text-sm {row.mono ? 'font-mono' : ''} {row.value ? 'text-ink-900' : 'text-ink-300'}"
+        class="text-sm {row.mono ? 'font-mono' : ''} {row.value ? 'text-ink-900' : 'text-ink-500'}"
       >
         {row.value ?? t('system.unknown')}
       </dd>

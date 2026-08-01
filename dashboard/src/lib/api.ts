@@ -135,6 +135,8 @@ export type Status = {
   uplink: Uplink;
   survey?: NetworkSurvey;
   classes?: ClassMapping;
+  /** Which stored model is estimating, if any. */
+  active_model?: string;
   nodes: SensingNode[];
 };
 
@@ -231,6 +233,72 @@ export function saveNetworkSurvey(survey: NetworkSurvey | null): Promise<WriteOu
 /** Records how the appliance reaches the site network, or that it will not. */
 export function saveUplink(uplink: unknown): Promise<WriteOutcome> {
   return put('/api/uplink', uplink);
+}
+
+/**
+ * Takes a trained model bundle into service.
+ *
+ * Sent as raw bytes rather than a form: the appliance reads one archive, and
+ * a multipart envelope would add a parser for nothing.
+ */
+export async function importModel(file: File): Promise<WriteOutcome> {
+  try {
+    const response = await fetch('/api/model', {
+      method: 'POST',
+      headers: { 'content-type': 'application/gzip' },
+      body: file,
+    });
+    if (response.ok) {
+      return { kind: 'ok', status: (await response.json()) as Status };
+    }
+    const failure = (await response.json().catch(() => null)) as { error?: string } | null;
+    return { kind: 'refused', message: failure?.error ?? '' };
+  } catch {
+    return { kind: 'error' };
+  }
+}
+
+/** What a model says about itself. */
+export type ModelManifest = { name: string; trained_at: string; sessions: number };
+
+/** One model the appliance holds. */
+export type StoredModel = {
+  id: string;
+  manifest?: ModelManifest;
+  imported_at_us: number;
+  window_us: number;
+  receivers: number;
+  active: boolean;
+};
+
+/** Lists every model the appliance holds, newest first. */
+export async function fetchModels(): Promise<StoredModel[]> {
+  try {
+    const response = await fetch('/api/models');
+    return response.ok ? ((await response.json()) as StoredModel[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Puts one of the stored models back into service. */
+export async function useModel(id: string): Promise<WriteOutcome> {
+  return send('POST', `/api/models/${encodeURIComponent(id)}`, undefined);
+}
+
+/** Removes a stored model. */
+export async function forgetModel(id: string): Promise<boolean> {
+  try {
+    const response = await fetch(`/api/models/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Gives a stored model a new name. */
+export async function renameModel(id: string, name: string): Promise<boolean> {
+  return rename(`/api/models/${encodeURIComponent(id)}`, name);
 }
 
 /** Lists the captures recorded at this site, newest first. */
@@ -515,4 +583,22 @@ export function takeSecretFromFragment(): string | null {
     history.replaceState(null, '', window.location.pathname + window.location.search);
   }
   return secret;
+}
+
+/** Gives a recorded capture a new description. */
+export async function renameSession(sessionId: string, name: string): Promise<boolean> {
+  return rename(`/api/sessions/${encodeURIComponent(sessionId)}`, name);
+}
+
+async function rename(path: string, name: string): Promise<boolean> {
+  try {
+    const response = await fetch(path, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }

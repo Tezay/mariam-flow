@@ -3,8 +3,9 @@
 
   import { saveUplink, type Status, type Uplink } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
-  import type { Verdict } from '$lib/network';
+  import { uplinkBlocked, type Verdict } from '$lib/network';
   import { canSubmitUplink, uplinkBody } from '$lib/wizard';
+  import Button from '$components/ui/Button.svelte';
 
   type Choice = 'offline' | 'wifi' | 'ethernet';
 
@@ -39,10 +40,12 @@
   const canJoin = $derived(verdict.kind === 'joinable');
   const wifiChosen = $derived(choice === 'wifi');
 
+  const blocked = $derived(uplinkBlocked(choice, verdict));
+
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     saving = true;
-    const outcome = await saveUplink(uplinkBody(wifiChosen && !canJoin ? 'offline' : choice, wifi));
+    const outcome = await saveUplink(uplinkBody(choice, wifi));
     saving = false;
 
     if (outcome.kind === 'ok') {
@@ -119,15 +122,19 @@
   {/if}
 
   {#if failure}
-    <p role="status" class="mt-3 text-sm text-density-saturated">{failure}</p>
+    <p role="status" class="mt-3 text-sm text-danger">{failure}</p>
+  {:else if blocked}
+    <p class="mt-3 text-sm text-density-medium">
+      {blocked === 'unanswered' ? t('net.answerFirst') : t('net.cannotJoin')}
+    </p>
   {/if}
 
-  <button
-    type="submit"
-    disabled={saving || (wifiChosen && canJoin && !canSubmitUplink('wifi', wifi))}
-    class="mt-4 rounded-md bg-mariam-600 px-3 py-2 text-sm font-medium text-white
-           transition-colors hover:bg-mariam-700 disabled:bg-ink-200 disabled:text-ink-500"
-  >
-    {saving ? t('wizard.saving') : submitLabel}
-  </button>
+  <div class="mt-4">
+    <Button
+      type="submit"
+      disabled={saving || blocked !== null || (wifiChosen && !canSubmitUplink('wifi', wifi))}
+    >
+      {saving ? t('wizard.saving') : submitLabel}
+    </Button>
+  </div>
 </form>

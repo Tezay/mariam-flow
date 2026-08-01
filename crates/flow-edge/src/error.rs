@@ -257,3 +257,35 @@ pub enum TransitionError {
         stage: crate::Stage,
     },
 }
+
+/// A density model bundle that cannot be taken into service.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ModelError {
+    /// The archive could not be read as a gzipped tar.
+    #[error("the file is not a model bundle: {0}")]
+    Unreadable(String),
+    /// It carries something a bundle does not hold.
+    #[error("unexpected file in the bundle: {0}")]
+    UnexpectedMember(String),
+    /// A member is larger than a bundle should ever be.
+    #[error("{member} is too large for a model bundle")]
+    TooLarge {
+        /// Name of the offending member.
+        member: String,
+    },
+    /// A member the bundle must hold is absent.
+    #[error("the bundle has no {0}")]
+    MissingMember(&'static str),
+    /// The tuning could not be read.
+    #[error("the bundle site settings are unusable: {0}")]
+    Tuning(String),
+    /// The model does not fit this appliance.
+    #[error("{0}")]
+    Unusable(String),
+    /// The files could not be put in place.
+    #[error("{0}")]
+    Staging(String),
+    /// No model is held under that handle.
+    #[error("no model called {0}")]
+    Unknown(String),
+}

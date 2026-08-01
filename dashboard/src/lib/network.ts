@@ -160,3 +160,21 @@ export function handoutMarkdown(doc: Handout): string {
 
   return `${lines.join('\n')}\n`;
 }
+
+/**
+ * Why the site Wi-Fi cannot be saved, or nothing when it can.
+ *
+ * The appliance stores an uplink it can act on or nothing at all. The choice
+ * on screen used to be quietly rewritten to "offline" when the network turned
+ * out to need an administrator, which stored something the reader never
+ * picked; it is refused with a reason instead.
+ */
+export function uplinkBlocked(
+  choice: 'offline' | 'wifi' | 'ethernet',
+  answer: Verdict,
+): 'unanswered' | 'needs-administrator' | null {
+  if (choice !== 'wifi' || answer.kind === 'joinable') {
+    return null;
+  }
+  return answer.kind;
+}

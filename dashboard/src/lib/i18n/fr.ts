@@ -137,17 +137,43 @@ export const fr: Messages = {
   'handout.privacy':
     "Seules des valeurs agrégées quittent le site — temps d'attente, niveau de densité, confiance, horodatage. Aucune mesure radio brute ne sort du boîtier.",
 
-  'cal.title': 'Calibration',
-  'cal.lead':
-    "Enregistrez à quoi ressemble la file, pour qu'un modèle puisse être entraîné pour ce site. L'enregistrement est exporté et entraîné ailleurs ; le modèle revient ensuite.",
-  'cal.classes': 'Ce que les niveaux signifient ici',
+  'models.title': 'Modèles',
+  'models.lead':
+    'Ce avec quoi le boîtier estime. Un seul est en service ; les autres sont conservés.',
+  'model.rename': 'Renommer',
+  'cal.rename': 'Renommer',
+  'net.answerFirst':
+    'Répondez d’abord aux questions ci-dessus, pour que le boîtier sache ce que ce réseau demande.',
+  'net.cannotJoin':
+    'Le boîtier ne peut pas rejoindre ce réseau seul. Laissez-le hors ligne, ou transmettez la demande ci-dessous au service réseau du site.',
+  'model.inService': 'En service',
+  'model.noneTitle': 'Aucun modèle',
+  'model.noneLead': "Le boîtier enregistre mais n'estime pas. Importez-en un pour démarrer.",
+  'model.trained': 'entraîné {when}',
+  'model.importedOn': 'importé {when}',
+  'model.window': 'fenêtre {value} s',
+  'model.receivers': '{count} récepteur(s)',
+  'model.use': 'Utiliser',
+  'model.forget': 'Supprimer',
+  'model.confirmForget': 'Supprimer ce modèle ?',
+  'model.confirmForgetLead':
+    "Il ne pourra pas être récupéré. L'enregistrement qui a servi à l'entraîner est conservé.",
+  'model.library': 'Modèles détenus',
+  'model.anonymous': 'Paquet sans nom',
+  'prepare.title': 'Préparer le prochain modèle',
+  'prepare.lead': 'Enregistrez la file, exportez, entraînez ailleurs, rapportez le modèle.',
+  'live.model': 'modèle {name}',
+
+  'model.choose': 'Choisir un paquet',
+  'model.import': 'Importer et activer',
+  'model.importing': 'Vérification…',
+
   'cal.classesLead':
     'Décidé une fois pour le site. Deux personnes qui labellisent la même file doivent placer les frontières au même endroit.',
   'cal.classesSaved': 'Descriptions enregistrées.',
   'cal.environment': "Ce qu'on enregistre",
   'cal.environmentHint': 'Par exemple : hall principal, service du midi, jour de pluie.',
   'cal.positions': 'Où sont les capteurs',
-  'cal.positionsHint': 'Facultatif, et repris du dernier enregistrement.',
   'cal.start': "Démarrer l'enregistrement",
   'cal.starting': 'Démarrage…',
   'cal.notReady': "Appairez les capteurs avant d'enregistrer.",
@@ -163,12 +189,10 @@ export const fr: Messages = {
   'cal.discarding':
     "Aucune marque pour l'instant : rien de ce qui est enregistré ne pourra servir à l'entraînement. Appuyez sur le niveau que vous voyez.",
   'cal.silent': 'Un capteur est devenu silencieux. Vérifiez-le avant de continuer.',
-  'cal.done': 'Enregistrement conservé.',
   'cal.history': 'Enregistrements',
   'cal.historyEmpty': 'Rien enregistré ici pour le moment.',
   'cal.export': 'Télécharger',
   'cal.unfinished': 'Jamais terminé',
-  'cal.newRecording': 'Nouvel enregistrement',
   'cal.confirmStop': 'Arrêter et conserver cet enregistrement ?',
   'cal.confirmStopLead':
     "L'enregistrement est scellé et ne peut pas reprendre. Vous pourrez en démarrer un autre.",
@@ -198,6 +222,7 @@ export const fr: Messages = {
   'settings.site': 'Site',
   'settings.nodes': 'Capteurs',
   'settings.network': 'Réseau',
+  'settings.levels': 'Niveaux de densité',
   'settings.hours': 'Horaires de service',
   'settings.system': 'Système',
   'settings.back': 'Réglages',

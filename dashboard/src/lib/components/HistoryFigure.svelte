@@ -71,7 +71,7 @@
   }
 </script>
 
-<section class="rounded-lg bg-white p-4">
+<section class="rounded-xl bg-white p-4 ring-1 ring-ink-100">
   <header class="flex items-baseline justify-between gap-3">
     <h3 class="text-sm font-medium text-ink-900">{t('live.history')}</h3>
     <button

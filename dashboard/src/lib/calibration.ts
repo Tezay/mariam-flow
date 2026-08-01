@@ -88,3 +88,24 @@ export function page<T>(items: T[], index: number): T[] {
 export function pageCount(total: number): number {
   return Math.max(1, Math.ceil(total / PAGE_SIZE));
 }
+
+/** A day, spelled out — what a reader compares two models by. */
+export function formatDay(us: number, locale: string): string {
+  return new Date(us / 1000).toLocaleDateString(locale, {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+/** A window in seconds, which is how anyone discusses one. */
+export function formatWindow(us: number): string {
+  const seconds = us / 1_000_000;
+  return Number.isInteger(seconds) ? `${seconds}` : seconds.toFixed(1);
+}
+
+/** What to call a model: the name it declared, else its handle. */
+export function modelName(model: { id: string; manifest?: { name: string } }): string {
+  const declared = model.manifest?.name?.trim();
+  return declared && declared.length > 0 ? declared : model.id;
+}
