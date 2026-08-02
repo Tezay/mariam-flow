@@ -20,19 +20,36 @@ export type NodeState =
   /** Nothing has ever arrived from it. */
   | { kind: 'never-heard' };
 
+/** What the appliance says about the stream as a whole. */
+export type StreamReference = {
+  last_frame_us?: number;
+  /** Whether frame timestamps come from the appliance clock. */
+  edge_stamped?: boolean;
+};
+
 /**
  * What one receiver is doing.
  *
- * Silence is measured against the newest frame of the whole stream rather
- * than against the clock: an appliance whose sensors have all stopped is a
- * different fault from one sensor stopping, and only the comparison between
- * nodes tells them apart.
+ * Silence is measured against the newest frame of the stream, and against the
+ * appliance clock as well when the frames are edge-stamped. Against the stream
+ * alone a node cannot lag itself, so one receiver could never be reported
+ * silent and a stream where every receiver stopped would look healthy; against
+ * the clock alone a replayed capture — whose timestamps come from the
+ * recording — would report every node dead. Comparing between nodes still does
+ * its work whenever some are alive, which is what tells one dead sensor from a
+ * dead network.
  */
-export function receiverState(health: NodeHealth | undefined, streamLastUs?: number): NodeState {
+export function receiverState(
+  health: NodeHealth | undefined,
+  stream: StreamReference | undefined,
+  nowUs?: number,
+): NodeState {
   if (!health?.last_frame_us) {
     return { kind: 'never-heard' };
   }
-  const lag = (streamLastUs ?? health.last_frame_us) - health.last_frame_us;
+  const clock = stream?.edge_stamped ? (nowUs ?? 0) : 0;
+  const reference = Math.max(stream?.last_frame_us ?? 0, clock, health.last_frame_us);
+  const lag = reference - health.last_frame_us;
   if (lag > SILENT_AFTER_US) {
     return { kind: 'silent', seconds: Math.round(lag / 1_000_000) };
   }

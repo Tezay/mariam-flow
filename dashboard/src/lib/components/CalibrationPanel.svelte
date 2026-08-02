@@ -12,8 +12,7 @@
   } from '$lib/api';
   import { defaultEnvironment } from '$lib/calibration';
   import { formattingLocale, t } from '$lib/i18n/i18n.svelte';
-  import { nodeLagSeconds } from '$lib/live';
-  import { knownPositions } from '$lib/sensors';
+  import { knownPositions, receiverState } from '$lib/sensors';
   import LabelingScreen from '$components/LabelingScreen.svelte';
   import ModelsSection from '$components/ModelsSection.svelte';
   import RecordingsSection from '$components/RecordingsSection.svelte';
@@ -29,9 +28,6 @@
     onupdated: (status: Status) => void;
     onlibrarychanged: () => void;
   } = $props();
-
-  /** A node lagging the stream by more than this is treated as silent. */
-  const SILENT_AFTER_US = 10_000_000;
 
   let environment = $state(
     untrack(() => defaultEnvironment(status.site_name, new Date(), formattingLocale())),
@@ -64,7 +60,7 @@
       return false;
     }
     return Object.values(stream.nodes).some(
-      (node) => nodeLagSeconds(node.last_frame_us, stream.last_frame_us, SILENT_AFTER_US) !== null,
+      (node) => receiverState(node, stream, snapshot?.now_us).kind !== 'streaming',
     );
   });
 

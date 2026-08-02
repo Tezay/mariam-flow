@@ -84,7 +84,7 @@
         ? { tone: 'good' as const, text: t('sensors.heard'), faulty: false }
         : { tone: 'warn' as const, text: t('sensors.notHeard'), faulty: true };
     }
-    const rx = receiverState(health[node.node_id], snapshot?.stream.last_frame_us);
+    const rx = receiverState(health[node.node_id], snapshot?.stream, snapshot?.now_us);
     if (rx.kind === 'streaming') {
       return {
         tone: 'good' as const,

@@ -5,7 +5,8 @@
 
   import { fetchHistory, subscribeLive, type LiveSnapshot, type MinuteSummary } from '$lib/api';
   import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';
-  import { DENSITY_SWATCH, nodeLagSeconds } from '$lib/live';
+  import { DENSITY_SWATCH } from '$lib/live';
+  import { receiverState } from '$lib/sensors';
   import { formatNextChange } from '$lib/schedule';
   import HistoryFigure from '$components/HistoryFigure.svelte';
 
@@ -13,9 +14,6 @@
 
   /** How far back the short history reaches. */
   const HISTORY_MINUTES = 60;
-
-  /** A node lagging the stream by more than this is reported as silent. */
-  const SILENT_AFTER_US = 10_000_000;
 
   let snapshot = $state<LiveSnapshot | null>(null);
   let history = $state<MinuteSummary[]>([]);
@@ -134,26 +132,25 @@
     {:else}
       <ul class="mt-2 divide-y divide-ink-100">
         {#each nodes as [nodeId, node] (nodeId)}
-          {@const silent = nodeLagSeconds(
-            node.last_frame_us,
-            stream?.last_frame_us,
-            SILENT_AFTER_US,
-          )}
+          {@const state = receiverState(node, stream ?? undefined, snapshot?.now_us)}
           <li class="flex items-center justify-between gap-3 py-2">
             <span class="flex items-center gap-2">
               <Radio
                 size={16}
-                class={silent === null ? 'text-density-empty' : 'text-density-saturated'}
+                class={state.kind === 'streaming' ? 'text-density-empty' : 'text-density-saturated'}
                 aria-hidden="true"
               />
               <span class="font-mono text-sm text-ink-900">{nodeId}</span>
             </span>
-            {#if silent === null}
+            {#if state.kind === 'streaming'}
               <span class="text-sm tabular-nums text-ink-500">
-                {t('live.framesPerSecond', { value: node.frames_per_second.toFixed(0) })}
+                {t('live.framesPerSecond', { value: state.framesPerSecond.toFixed(0) })}
               </span>
+            {:else if state.kind === 'silent'}
+              <span class="text-sm text-danger">{t('live.silent', { seconds: state.seconds })}</span
+              >
             {:else}
-              <span class="text-sm text-danger">{t('live.silent', { seconds: silent })}</span>
+              <span class="text-sm text-density-medium">{t('sensors.neverHeard')}</span>
             {/if}
           </li>
         {/each}

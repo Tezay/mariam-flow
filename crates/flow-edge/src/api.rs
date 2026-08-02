@@ -40,7 +40,9 @@ use crate::config::{ApplianceConfig, NetworkSurvey, PairedNode, Uplink};
 use crate::credential::AdminCredential;
 use crate::discovery::Discovery;
 use crate::history::{MINUTE_US, MinuteSummary};
-use crate::journal::{Event, EventKind, Journal, RecordedEvent};
+use crate::journal::{
+    EVENT_CATEGORIES, Event, EventCategory, EventKind, EventPage, Journal, RecordedEvent,
+};
 use crate::model;
 use crate::now_us;
 use crate::pipeline::StreamHealth;
@@ -113,6 +115,11 @@ pub struct EdgeState {
     journal: Arc<Mutex<Journal>>,
     /// What the pipeline thread publishes.
     live: Arc<Live>,
+    /// Set once the daemon has been asked to stop, so responses that would
+    /// otherwise never end can end.
+    stopping: Arc<tokio::sync::watch::Sender<bool>>,
+    /// Why the journal last refused a write, if it is refusing them.
+    journal_failure: Arc<Mutex<Option<JournalFailure>>>,
 }
 
 /// The live surface, written by the pipeline thread and read by handlers.
@@ -163,6 +170,8 @@ impl EdgeState {
             })),
             login_gate: Arc::new(tokio::sync::Mutex::new(())),
             journal: Arc::new(Mutex::new(journal)),
+            stopping: Arc::new(tokio::sync::watch::Sender::new(false)),
+            journal_failure: Arc::new(Mutex::new(None)),
             live: Arc::new(Live {
                 estimates: tokio::sync::watch::Sender::new(None),
                 health: Mutex::new(StreamHealth::default()),
@@ -170,6 +179,21 @@ impl EdgeState {
                 recorder: Mutex::new(None),
             }),
         }
+    }
+
+    /// Asks every long-lived response to end.
+    ///
+    /// The live stream never completes on its own, so a graceful shutdown that
+    /// waits for connections to finish would wait for as long as one dashboard
+    /// is open — until a supervisor kills the process, and with it the journal
+    /// entries still buffered.
+    pub fn begin_shutdown(&self) {
+        self.stopping.send_replace(true);
+    }
+
+    /// Watches for the daemon being asked to stop.
+    fn watch_stopping(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.stopping.subscribe()
     }
 
     /// Publishes a freshly computed estimate.
@@ -347,28 +371,71 @@ impl EdgeState {
     /// on.
     pub fn record(&self, event: Event) {
         let now = now_us();
-        if let Err(err) = self.journal().record(event, now) {
-            eprintln!("journal: {err}");
-        }
+        let outcome = self.journal().record(event, now);
+        self.note_journal(&outcome, "recording");
     }
 
     /// Writes everything the journal has buffered.
     pub fn flush_journal(&self) {
-        if let Err(err) = self.journal().flush() {
-            eprintln!("journal flush: {err}");
-        }
+        let outcome = self.journal().flush();
+        self.note_journal(&outcome, "writing");
     }
 
     /// Drops events past the retention window or the row cap.
     pub fn prune_journal(&self) {
         let now = now_us();
-        if let Err(err) = self.journal().prune(now) {
-            eprintln!("journal prune: {err}");
+        let outcome = self.journal().prune(now).map(|_| ());
+        self.note_journal(&outcome, "pruning");
+    }
+
+    /// Remembers whether the journal can still be written.
+    ///
+    /// A card that has gone read-only — how these usually end — makes every
+    /// write fail. Left to a console nobody reads, the appliance would look
+    /// healthy while keeping no record of anything at all, which is the one
+    /// failure a journal must not have quietly.
+    fn note_journal<T>(
+        &self,
+        outcome: &Result<T, crate::error::JournalError>,
+        doing: &'static str,
+    ) {
+        let mut failure = match self.journal_failure.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        match outcome {
+            Ok(_) => *failure = None,
+            Err(err) => {
+                if failure.is_none() {
+                    eprintln!("journal {doing}: {err}");
+                }
+                *failure = Some(JournalFailure {
+                    since_us: failure.map_or_else(now_us, |previous| previous.since_us),
+                });
+            }
         }
     }
 
-    fn recent_events(&self, limit: usize) -> Vec<RecordedEvent> {
-        self.journal().recent(limit).unwrap_or_default()
+    /// Since when the journal has been failing to write, if it is.
+    #[must_use]
+    pub fn journal_failure(&self) -> Option<JournalFailure> {
+        match self.journal_failure.lock() {
+            Ok(guard) => *guard,
+            Err(poisoned) => *poisoned.into_inner(),
+        }
+    }
+
+    fn recent_events(&self, page: &EventPage) -> Vec<RecordedEvent> {
+        self.journal().events(page).unwrap_or_default()
+    }
+
+    fn newest_event_id(&self) -> Option<i64> {
+        self.recent_events(&EventPage {
+            limit: 1,
+            ..EventPage::default()
+        })
+        .first()
+        .map(|event| event.id)
     }
 
     fn journal(&self) -> MutexGuard<'_, Journal> {
@@ -473,9 +540,24 @@ impl EdgeState {
         presented: String,
     ) -> Result<String, LoginRefusal> {
         let now = now_us();
-        if let Err(wait_us) = self.lock().throttle.check(client, now) {
-            self.record(Event::new(EventKind::LoginThrottled).from_client(client));
-            return Err(LoginRefusal::TooManyAttempts { wait_us });
+        if let Err(refusal) = self.lock().throttle.check(client, now) {
+            // One entry per block, not per request: a refusal is decided
+            // before the hash is computed, so it costs the client nothing and
+            // a row each would let anyone on the network evict the journal.
+            if refusal.first {
+                self.record(Event::new(EventKind::LoginThrottled).from_client(client));
+            }
+            return Err(LoginRefusal::TooManyAttempts {
+                wait_us: refusal.wait_us,
+            });
+        }
+        let suppressed = self.lock().throttle.take_suppressed(client);
+        if suppressed > 0 {
+            self.record(
+                Event::new(EventKind::LoginThrottled)
+                    .from_client(client)
+                    .with_detail(format!("{suppressed} further attempts refused")),
+            );
         }
 
         let _permit = self.login_gate.lock().await;
@@ -541,6 +623,7 @@ impl EdgeState {
             survey: config.network.survey,
             classes: config.classes.clone(),
             active_model: inner.config.active_model.clone(),
+            journal_failure: self.journal_failure(),
             nodes: config
                 .nodes
                 .iter()
@@ -583,6 +666,7 @@ pub fn router(state: EdgeState) -> Router {
     let protected = Router::new()
         .route("/api/status", get(status))
         .route("/api/events", get(events))
+        .route("/api/events.csv", get(events_csv))
         .route("/api/live", get(live))
         .route("/api/estimates", get(estimates))
         .route("/api/discovery", get(discovery))
@@ -708,6 +792,13 @@ struct LiveSnapshot {
     /// Appliance clock, so a browser can judge staleness without trusting
     /// its own — the same reasoning as the labeling page.
     now_us: u64,
+    /// Newest row of the journal, or nothing if it is empty.
+    ///
+    /// Carried here rather than polled for: this stream already ticks every
+    /// second for the live view, so a reader of the journal learns that
+    /// something happened within a second and at the cost of one integer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    journal_id: Option<i64>,
 }
 
 /// An estimate as the dashboard sees it.
@@ -748,6 +839,7 @@ impl EdgeState {
             stream: self.stream_health(),
             service: self.service_state(),
             now_us: now_us(),
+            journal_id: self.newest_event_id(),
         }
     }
 }
@@ -767,18 +859,30 @@ async fn live(
     // would freeze on its last good state instead of reporting the silence —
     // and a capture, which suspends estimation entirely, would show a clock
     // that never advances.
-    let estimates = tokio_stream::wrappers::WatchStream::new(state.watch_estimates()).map(|_| ());
+    let estimates =
+        tokio_stream::wrappers::WatchStream::new(state.watch_estimates()).map(|_| false);
     let ticks = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(
         std::time::Duration::from_secs(1),
     ))
-    .map(|_| ());
+    .map(|_| false);
 
-    let stream = estimates.merge(ticks).map(move |()| {
-        let event = SseEvent::default()
-            .json_data(state.live_snapshot())
-            .unwrap_or_else(|_| SseEvent::default().comment("snapshot unavailable"));
-        Ok(event)
-    });
+    // Merged in as a third source rather than raced against the whole stream:
+    // this response has to *end* when the daemon is asked to stop, or a
+    // graceful shutdown waits for as long as one dashboard is left open.
+    let stopping = tokio_stream::wrappers::WatchStream::new(state.watch_stopping());
+
+    let stream = estimates
+        .merge(ticks)
+        .merge(stopping)
+        .map_while(move |stopping| {
+            if stopping {
+                return None;
+            }
+            let event = SseEvent::default()
+                .json_data(state.live_snapshot())
+                .unwrap_or_else(|_| SseEvent::default().comment("snapshot unavailable"));
+            Some(Ok(event))
+        });
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
@@ -1598,17 +1702,133 @@ const MAX_EVENT_LIMIT: usize = 1_000;
 #[derive(Deserialize)]
 struct EventsQuery {
     limit: Option<usize>,
+    /// Read further back: only rows older than this one.
+    before: Option<i64>,
+    /// Read forward: only rows newer than this one.
+    ///
+    /// This is what tells a reader how much has arrived while they were
+    /// reading, without the list moving under them.
+    after: Option<i64>,
+    /// Restrict to one family.
+    category: Option<String>,
 }
 
 async fn events(
     State(state): State<EdgeState>,
     Query(query): Query<EventsQuery>,
 ) -> Json<Vec<RecordedEvent>> {
-    let limit = query
-        .limit
-        .unwrap_or(DEFAULT_EVENT_LIMIT)
-        .clamp(1, MAX_EVENT_LIMIT);
-    Json(state.recent_events(limit))
+    // An unknown family reads as no filter rather than as an error: it can
+    // only come from a hand-written URL, and an empty journal would look like
+    // an appliance that has never done anything.
+    let category = query
+        .category
+        .as_deref()
+        .and_then(|name| EVENT_CATEGORIES.into_iter().find(|c| c.as_str() == name));
+
+    Json(
+        state.recent_events(&EventPage {
+            limit: query
+                .limit
+                .unwrap_or(DEFAULT_EVENT_LIMIT)
+                .clamp(1, MAX_EVENT_LIMIT),
+            before: query.before,
+            after: query.after,
+            category,
+        }),
+    )
+}
+
+/// How many rows are held at once while an export is written.
+///
+/// The whole journal is 20 000 rows; reading it in slices keeps the row buffer
+/// small whatever the retention grows to, and the text it produces is under
+/// two megabytes.
+const CSV_SLICE: usize = 2_000;
+
+#[derive(Deserialize)]
+struct CsvQuery {
+    category: Option<String>,
+}
+
+/// Sends the journal as CSV, honouring the family filter.
+///
+/// The client address is included: an access incident forwarded to whoever
+/// handles it is not usable without saying where it came from. It is personal
+/// data, which is why the journal bounds its retention (ADR 0012) — an export
+/// takes it off the appliance, and that is the operator's decision to make.
+async fn events_csv(State(state): State<EdgeState>, Query(query): Query<CsvQuery>) -> Response {
+    let category = query
+        .category
+        .as_deref()
+        .and_then(|name| EVENT_CATEGORIES.into_iter().find(|c| c.as_str() == name));
+
+    let mut out = String::from("time,category,kind,client,detail\n");
+    let mut before = None;
+    loop {
+        let slice = state.recent_events(&EventPage {
+            limit: CSV_SLICE,
+            before,
+            after: None,
+            category,
+        });
+        let Some(last) = slice.last() else { break };
+        before = Some(last.id);
+        for event in &slice {
+            out.push_str(&csv_row(event));
+        }
+        if slice.len() < CSV_SLICE {
+            break;
+        }
+    }
+
+    (
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8".to_owned()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!(
+                    "attachment; filename=\"journal-{}.csv\"",
+                    category.map_or("all", EventCategory::as_str)
+                ),
+            ),
+        ],
+        out,
+    )
+        .into_response()
+}
+
+fn csv_row(event: &RecordedEvent) -> String {
+    format!(
+        "{},{},{},{},{}\n",
+        csv_field(&utc_instant(event.ts_us)),
+        event.category.as_str(),
+        event.kind.as_str(),
+        csv_field(event.client.as_deref().unwrap_or_default()),
+        csv_field(event.detail.as_deref().unwrap_or_default()),
+    )
+}
+
+/// Quotes a field so that a comma, a quote or a newline in an operator's own
+/// words cannot end the field early — RFC 4180, doubling the quote.
+/// The instant an event carries, in UTC and in a form a spreadsheet sorts.
+///
+/// UTC rather than the site's zone: an export is read elsewhere, and a naive
+/// local time with no offset is the classic way two records of the same
+/// incident stop lining up.
+fn utc_instant(ts_us: u64) -> String {
+    let micros = i64::try_from(ts_us).unwrap_or(0);
+    jiff::Timestamp::from_microsecond(micros).map_or_else(
+        |_| ts_us.to_string(),
+        |ts| ts.strftime("%Y-%m-%dT%H:%M:%SZ").to_string(),
+    )
+}
+
+fn csv_field(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_owned()
+    }
 }
 
 #[derive(Deserialize)]
@@ -1733,6 +1953,9 @@ struct StatusResponse {
     /// Which stored model is estimating, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     active_model: Option<String>,
+    /// Since when the journal has been unable to write, if it cannot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    journal_failure: Option<JournalFailure>,
     nodes: Vec<NodeView>,
 }
 
@@ -1740,6 +1963,13 @@ struct StatusResponse {
 struct SensorApView {
     ssid: String,
     channel: u8,
+}
+
+/// The journal refusing to be written, and since when.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct JournalFailure {
+    /// When writes started failing.
+    pub since_us: u64,
 }
 
 /// The uplink as the dashboard sees it: its shape, never its secrets.
@@ -2373,7 +2603,10 @@ mod tests {
         // to ask for them the way the housekeeping task does.
         state.flush_journal();
         state
-            .recent_events(50)
+            .recent_events(&EventPage {
+                limit: 50,
+                ..EventPage::default()
+            })
             .into_iter()
             .filter_map(|event| event.detail)
             .collect::<Vec<String>>()
@@ -3088,6 +3321,74 @@ mod tests {
             let (status, _, _) = send(&state, method, path, None, Some("{}".to_owned()), 10).await;
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path} is open");
         }
+    }
+
+    #[tokio::test]
+    async fn the_live_stream_ends_when_the_daemon_is_asked_to_stop() {
+        // Without this the stream never completes, so a graceful shutdown
+        // waits for as long as one dashboard is open — until a supervisor
+        // kills the process, taking the still-buffered journal with it.
+        let (state, _dir) = writable();
+        let cookie = session_of(&state).await;
+
+        let mut request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/api/live")
+            .header(header::COOKIE, cookie)
+            .body(axum::body::Body::empty())
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from((
+                Ipv4Addr::new(192, 168, 4, 10),
+                51_000,
+            ))));
+        let response = router(state.clone()).oneshot(request).await.unwrap();
+
+        state.begin_shutdown();
+
+        let drained = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            response.into_body().collect(),
+        )
+        .await;
+        assert!(drained.is_ok(), "the live stream never ended");
+    }
+
+    #[tokio::test]
+    async fn the_journal_exports_as_csv_and_quotes_what_would_break_a_row() {
+        let (state, _dir) = writable();
+        let cookie = session_of(&state).await;
+        // A detail containing a comma, a quote and a newline: all three end a
+        // CSV field early if they are not quoted.
+        state.record(
+            Event::new(EventKind::ConfigurationChanged)
+                .with_detail("site named \"RU, Efrei\"\nline two"),
+        );
+        state.flush_journal();
+
+        let (status, headers, _) =
+            send(&state, "GET", "/api/events.csv", Some(&cookie), None, 10).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers.get(header::CONTENT_TYPE).unwrap(),
+            "text/csv; charset=utf-8"
+        );
+    }
+
+    #[test]
+    fn a_csv_field_survives_a_comma_a_quote_and_a_newline() {
+        assert_eq!(csv_field("plain"), "plain");
+        assert_eq!(csv_field("a,b"), "\"a,b\"");
+        assert_eq!(csv_field("say \"hi\""), "\"say \"\"hi\"\"\"");
+        assert_eq!(csv_field("two\nlines"), "\"two\nlines\"");
+    }
+
+    #[test]
+    fn an_exported_instant_is_utc_and_sorts_as_text() {
+        // Read elsewhere, so a naive local time with no offset is how two
+        // records of one incident stop lining up.
+        assert_eq!(utc_instant(1_785_700_800_000_000), "2026-08-02T20:00:00Z");
     }
 
     #[tokio::test]

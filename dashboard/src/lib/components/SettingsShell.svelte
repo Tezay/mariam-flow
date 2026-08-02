@@ -5,6 +5,7 @@
   import type { Status } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
   import ClassesSection from '$components/ClassesSection.svelte';
+  import JournalSection from '$components/JournalSection.svelte';
   import NetworkSection from '$components/NetworkSection.svelte';
   import ServiceHoursPanel from '$components/ServiceHoursPanel.svelte';
   import SiteSection from '$components/SiteSection.svelte';
@@ -12,7 +13,7 @@
 
   let { status, onupdated }: { status: Status; onupdated: (status: Status) => void } = $props();
 
-  const SECTIONS = ['site', 'network', 'levels', 'hours', 'system'] as const;
+  const SECTIONS = ['site', 'network', 'levels', 'hours', 'system', 'journal'] as const;
   type Section = (typeof SECTIONS)[number];
 
   /* Nothing is selected to begin with, which is what makes one component
@@ -70,8 +71,10 @@
           <ClassesSection {status} {onupdated} />
         {:else if section === 'hours'}
           <ServiceHoursPanel />
-        {:else}
+        {:else if section === 'system'}
           <SystemSection {status} />
+        {:else}
+          <JournalSection />
         {/if}
       </div>
     </div>

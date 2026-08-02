@@ -1,6 +1,9 @@
 <script lang="ts">
+  import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+
   import { fetchSystem, type Status, type SystemReport } from '$lib/api';
-  import { t } from '$lib/i18n/i18n.svelte';
+  import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';
+  import { formatClock } from '$lib/live';
   import { asMegabytes, formatUptime } from '$lib/system';
 
   let { status }: { status: Status } = $props();
@@ -84,6 +87,22 @@
       {status.model_installed ? t('status.modelInstalled') : t('status.modelMissing')}
     </dd>
   </div>
+  {#if status.journal_failure}
+    <!-- Said here rather than left to a console nobody reads: a card that has
+         gone read-only makes the appliance look healthy while it keeps no
+         record of anything at all. -->
+    <div class="flex flex-wrap items-baseline justify-between gap-3 py-2">
+      <dt class="flex items-center gap-1.5 text-sm text-danger">
+        <TriangleAlert size={14} class="shrink-0" aria-hidden="true" />
+        {t('system.journalFailing')}
+      </dt>
+      <dd class="text-sm text-danger">
+        {t('system.journalFailingValue', {
+          when: formatClock(status.journal_failure.since_us, formattingLocale(), hour12()),
+        })}
+      </dd>
+    </div>
+  {/if}
   <div class="flex flex-wrap items-baseline justify-between gap-3 py-2">
     <dt class="text-sm text-ink-500">{t('status.sensorAp')}</dt>
     <dd class="font-mono text-sm text-ink-900">

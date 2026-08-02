@@ -213,7 +213,7 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
             listener,
             router(state.clone()).into_make_service_with_connect_info::<SocketAddr>(),
         )
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(state.clone()))
         .await?;
 
         housekeeper.abort();
@@ -232,8 +232,12 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
 async fn housekeeping(state: EdgeState) {
     let mut ticks: u64 = 0;
     let mut interval = tokio::time::interval(FLUSH_INTERVAL);
+    let mut clock = ClockWatch::new();
     loop {
         interval.tick().await;
+        if let Some(step) = clock.stepped() {
+            state.record(Event::new(EventKind::ClockStepped).with_detail(step));
+        }
         state.flush_journal();
         ticks += 1;
         if ticks % PRUNE_EVERY_TICKS == 0 {
@@ -242,12 +246,58 @@ async fn housekeeping(state: EdgeState) {
     }
 }
 
+/// Watches the wall clock against a monotonic one.
+///
+/// An appliance installed offline boots with whatever time it kept, and the
+/// clock jumps the moment an uplink lets it be corrected. Rows are ordered by
+/// their identifier so the journal still reads in order, but their times
+/// contradict each other across the jump — which looks like corruption unless
+/// the jump itself is recorded.
+struct ClockWatch {
+    wall_us: u64,
+    monotonic: std::time::Instant,
+}
+
+/// A wall-clock drift larger than this, over one tick, is a step rather than
+/// the ordinary imprecision of a timer.
+const CLOCK_STEP_US: i128 = 5 * 1_000_000;
+
+impl ClockWatch {
+    fn new() -> Self {
+        Self {
+            wall_us: now_us(),
+            monotonic: std::time::Instant::now(),
+        }
+    }
+
+    /// How far the clock jumped since the last call, phrased, if it did.
+    fn stepped(&mut self) -> Option<String> {
+        let wall = now_us();
+        let monotonic = std::time::Instant::now();
+        let elapsed = i128::try_from(monotonic.duration_since(self.monotonic).as_micros()).ok()?;
+        let moved = i128::from(wall) - i128::from(self.wall_us);
+        self.wall_us = wall;
+        self.monotonic = monotonic;
+
+        let step = moved - elapsed;
+        if step.abs() < CLOCK_STEP_US {
+            return None;
+        }
+        let seconds = step / 1_000_000;
+        Some(format!(
+            "{}{} s",
+            if seconds > 0 { "+" } else { "" },
+            seconds
+        ))
+    }
+}
+
 /// Resolves when the supervisor asks the daemon to stop.
 ///
 /// Both signals matter: systemd sends SIGTERM, a console sends SIGINT.
 /// Catching them is what lets the journal be flushed instead of losing
 /// whatever was buffered.
-async fn shutdown_signal() {
+async fn shutdown_signal(state: EdgeState) {
     let interrupt = async {
         let _ = tokio::signal::ctrl_c().await;
     };
@@ -268,6 +318,10 @@ async fn shutdown_signal() {
         () = interrupt => {}
         () = terminate => {}
     }
+
+    // Before returning, so that responses which never end on their own are
+    // already finishing when axum starts waiting for connections to close.
+    state.begin_shutdown();
 }
 
 fn provision(args: &ProvisionArgs) -> Result<(), Box<dyn Error>> {
