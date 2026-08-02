@@ -23,7 +23,7 @@
 //! that cannot estimate is not a failure to report — it is an installation
 //! that has not reached calibration yet. The daemon serves regardless.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use std::time::Duration;
 
@@ -84,6 +84,13 @@ pub struct StreamHealth {
     pub estimates: u64,
     /// Edge timestamp of the most recent frame, if any.
     pub last_frame_us: Option<u64>,
+    /// Whether frame timestamps come from the appliance clock.
+    ///
+    /// True over UDP, where the edge stamps each datagram at reception. A
+    /// replayed capture reconstructs its timestamps from the recording, so
+    /// they drift from wall time by design — and judging silence against the
+    /// clock would report every node of a replay as dead.
+    pub edge_stamped: bool,
     /// Per receiving node, keyed by node id and ordered for a stable
     /// display.
     pub nodes: BTreeMap<String, NodeHealth>,
@@ -269,6 +276,10 @@ fn supervise(
     data_dir: &Path,
     options: &LiveOptions,
 ) {
+    // Over UDP the edge stamps each datagram at reception; a file or stdin
+    // carries the timestamps of the recording instead.
+    let edge_stamped = options.input.starts_with("udp://");
+
     let mut built = first;
     loop {
         let generation = state.config_generation();
@@ -285,7 +296,7 @@ fn supervise(
         state.set_stream_running(true);
         state.set_estimating(estimator.is_some());
 
-        match run(state, source, estimator, generation) {
+        match run(state, source, estimator, generation, edge_stamped) {
             Exit::StreamEnded => break,
             // The old source is dropped by `run` returning, so its socket is
             // free before the new one binds it.
@@ -305,6 +316,65 @@ fn supervise(
     }
     state.set_estimating(false);
     state.set_stream_running(false);
+}
+
+/// How long a node may be behind the stream before it counts as gone.
+///
+/// The same threshold the live view uses, so the journal and the screen never
+/// disagree about which sensors are quiet.
+const SILENT_AFTER_US: u64 = 10_000_000;
+
+/// Records nodes that started or stopped streaming since the last check.
+///
+/// Silence is measured against the newest frame of the stream, and against the
+/// clock as well when the frames are edge-stamped. Against the stream alone a
+/// node cannot lag itself, so one receiver could never be reported silent and a
+/// stream where every receiver stopped would look healthy; against the clock
+/// alone a replayed capture would report every node dead. Comparing between
+/// nodes still does its work whenever some are alive — which is what tells one
+/// dead sensor from a dead network.
+fn journal_node_changes(
+    state: &EdgeState,
+    counters: &BTreeMap<String, NodeCounter>,
+    streaming: &mut BTreeSet<String>,
+    now_us: u64,
+    edge_stamped: bool,
+) {
+    let newest = counters
+        .values()
+        .filter_map(|counter| counter.last_frame_us)
+        .max()
+        .unwrap_or(now_us);
+    // The clock only joins in when the frames are on the same timeline as it.
+    let newest = if edge_stamped {
+        newest.max(now_us)
+    } else {
+        newest
+    };
+
+    for (node_id, counter) in counters {
+        let alive = counter
+            .last_frame_us
+            .is_some_and(|last| newest.saturating_sub(last) <= SILENT_AFTER_US);
+        let known = streaming.contains(node_id);
+        if alive && !known {
+            streaming.insert(node_id.clone());
+            // The rate is only known once a measurement window has closed, so
+            // the first frame from a node has none to report yet.
+            let detail = if counter.rate > 0.0 {
+                format!("{node_id}, {:.0} frames/s", counter.rate)
+            } else {
+                node_id.clone()
+            };
+            state.record(Event::new(EventKind::NodeAppeared).with_detail(detail));
+        } else if !alive && known {
+            streaming.remove(node_id);
+            state.record(
+                Event::new(EventKind::NodeLost)
+                    .with_detail(format!("{node_id}, after {} frames", counter.frames)),
+            );
+        }
+    }
 }
 
 /// Whether a read simply found nothing within the intake tick.
@@ -330,6 +400,7 @@ fn run(
     mut source: FrameSource,
     mut estimator: Option<LivePipeline>,
     generation: u64,
+    edge_stamped: bool,
 ) -> Exit {
     let mut counters: BTreeMap<String, NodeCounter> = BTreeMap::new();
     let mut aggregator = MinuteAggregator::new();
@@ -341,6 +412,11 @@ fn run(
     // three in the morning would be a number with nothing behind it.
     let mut open = true;
     let mut next_service_check: u64 = 0;
+
+    // Which nodes were streaming at the last check, so that only the change
+    // is recorded: the live screen already shows the current state, and a
+    // journal that repeated it every second would say nothing.
+    let mut streaming: BTreeSet<String> = BTreeSet::new();
 
     let mut exit = Exit::StreamEnded;
     loop {
@@ -374,6 +450,8 @@ fn run(
                 exit = Exit::ConfigurationChanged;
                 break;
             }
+
+            journal_node_changes(state, &counters, &mut streaming, now, edge_stamped);
 
             let was_open = open;
             open = state.service_state().open;
@@ -424,7 +502,13 @@ fn run(
             }
         }
 
-        state.set_stream_health(health(&counters, frames, estimates, estimator.is_some()));
+        state.set_stream_health(health(
+            &counters,
+            frames,
+            estimates,
+            estimator.is_some(),
+            edge_stamped,
+        ));
     }
 
     // The minute in progress is worth keeping: a capture that ends at
@@ -432,7 +516,13 @@ fn run(
     if let Some(minute) = aggregator.flush() {
         state.write_minute(&minute);
     }
-    state.set_stream_health(health(&counters, frames, estimates, estimator.is_some()));
+    state.set_stream_health(health(
+        &counters,
+        frames,
+        estimates,
+        estimator.is_some(),
+        edge_stamped,
+    ));
     exit
 }
 
@@ -448,12 +538,14 @@ fn health(
     frames: u64,
     estimates: u64,
     estimating: bool,
+    edge_stamped: bool,
 ) -> StreamHealth {
     StreamHealth {
         running: true,
         estimating,
         frames,
         estimates,
+        edge_stamped,
         last_frame_us: counters.values().filter_map(|c| c.last_frame_us).max(),
         nodes: counters
             .iter()
@@ -561,9 +653,9 @@ mod tests {
     #[test]
     fn health_separates_reading_from_estimating() {
         let counters = BTreeMap::new();
-        assert!(health(&counters, 0, 0, false).running);
-        assert!(!health(&counters, 0, 0, false).estimating);
-        assert!(health(&counters, 0, 0, true).estimating);
+        assert!(health(&counters, 0, 0, false, true).running);
+        assert!(!health(&counters, 0, 0, false, true).estimating);
+        assert!(health(&counters, 0, 0, true, true).estimating);
     }
 
     #[test]
@@ -643,7 +735,7 @@ mod tests {
         observe(&mut counters, &frame("rx-2", NOW + 1_000));
         observe(&mut counters, &frame("rx-1", NOW + 2_000));
 
-        let health = health(&counters, 3, 1, true);
+        let health = health(&counters, 3, 1, true, true);
         assert_eq!(health.frames, 3);
         assert_eq!(health.estimates, 1);
         assert_eq!(health.nodes.len(), 2);

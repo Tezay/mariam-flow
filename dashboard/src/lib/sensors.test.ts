@@ -33,26 +33,54 @@ const NODES: SensingNode[] = [
   { node_id: 'rx-2', role: 'rx', address: '192.168.4.52' },
 ];
 
+/** The stream as the appliance reports it over UDP, where it stamps frames. */
+function stream(lastFrameUs?: number, edgeStamped = true) {
+  return { last_frame_us: lastFrameUs, edge_stamped: edgeStamped };
+}
+
 describe('receiverState', () => {
   it('reports a node that has never been heard apart from one that stopped', () => {
-    expect(receiverState(undefined, NOW)).toEqual({ kind: 'never-heard' });
-    expect(receiverState(health(undefined), NOW)).toEqual({ kind: 'never-heard' });
+    expect(receiverState(undefined, stream(NOW), NOW)).toEqual({ kind: 'never-heard' });
+    expect(receiverState(health(undefined), stream(NOW), NOW)).toEqual({ kind: 'never-heard' });
   });
 
   it('reports the rate while frames are arriving', () => {
-    expect(receiverState(health(NOW, 38), NOW)).toEqual({
+    expect(receiverState(health(NOW, 38), stream(NOW), NOW)).toEqual({
       kind: 'streaming',
       framesPerSecond: 38,
     });
   });
 
-  it('measures silence against the stream, not the clock', () => {
-    // All sensors stopping is a different fault from one stopping, and only
-    // the comparison between them tells the two apart.
+  it('reports a node that lags the others', () => {
     const stopped = health(NOW - 5 * SILENT_AFTER_US);
-    expect(receiverState(stopped, NOW)).toEqual({ kind: 'silent', seconds: 50 });
-    // The same node, when nothing else is arriving either, is not singled out.
-    expect(receiverState(stopped, stopped.last_frame_us)).toEqual({
+    expect(receiverState(stopped, stream(NOW), NOW)).toEqual({ kind: 'silent', seconds: 50 });
+  });
+
+  it('still reports it when nothing else is arriving either', () => {
+    // Against the stream alone a node cannot lag itself, so an installation
+    // with one receiver could never report it silent, and one where every
+    // receiver stopped would report them all healthy.
+    const stopped = health(NOW - 5 * SILENT_AFTER_US);
+    expect(receiverState(stopped, stream(stopped.last_frame_us), NOW)).toEqual({
+      kind: 'silent',
+      seconds: 50,
+    });
+  });
+
+  it('never judges a replayed capture against the clock', () => {
+    // A replay carries the timestamps of the recording, which drift from wall
+    // time by design; judging them against it would call every node dead.
+    const replayed = health(NOW - 400 * SILENT_AFTER_US);
+    expect(receiverState(replayed, stream(replayed.last_frame_us, false), NOW)).toEqual({
+      kind: 'streaming',
+      framesPerSecond: 40,
+    });
+  });
+
+  it('is not fooled by a clock that lags the frames', () => {
+    // The appliance stamps frames itself, so `now` can trail the newest one
+    // by a tick; that is not silence.
+    expect(receiverState(health(NOW), stream(NOW), NOW - 1_000_000)).toEqual({
       kind: 'streaming',
       framesPerSecond: 40,
     });

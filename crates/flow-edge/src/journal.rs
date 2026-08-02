@@ -91,6 +91,27 @@ pub enum EventCategory {
     Nodes,
 }
 
+impl EventCategory {
+    /// Stable name used in the database and on the wire.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Access => "access",
+            Self::Lifecycle => "lifecycle",
+            Self::Installation => "installation",
+            Self::Nodes => "nodes",
+        }
+    }
+}
+
+/// Every category, for the same reason [`EVENT_KINDS`] exists.
+pub const EVENT_CATEGORIES: [EventCategory; 4] = [
+    EventCategory::Access,
+    EventCategory::Lifecycle,
+    EventCategory::Installation,
+    EventCategory::Nodes,
+];
+
 /// What happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -134,6 +155,8 @@ pub enum EventKind {
     NodeAppeared,
     /// A sensing node stopped being seen.
     NodeLost,
+    /// The wall clock jumped, rather than advancing with elapsed time.
+    ClockStepped,
     /// A stored row this build cannot name.
     ///
     /// Never written, only read: a journal carried over from a newer build,
@@ -149,7 +172,7 @@ pub enum EventKind {
 /// [`EventKind::as_str`] and `parse_kind` are inverses, and the test that
 /// proves it walks this list: a variant added to one and forgotten in the
 /// other is a stored row that comes back as a different event.
-pub const EVENT_KINDS: [EventKind; 18] = [
+pub const EVENT_KINDS: [EventKind; 19] = [
     EventKind::LoginSucceeded,
     EventKind::LoginFailed,
     EventKind::LoginThrottled,
@@ -167,6 +190,7 @@ pub const EVENT_KINDS: [EventKind; 18] = [
     EventKind::ModelRejected,
     EventKind::NodeAppeared,
     EventKind::NodeLost,
+    EventKind::ClockStepped,
     EventKind::Unknown,
 ];
 
@@ -191,14 +215,20 @@ impl EventKind {
             | Self::ModelActivated
             | Self::ModelRejected => EventCategory::Installation,
             Self::NodeAppeared | Self::NodeLost => EventCategory::Nodes,
+            Self::ClockStepped => EventCategory::Lifecycle,
             Self::Unknown => EventCategory::Lifecycle,
         }
     }
 
     /// Whether this kind must reach the card before the call returns.
+    ///
+    /// The access events an attacker would erase by pulling the power are the
+    /// ones that say what was attempted and whether it worked. A refusal by
+    /// the throttle is implied by the failures that earned it, and paying a
+    /// physical write for one would let a flood of them wear the card.
     #[must_use]
     pub fn is_immediate(self) -> bool {
-        self.category() == EventCategory::Access
+        self.category() == EventCategory::Access && self != Self::LoginThrottled
     }
 
     /// Stable name used in the database and on the wire.
@@ -222,6 +252,7 @@ impl EventKind {
             Self::ModelRejected => "model-rejected",
             Self::NodeAppeared => "node-appeared",
             Self::NodeLost => "node-lost",
+            Self::ClockStepped => "clock-stepped",
             Self::Unknown => "unknown",
         }
     }
@@ -264,9 +295,28 @@ impl Event {
     }
 }
 
+/// Which slice of the journal to read.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EventPage {
+    /// How many rows at most.
+    pub limit: usize,
+    /// Only rows older than this one, for reading further back.
+    pub before: Option<i64>,
+    /// Only rows newer than this one, for finding what has arrived since.
+    pub after: Option<i64>,
+    /// Only rows of this family.
+    pub category: Option<EventCategory>,
+}
+
 /// An event as read back out of the journal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RecordedEvent {
+    /// Row identifier, and the cursor a reader pages on.
+    ///
+    /// Paging on the row rather than on an offset: the journal is written
+    /// while it is read, and an offset would make events arriving mid-read
+    /// repeat some rows and skip others.
+    pub id: i64,
     /// When it happened, µs since the Unix epoch, by the edge clock.
     pub ts_us: u64,
     /// Family it belongs to.
@@ -387,7 +437,7 @@ impl Journal {
             for (ts_us, event) in &self.pending {
                 statement.execute(params![
                     to_sql_us(*ts_us),
-                    serde_plain_category(event.kind.category()),
+                    event.kind.category().as_str(),
                     event.kind.as_str(),
                     event.client.map(|client| client.to_string()),
                     event.detail.as_deref(),
@@ -439,29 +489,44 @@ impl Journal {
         Ok(removed)
     }
 
-    /// The most recent events, newest first.
+    /// A page of events, newest first.
     ///
     /// # Errors
     ///
     /// [`JournalError`] if the query fails.
-    pub fn recent(&self, limit: usize) -> Result<Vec<RecordedEvent>, JournalError> {
+    pub fn events(&self, page: &EventPage) -> Result<Vec<RecordedEvent>, JournalError> {
+        // `before` and `after` are bounds on the row rather than on the
+        // timestamp: two events of the same microsecond are ordinary, and a
+        // cursor that cannot separate them loses one of them.
         let mut statement = self.connection.prepare(
-            "SELECT ts_us, category, kind, client, detail
-             FROM events ORDER BY id DESC LIMIT ?1",
+            "SELECT id, ts_us, category, kind, client, detail FROM events
+             WHERE (?1 IS NULL OR id < ?1)
+               AND (?2 IS NULL OR id > ?2)
+               AND (?3 IS NULL OR category = ?3)
+             ORDER BY id DESC LIMIT ?4",
         )?;
-        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-        let rows = statement.query_map(params![limit], |row| {
-            let category: String = row.get(1)?;
-            let kind: String = row.get(2)?;
-            let ts_us: i64 = row.get(0)?;
-            Ok(RecordedEvent {
-                ts_us: from_sql_us(ts_us),
-                category: parse_category(&category),
-                kind: parse_kind(&kind),
-                client: row.get(3)?,
-                detail: row.get(4)?,
-            })
-        })?;
+        let limit = i64::try_from(page.limit).unwrap_or(i64::MAX);
+        let rows = statement.query_map(
+            params![
+                page.before,
+                page.after,
+                page.category.map(EventCategory::as_str),
+                limit
+            ],
+            |row| {
+                let category: String = row.get(2)?;
+                let kind: String = row.get(3)?;
+                let ts_us: i64 = row.get(1)?;
+                Ok(RecordedEvent {
+                    id: row.get(0)?,
+                    ts_us: from_sql_us(ts_us),
+                    category: parse_category(&category),
+                    kind: parse_kind(&kind),
+                    client: row.get(4)?,
+                    detail: row.get(5)?,
+                })
+            },
+        )?;
         let mut events = Vec::new();
         for row in rows {
             events.push(row?);
@@ -585,22 +650,13 @@ fn from_sql_us(value: i64) -> u64 {
     u64::try_from(value).unwrap_or(0)
 }
 
-fn serde_plain_category(category: EventCategory) -> &'static str {
-    match category {
-        EventCategory::Access => "access",
-        EventCategory::Lifecycle => "lifecycle",
-        EventCategory::Installation => "installation",
-        EventCategory::Nodes => "nodes",
-    }
-}
-
+/// The category a stored row names, defaulting to the one it is written under
+/// when a row predates the name.
 fn parse_category(text: &str) -> EventCategory {
-    match text {
-        "lifecycle" => EventCategory::Lifecycle,
-        "installation" => EventCategory::Installation,
-        "nodes" => EventCategory::Nodes,
-        _ => EventCategory::Access,
-    }
+    EVENT_CATEGORIES
+        .into_iter()
+        .find(|category| category.as_str() == text)
+        .unwrap_or(EventCategory::Lifecycle)
 }
 
 /// The kind a stored row names, or [`EventKind::Unknown`].
@@ -636,6 +692,125 @@ mod tests {
             class,
             confidence: 0.8,
         }
+    }
+
+    /// A journal holding `count` lifecycle events, newest last.
+    fn filled(count: usize) -> Journal {
+        let mut journal = Journal::open_in_memory().unwrap();
+        for n in 0..count {
+            journal
+                .record(
+                    Event::new(EventKind::ConfigurationChanged).with_detail(format!("change {n}")),
+                    NOW + n as u64,
+                )
+                .unwrap();
+        }
+        journal
+            .record(
+                Event::new(EventKind::LoginSucceeded).from_client(client()),
+                NOW + 10_000,
+            )
+            .unwrap();
+        journal.flush().unwrap();
+        journal
+    }
+
+    fn page(limit: usize) -> EventPage {
+        EventPage {
+            limit,
+            ..EventPage::default()
+        }
+    }
+
+    #[test]
+    fn a_page_reads_backwards_from_the_row_it_is_given() {
+        let journal = filled(6);
+        let first = journal.events(&page(3)).unwrap();
+        assert_eq!(first.len(), 3);
+
+        let older = journal
+            .events(&EventPage {
+                before: Some(first[2].id),
+                ..page(3)
+            })
+            .unwrap();
+
+        // Continuous and non-overlapping: the cursor is the row, so nothing
+        // written meanwhile can shift what comes next.
+        assert!(older.iter().all(|event| event.id < first[2].id));
+        assert_eq!(older[0].id, first[2].id - 1);
+    }
+
+    #[test]
+    fn events_arriving_during_a_read_do_not_move_the_page_under_it() {
+        // The defect an offset would have: three rows written while page one
+        // is on screen make page two repeat three rows already seen.
+        let mut journal = filled(6);
+        let first = journal.events(&page(3)).unwrap();
+
+        for n in 0..3 {
+            journal
+                .record(Event::new(EventKind::ServiceOpened), NOW + 900 + n)
+                .unwrap();
+        }
+        journal.flush().unwrap();
+
+        let older = journal
+            .events(&EventPage {
+                before: Some(first[2].id),
+                ..page(3)
+            })
+            .unwrap();
+
+        assert!(
+            older.iter().all(|event| !first.contains(event)),
+            "a row was served twice"
+        );
+    }
+
+    #[test]
+    fn reading_forward_reports_only_what_arrived_since() {
+        let mut journal = filled(4);
+        let newest = journal.events(&page(1)).unwrap()[0].id;
+        assert!(
+            journal
+                .events(&EventPage {
+                    after: Some(newest),
+                    ..page(50)
+                })
+                .unwrap()
+                .is_empty()
+        );
+
+        journal
+            .record(Event::new(EventKind::ServiceClosed), NOW + 999)
+            .unwrap();
+        journal.flush().unwrap();
+
+        let since = journal
+            .events(&EventPage {
+                after: Some(newest),
+                ..page(50)
+            })
+            .unwrap();
+        assert_eq!(since.len(), 1);
+        assert_eq!(since[0].kind, EventKind::ServiceClosed);
+    }
+
+    #[test]
+    fn a_family_filter_keeps_only_that_family() {
+        let journal = filled(4);
+
+        let access = journal
+            .events(&EventPage {
+                category: Some(EventCategory::Access),
+                ..page(50)
+            })
+            .unwrap();
+
+        assert_eq!(access.len(), 1);
+        assert_eq!(access[0].kind, EventKind::LoginSucceeded);
+        assert!(access[0].client.is_some());
     }
 
     #[test]
@@ -836,7 +1011,7 @@ mod tests {
         for kind in kinds {
             assert_eq!(parse_kind(kind.as_str()), kind, "{kind:?} must round-trip");
             assert_eq!(
-                parse_category(serde_plain_category(kind.category())),
+                parse_category(EventCategory::as_str(kind.category())),
                 kind.category()
             );
         }
@@ -862,7 +1037,12 @@ mod tests {
 
         assert_eq!(journal.pending(), 0, "nothing left buffered");
         assert_eq!(journal.count().unwrap(), 1);
-        let recorded = &journal.recent(10).unwrap()[0];
+        let recorded = &journal
+            .events(&EventPage {
+                limit: 10,
+                ..EventPage::default()
+            })
+            .unwrap()[0];
         assert_eq!(recorded.kind, EventKind::LoginFailed);
         assert_eq!(recorded.category, EventCategory::Access);
         assert_eq!(recorded.client.as_deref(), Some("192.168.4.10"));
@@ -936,7 +1116,12 @@ mod tests {
         }
         journal.flush().unwrap();
 
-        let recent = journal.recent(3).unwrap();
+        let recent = journal
+            .events(&EventPage {
+                limit: 3,
+                ..EventPage::default()
+            })
+            .unwrap();
         assert_eq!(recent.len(), 3, "the limit is honoured");
         assert_eq!(recent[0].detail.as_deref(), Some("boot 4"));
         assert_eq!(recent[2].detail.as_deref(), Some("boot 2"));
@@ -947,7 +1132,16 @@ mod tests {
         let mut journal = Journal::open_in_memory().unwrap();
         journal.record(Event::new(EventKind::Started), NOW).unwrap();
         journal.flush().unwrap();
-        assert_eq!(journal.recent(1).unwrap()[0].client, None);
+        assert_eq!(
+            journal
+                .events(&EventPage {
+                    limit: 1,
+                    ..EventPage::default()
+                })
+                .unwrap()[0]
+                .client,
+            None
+        );
     }
 
     #[test]
@@ -966,7 +1160,12 @@ mod tests {
 
         let removed = journal.prune(NOW + RETENTION_US + DAY).unwrap();
         assert_eq!(removed, 1);
-        let remaining = journal.recent(10).unwrap();
+        let remaining = journal
+            .events(&EventPage {
+                limit: 10,
+                ..EventPage::default()
+            })
+            .unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].detail.as_deref(), Some("recent"));
     }
@@ -986,7 +1185,13 @@ mod tests {
         assert_eq!(journal.count().unwrap(), MAX_EVENTS);
         // The newest survive.
         assert_eq!(
-            journal.recent(1).unwrap()[0].ts_us,
+            journal
+                .events(&EventPage {
+                    limit: 1,
+                    ..EventPage::default()
+                })
+                .unwrap()[0]
+                .ts_us,
             NOW + MAX_EVENTS as u64 + 49
         );
     }
@@ -1012,7 +1217,13 @@ mod tests {
         let journal = Journal::open(dir.path()).unwrap();
         assert_eq!(journal.count().unwrap(), 1);
         assert_eq!(
-            journal.recent(1).unwrap()[0].kind,
+            journal
+                .events(&EventPage {
+                    limit: 1,
+                    ..EventPage::default()
+                })
+                .unwrap()[0]
+                .kind,
             EventKind::LoginSucceeded
         );
     }

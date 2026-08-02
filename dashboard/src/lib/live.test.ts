@@ -8,7 +8,6 @@ import {
   formatClock,
   linePath,
   nearestIndex,
-  nodeLagSeconds,
   plotGeometry,
 } from './live';
 import { DENSITY_CLASSES } from './api';
@@ -44,34 +43,6 @@ describe('density colour maps', () => {
   it('names no colour twice', () => {
     expect(new Set(Object.values(DENSITY_FILL)).size).toBe(DENSITY_CLASSES.length);
     expect(new Set(Object.values(DENSITY_SWATCH)).size).toBe(DENSITY_CLASSES.length);
-  });
-});
-
-describe('nodeLagSeconds', () => {
-  const THRESHOLD = 10_000_000;
-  const NOW = 1_800_000_000_000_000;
-
-  it('reports nothing while a node keeps up with the stream', () => {
-    expect(nodeLagSeconds(NOW, NOW, THRESHOLD)).toBeNull();
-    expect(nodeLagSeconds(NOW - 5_000_000, NOW, THRESHOLD)).toBeNull();
-  });
-
-  it('reports the lag once a node falls behind', () => {
-    expect(nodeLagSeconds(NOW - 30_000_000, NOW, THRESHOLD)).toBe(30);
-  });
-
-  it('ignores the wall clock entirely', () => {
-    // A replayed capture reconstructs its timestamps and drifts from wall
-    // time by design. Judging silence against the stream's own newest frame
-    // is what keeps a healthy sensor from being reported as dead — the bug
-    // this function was rewritten to fix.
-    const driftedFarFromWallClock = 1_000_000_000_000_000;
-    expect(nodeLagSeconds(driftedFarFromWallClock, driftedFarFromWallClock, THRESHOLD)).toBeNull();
-  });
-
-  it('says nothing when there is not enough information to judge', () => {
-    expect(nodeLagSeconds(undefined, NOW, THRESHOLD)).toBeNull();
-    expect(nodeLagSeconds(NOW, undefined, THRESHOLD)).toBeNull();
   });
 });
 

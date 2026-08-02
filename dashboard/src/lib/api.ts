@@ -139,6 +139,8 @@ export type Status = {
   classes?: ClassMapping;
   /** Which stored model is estimating, if any. */
   active_model?: string;
+  /** Since when the journal has been unable to write, if it cannot. */
+  journal_failure?: { since_us: number };
   nodes: SensingNode[];
 };
 
@@ -298,6 +300,70 @@ export async function forgetModel(id: string): Promise<boolean> {
   }
 }
 
+/** The families the journal sorts events into. */
+export const EVENT_CATEGORIES = ['access', 'lifecycle', 'installation', 'nodes'] as const;
+export type EventCategory = (typeof EVENT_CATEGORIES)[number];
+
+/** Everything the appliance records about itself. */
+export const EVENT_KINDS = [
+  'login-succeeded',
+  'login-failed',
+  'login-throttled',
+  'logged-out',
+  'credential-reset',
+  'started',
+  'stopped',
+  'configuration-changed',
+  'service-opened',
+  'service-closed',
+  'stage-completed',
+  'calibration-started',
+  'calibration-stopped',
+  'model-activated',
+  'model-rejected',
+  'node-appeared',
+  'node-lost',
+  'clock-stepped',
+  'unknown',
+] as const;
+export type EventKind = (typeof EVENT_KINDS)[number];
+
+/** One line of the appliance journal. */
+export type RecordedEvent = {
+  /** Row identifier, and the cursor a reader pages on. */
+  id: number;
+  ts_us: number;
+  category: EventCategory;
+  kind: EventKind;
+  client?: string;
+  detail?: string;
+};
+
+/**
+ * Reads a slice of the journal, newest first.
+ *
+ * Paged on the row rather than on an offset: the journal is written while it
+ * is read, and an offset would repeat some rows and skip others.
+ */
+export async function fetchEvents(page: {
+  limit?: number;
+  before?: number;
+  after?: number;
+  category?: EventCategory | null;
+}): Promise<RecordedEvent[]> {
+  const query = new URLSearchParams();
+  if (page.limit !== undefined) query.set('limit', String(page.limit));
+  if (page.before !== undefined) query.set('before', String(page.before));
+  if (page.after !== undefined) query.set('after', String(page.after));
+  if (page.category) query.set('category', page.category);
+  try {
+    const response = await fetch(`/api/events?${query}`);
+    return response.ok ? ((await response.json()) as RecordedEvent[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Records where a node physically sits, or that it is unknown again. */
 export async function describeNode(nodeId: string, position: string): Promise<WriteOutcome> {
   return send('PATCH', `/api/nodes/${encodeURIComponent(nodeId)}`, { position });
@@ -402,6 +468,8 @@ export type StreamHealth = {
   frames: number;
   estimates: number;
   last_frame_us?: number;
+  /** Whether frame timestamps come from the appliance clock. */
+  edge_stamped: boolean;
   nodes: Record<string, NodeHealth>;
 };
 
@@ -422,6 +490,14 @@ export type LiveSnapshot = {
   stream: StreamHealth;
   service: ServiceState;
   now_us: number;
+  /**
+   * Newest journal row.
+   *
+   * Carried here rather than polled for: this stream already ticks every
+   * second, so a reader of the journal learns that something happened within
+   * a second and at the cost of one integer.
+   */
+  journal_id?: number;
 };
 
 /** One folded minute of history. */

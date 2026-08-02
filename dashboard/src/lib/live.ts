@@ -44,33 +44,6 @@ export function densityName(value: number): DensityClass {
 }
 
 /**
- * How far a node lags the newest frame in the stream, in seconds.
- *
- * Measured against the stream's own clock, never the wall clock. Frames
- * are stamped by the edge at reception only over UDP; a replayed capture
- * reconstructs its timestamps from the node's clock and drifts from wall
- * time by design, which would report a perfectly healthy sensor as silent.
- *
- * Comparing nodes to one another is also the more useful diagnosis on
- * site: "rx-2 stopped while rx-1 keeps streaming" is what an installer
- * needs to know, and no wall clock is involved in seeing it.
- *
- * Returns `null` while the node is keeping up, or when there is not yet
- * enough information to judge.
- */
-export function nodeLagSeconds(
-  nodeLastUs: number | undefined,
-  streamNewestUs: number | undefined,
-  thresholdUs: number,
-): number | null {
-  if (!nodeLastUs || !streamNewestUs) {
-    return null;
-  }
-  const lag = streamNewestUs - nodeLastUs;
-  return lag > thresholdUs ? Math.round(lag / 1_000_000) : null;
-}
-
-/**
  * Formats an appliance timestamp as a wall-clock time.
  *
  * The locale comes from the interface language rather than the browser's,
