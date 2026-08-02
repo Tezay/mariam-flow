@@ -123,11 +123,52 @@ pub enum EventKind {
     CalibrationStopped,
     /// A density model became the active one.
     ModelActivated,
+    /// The active model cannot drive this appliance, so it is not estimating.
+    ///
+    /// Distinct from [`EventKind::Stopped`]: the appliance keeps reading its
+    /// stream and keeps serving. Recording this as a stop would tell an
+    /// operator the unit had halted while it is running perfectly well, in the
+    /// one record whose whole job is to say what happened.
+    ModelRejected,
     /// A sensing node joined the sensor network.
     NodeAppeared,
     /// A sensing node stopped being seen.
     NodeLost,
+    /// A stored row this build cannot name.
+    ///
+    /// Never written, only read: a journal carried over from a newer build,
+    /// or a damaged row. It exists so that reading one cannot be reported as
+    /// something it is not — the previous fallback resolved an unknown row to
+    /// a successful login, which is the single worst thing an audit record can
+    /// invent.
+    Unknown,
 }
+
+/// Every kind, so that writing and reading cannot drift apart.
+///
+/// [`EventKind::as_str`] and `parse_kind` are inverses, and the test that
+/// proves it walks this list: a variant added to one and forgotten in the
+/// other is a stored row that comes back as a different event.
+pub const EVENT_KINDS: [EventKind; 18] = [
+    EventKind::LoginSucceeded,
+    EventKind::LoginFailed,
+    EventKind::LoginThrottled,
+    EventKind::LoggedOut,
+    EventKind::CredentialReset,
+    EventKind::Started,
+    EventKind::Stopped,
+    EventKind::ConfigurationChanged,
+    EventKind::ServiceOpened,
+    EventKind::ServiceClosed,
+    EventKind::StageCompleted,
+    EventKind::CalibrationStarted,
+    EventKind::CalibrationStopped,
+    EventKind::ModelActivated,
+    EventKind::ModelRejected,
+    EventKind::NodeAppeared,
+    EventKind::NodeLost,
+    EventKind::Unknown,
+];
 
 impl EventKind {
     /// Family this kind belongs to.
@@ -147,8 +188,10 @@ impl EventKind {
             Self::StageCompleted
             | Self::CalibrationStarted
             | Self::CalibrationStopped
-            | Self::ModelActivated => EventCategory::Installation,
+            | Self::ModelActivated
+            | Self::ModelRejected => EventCategory::Installation,
             Self::NodeAppeared | Self::NodeLost => EventCategory::Nodes,
+            Self::Unknown => EventCategory::Lifecycle,
         }
     }
 
@@ -176,8 +219,10 @@ impl EventKind {
             Self::CalibrationStarted => "calibration-started",
             Self::CalibrationStopped => "calibration-stopped",
             Self::ModelActivated => "model-activated",
+            Self::ModelRejected => "model-rejected",
             Self::NodeAppeared => "node-appeared",
             Self::NodeLost => "node-lost",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -558,25 +603,14 @@ fn parse_category(text: &str) -> EventCategory {
     }
 }
 
+/// The kind a stored row names, or [`EventKind::Unknown`].
+///
+/// Derived from the same list the writer uses, so the two cannot disagree.
 fn parse_kind(text: &str) -> EventKind {
-    match text {
-        "login-failed" => EventKind::LoginFailed,
-        "login-throttled" => EventKind::LoginThrottled,
-        "logged-out" => EventKind::LoggedOut,
-        "credential-reset" => EventKind::CredentialReset,
-        "started" => EventKind::Started,
-        "stopped" => EventKind::Stopped,
-        "configuration-changed" => EventKind::ConfigurationChanged,
-        "service-opened" => EventKind::ServiceOpened,
-        "service-closed" => EventKind::ServiceClosed,
-        "stage-completed" => EventKind::StageCompleted,
-        "calibration-started" => EventKind::CalibrationStarted,
-        "calibration-stopped" => EventKind::CalibrationStopped,
-        "model-activated" => EventKind::ModelActivated,
-        "node-appeared" => EventKind::NodeAppeared,
-        "node-lost" => EventKind::NodeLost,
-        _ => EventKind::LoginSucceeded,
-    }
+    EVENT_KINDS
+        .into_iter()
+        .find(|kind| kind.as_str() == text)
+        .unwrap_or(EventKind::Unknown)
 }
 
 #[cfg(test)]
@@ -602,6 +636,50 @@ mod tests {
             class,
             confidence: 0.8,
         }
+    }
+
+    #[test]
+    fn every_kind_survives_a_round_trip_through_storage() {
+        // The failure this prevents is silent: a kind written under one name
+        // and read back as another turns one event into a different one, and
+        // the previous fallback turned any unrecognised row into a successful
+        // login.
+        for kind in EVENT_KINDS {
+            assert_eq!(
+                parse_kind(kind.as_str()),
+                kind,
+                "{} does not round-trip",
+                kind.as_str()
+            );
+        }
+        let names: std::collections::BTreeSet<&str> =
+            EVENT_KINDS.iter().map(|kind| kind.as_str()).collect();
+        assert_eq!(
+            names.len(),
+            EVENT_KINDS.len(),
+            "two kinds share a stored name"
+        );
+    }
+
+    #[test]
+    fn a_row_this_build_cannot_name_is_not_reported_as_a_login() {
+        assert_eq!(
+            parse_kind("something-a-newer-build-wrote"),
+            EventKind::Unknown
+        );
+    }
+
+    #[test]
+    fn a_model_that_cannot_be_used_is_not_the_appliance_stopping() {
+        // The intake keeps reading and the daemon keeps serving when a model
+        // is refused. Recording that as a stop would tell an operator the unit
+        // had halted, in the one record whose job is to say what happened.
+        assert_eq!(EventKind::ModelRejected.as_str(), "model-rejected");
+        assert_eq!(
+            EventKind::ModelRejected.category(),
+            EventCategory::Installation
+        );
+        assert_eq!(EventKind::Stopped.category(), EventCategory::Lifecycle);
     }
 
     #[test]

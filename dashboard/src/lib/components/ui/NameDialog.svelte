@@ -7,11 +7,14 @@
   let {
     title,
     initial,
+    allowEmpty = false,
     onrename,
     oncancel,
   }: {
     title: string;
     initial: string;
+    /** Whether clearing the field is an answer rather than an omission. */
+    allowEmpty?: boolean;
     onrename: (name: string) => void;
     oncancel: () => void;
   } = $props();
@@ -36,12 +39,12 @@
       type="text"
       bind:value={name}
       autofocus
-      required
+      required={!allowEmpty}
       class="-mt-2 block w-full rounded-md border border-ink-200 px-3 py-2 text-base text-ink-900"
     />
     <button
       type="submit"
-      disabled={name.trim().length === 0}
+      disabled={!allowEmpty && name.trim().length === 0}
       class="rounded-md bg-mariam-600 px-4 py-3 text-sm font-medium text-white transition-colors
              hover:bg-mariam-700 disabled:bg-ink-200 disabled:text-ink-500"
     >

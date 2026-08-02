@@ -47,7 +47,7 @@
 <!-- Framed as a document for someone else rather than another settings block:
      it is meant to leave the screen and reach the site's network team. -->
 <section
-  class="print-sheet rounded-xl border-2 border-dashed border-mariam-200 bg-white p-5
+  class="print-sheet rounded-lg border-2 border-dashed border-mariam-200 bg-white p-5
          print:border-0 print:p-0"
 >
   <p

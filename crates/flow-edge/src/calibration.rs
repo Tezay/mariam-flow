@@ -86,9 +86,14 @@ pub fn session_meta(
             .map(|node| NodePlacement {
                 node_id: node.node_id.clone(),
                 role: node.role,
+                // The installation's own answer stands unless this capture
+                // overrides it: a sensor is described once, where it is
+                // fitted, not again by whoever happens to start a recording.
                 position: request
                     .positions
                     .get(&node.node_id)
+                    .filter(|position| !position.trim().is_empty())
+                    .or(node.position.as_ref())
                     .cloned()
                     .unwrap_or_default(),
             })
@@ -140,12 +145,14 @@ mod tests {
                 role: NodeRole::Tx,
                 mac: Some("1a:00:00:00:00:00".into()),
                 address: None,
+                position: None,
             },
             PairedNode {
                 node_id: "rx-1".into(),
                 role: NodeRole::Rx,
                 mac: None,
                 address: Some("192.168.4.51".parse().unwrap()),
+                position: None,
             },
         ];
         config
@@ -311,6 +318,53 @@ mod tests {
         let meta = session_meta(&config, &SessionRequest::default(), "session-1".into());
 
         assert_eq!(meta.site, "KIT-0042");
+    }
+
+    #[test]
+    fn a_capture_takes_the_position_the_installation_recorded() {
+        let mut config = installed();
+        config.nodes[1].position = Some("above the entrance".into());
+
+        let meta = session_meta(&config, &SessionRequest::default(), "session-1".into());
+
+        let rx = meta.nodes.iter().find(|n| n.node_id == "rx-1").unwrap();
+        assert_eq!(rx.position, "above the entrance");
+    }
+
+    #[test]
+    fn a_capture_may_still_say_where_a_sensor_was_moved_to() {
+        let mut config = installed();
+        config.nodes[1].position = Some("above the entrance".into());
+        let request = SessionRequest {
+            positions: [("rx-1".to_owned(), "beside the tills".to_owned())]
+                .into_iter()
+                .collect(),
+            ..SessionRequest::default()
+        };
+
+        let meta = session_meta(&config, &request, "session-1".into());
+
+        let rx = meta.nodes.iter().find(|n| n.node_id == "rx-1").unwrap();
+        assert_eq!(rx.position, "beside the tills");
+    }
+
+    #[test]
+    fn a_blank_answer_does_not_erase_what_the_installation_knows() {
+        // An untouched field in the recording form is not a statement that
+        // the sensor has no position.
+        let mut config = installed();
+        config.nodes[1].position = Some("above the entrance".into());
+        let request = SessionRequest {
+            positions: [("rx-1".to_owned(), "   ".to_owned())]
+                .into_iter()
+                .collect(),
+            ..SessionRequest::default()
+        };
+
+        let meta = session_meta(&config, &request, "session-1".into());
+
+        let rx = meta.nodes.iter().find(|n| n.node_id == "rx-1").unwrap();
+        assert_eq!(rx.position, "above the entrance");
     }
 
     #[test]

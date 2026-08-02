@@ -10,6 +10,7 @@
   import { hour12, locale, t, toggleHourCycle, toggleLocale } from '$lib/i18n/i18n.svelte';
   import CalibrationPanel from '$components/CalibrationPanel.svelte';
   import LivePanel from '$components/LivePanel.svelte';
+  import SensorsPanel from '$components/SensorsPanel.svelte';
   import SettingsShell from '$components/SettingsShell.svelte';
 
   let {
@@ -134,12 +135,10 @@
           {onupdated}
           onlibrarychanged={() => void reloadModels()}
         />
-      {:else if active === 'settings'}
-        <SettingsShell {status} {onupdated} />
+      {:else if active === 'nodes'}
+        <SensorsPanel {status} {onupdated} />
       {:else}
-        <p class="rounded-xl bg-white p-4 text-sm text-ink-500 ring-1 ring-ink-100">
-          {t('wizard.comingNext')}
-        </p>
+        <SettingsShell {status} {onupdated} />
       {/if}
     </main>
   </div>

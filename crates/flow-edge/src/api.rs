@@ -49,7 +49,7 @@ use crate::session::{ABSOLUTE_LIFETIME_US, SessionStore};
 use crate::state::{Phase, Readiness, Runtime, RuntimeMode, Stage};
 use crate::system::SystemReport;
 use crate::throttle::Throttle;
-use flow_core::{DensityClass, Label};
+use flow_core::{DensityClass, Label, NodeRole};
 use flow_ingest::SenderObservation;
 use flow_ingest::SessionWriter;
 
@@ -549,6 +549,7 @@ impl EdgeState {
                     role: node.role,
                     mac: node.mac.clone(),
                     address: node.address.map(|address| address.to_string()),
+                    position: node.position.clone(),
                 })
                 .collect(),
         }
@@ -588,6 +589,8 @@ pub fn router(state: EdgeState) -> Router {
         .route("/api/system", get(system))
         .route("/api/site", put(set_site))
         .route("/api/nodes", put(set_nodes))
+        .route("/api/nodes/{node_id}", axum::routing::patch(describe_node))
+        .route("/api/nodes/{node_id}/hardware", post(adopt_hardware))
         .route("/api/uplink", put(set_uplink))
         .route("/api/network-survey", put(set_network_survey))
         .route(
@@ -856,6 +859,124 @@ async fn set_nodes(
 ) -> Response {
     let described = format!("{} node(s) paired", nodes.len());
     match state.write_config(|config| config.nodes = nodes) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(described),
+            );
+            (StatusCode::OK, Json(state.status())).into_response()
+        }
+        Err(rejection) => refusal(&rejection),
+    }
+}
+
+/// Where a node physically sits.
+#[derive(Debug, Deserialize)]
+struct Placement {
+    /// The operator's own words, or nothing to say it is unknown again.
+    position: String,
+}
+
+/// Describes where one node sits.
+async fn describe_node(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    axum::extract::Path(node_id): axum::extract::Path<String>,
+    Json(placement): Json<Placement>,
+) -> Response {
+    let position = placement.position.trim();
+    // A blank field is a statement — "I do not know where this one is" — and
+    // not the same thing as a refused name.
+    let position = (!position.is_empty()).then(|| position.to_owned());
+
+    let mut known = false;
+    let outcome = state.write_config(|config| {
+        for node in &mut config.nodes {
+            if node.node_id == node_id {
+                node.position.clone_from(&position);
+                known = true;
+            }
+        }
+    });
+    if !known {
+        return error_response(StatusCode::NOT_FOUND, "no such node");
+    }
+    match outcome {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(format!("node {node_id} placed")),
+            );
+            (StatusCode::OK, Json(state.status())).into_response()
+        }
+        Err(rejection) => refusal(&rejection),
+    }
+}
+
+/// The hardware now answering for a node.
+#[derive(Debug, Deserialize)]
+struct Hardware {
+    /// Source address of the replacement, for a receiver.
+    #[serde(default)]
+    address: Option<IpAddr>,
+    /// Hardware address of the replacement, for a transmitter.
+    #[serde(default)]
+    mac: Option<String>,
+}
+
+/// Points an existing node at the hardware that replaced it.
+///
+/// The identifier is kept rather than the node re-paired from scratch: it is
+/// what capture sessions are written against, and what a trained model was
+/// validated for. A receiver renamed on replacement would leave the site with
+/// a model that no longer fits it.
+async fn adopt_hardware(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    axum::extract::Path(node_id): axum::extract::Path<String>,
+    Json(hardware): Json<Hardware>,
+) -> Response {
+    let role = {
+        let inner = state.lock();
+        inner
+            .config
+            .nodes
+            .iter()
+            .find(|node| node.node_id == node_id)
+            .map(|node| node.role)
+    };
+    let Some(role) = role else {
+        return error_response(StatusCode::NOT_FOUND, "no such node");
+    };
+
+    // Each role is known by exactly one thing, so offering the other is a
+    // mistake worth naming rather than a field to ignore.
+    let described = match (role, &hardware.address, &hardware.mac) {
+        (NodeRole::Rx, Some(address), None) => format!("{node_id} now at {address}"),
+        (NodeRole::Tx, None, Some(mac)) => format!("{node_id} now {mac}"),
+        (NodeRole::Rx, _, _) => {
+            return error_response(StatusCode::BAD_REQUEST, "a receiver is adopted by address");
+        }
+        (NodeRole::Tx, _, _) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "a transmitter is adopted by MAC address",
+            );
+        }
+    };
+
+    match state.write_config(|config| {
+        for node in &mut config.nodes {
+            if node.node_id == node_id {
+                match role {
+                    NodeRole::Rx => node.address = hardware.address,
+                    NodeRole::Tx => node.mac.clone_from(&hardware.mac),
+                }
+            }
+        }
+    }) {
         Ok(()) => {
             state.record(
                 Event::new(EventKind::ConfigurationChanged)
@@ -1660,6 +1781,8 @@ struct NodeView {
     mac: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    position: Option<String>,
 }
 
 #[cfg(test)]
@@ -1694,12 +1817,14 @@ mod tests {
                 role: NodeRole::Tx,
                 mac: Some("1a:00:00:00:00:00".into()),
                 address: None,
+                position: None,
             },
             PairedNode {
                 node_id: "rx-1".into(),
                 role: NodeRole::Rx,
                 mac: Some("aa:bb:cc:00:00:01".into()),
                 address: Some("192.168.4.51".parse().unwrap()),
+                position: None,
             },
         ];
         config.network.uplink = Some(Uplink::Wifi {
@@ -2777,6 +2902,190 @@ mod tests {
             ("PATCH", "/api/sessions/s-001"),
         ] {
             let (status, _, _) = send(&state, method, path, None, None, 10).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path} is open");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_node_is_told_where_it_sits_and_can_be_told_it_is_unknown_again() {
+        let (state, _dir) = recording_ready();
+        let cookie = session_of(&state).await;
+
+        let (status, _, body) = send(
+            &state,
+            "PATCH",
+            "/api/nodes/rx-1",
+            Some(&cookie),
+            Some(json!({ "position": "  above the entrance  " }).to_string()),
+            10,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let placed = body["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["node_id"] == "rx-1")
+            .unwrap()
+            .clone();
+        assert_eq!(placed["position"], "above the entrance");
+
+        let (_, _, body) = send(
+            &state,
+            "PATCH",
+            "/api/nodes/rx-1",
+            Some(&cookie),
+            Some(json!({ "position": "   " }).to_string()),
+            10,
+        )
+        .await;
+        // Blank is an answer here — "I do not know" — not a refusal.
+        let cleared = body["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["node_id"] == "rx-1")
+            .unwrap()
+            .clone();
+        assert!(cleared.get("position").is_none());
+    }
+
+    #[tokio::test]
+    async fn replacing_a_receiver_keeps_the_identifier_a_model_was_trained_for() {
+        let (state, _dir) = recording_ready();
+        let cookie = session_of(&state).await;
+        send(
+            &state,
+            "PATCH",
+            "/api/nodes/rx-1",
+            Some(&cookie),
+            Some(json!({ "position": "above the entrance" }).to_string()),
+            10,
+        )
+        .await;
+
+        let (status, _, body) = send(
+            &state,
+            "POST",
+            "/api/nodes/rx-1/hardware",
+            Some(&cookie),
+            Some(json!({ "address": "192.168.4.57" }).to_string()),
+            10,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let node = body["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["node_id"] == "rx-1")
+            .unwrap()
+            .clone();
+        assert_eq!(node["address"], "192.168.4.57");
+        // What the swap exists to protect: the identifier is what sessions
+        // are written against and what a model was validated for.
+        assert_eq!(node["node_id"], "rx-1");
+        assert_eq!(node["position"], "above the entrance");
+    }
+
+    #[tokio::test]
+    async fn each_role_is_adopted_by_the_one_thing_that_identifies_it() {
+        let (state, _dir) = recording_ready();
+        let cookie = session_of(&state).await;
+
+        for (node_id, body) in [
+            ("rx-1", json!({ "mac": "aa:bb:cc:00:00:09" })),
+            ("tx-1", json!({ "address": "192.168.4.57" })),
+        ] {
+            let (status, _, _) = send(
+                &state,
+                "POST",
+                &format!("/api/nodes/{node_id}/hardware"),
+                Some(&cookie),
+                Some(body.to_string()),
+                10,
+            )
+            .await;
+            assert_eq!(
+                status,
+                StatusCode::BAD_REQUEST,
+                "{node_id} accepted the wrong kind"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn adopting_an_address_another_node_holds_is_refused() {
+        let (state, _dir) = recording_ready();
+        let cookie = session_of(&state).await;
+        send(
+            &state,
+            "PUT",
+            "/api/nodes",
+            Some(&cookie),
+            Some(
+                json!([
+                    { "node_id": "rx-1", "role": "rx", "address": "192.168.4.51" },
+                    { "node_id": "rx-2", "role": "rx", "address": "192.168.4.52" },
+                ])
+                .to_string(),
+            ),
+            10,
+        )
+        .await;
+
+        let (status, _, body) = send(
+            &state,
+            "POST",
+            "/api/nodes/rx-2/hardware",
+            Some(&cookie),
+            Some(json!({ "address": "192.168.4.51" }).to_string()),
+            10,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            body["error"].as_str().unwrap().contains("192.168.4.51"),
+            "{body} does not name the clash"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_node_the_appliance_does_not_have_is_not_found() {
+        let (state, _dir) = recording_ready();
+        let cookie = session_of(&state).await;
+        for (method, path, body) in [
+            ("PATCH", "/api/nodes/rx-9", json!({ "position": "nowhere" })),
+            (
+                "POST",
+                "/api/nodes/rx-9/hardware",
+                json!({ "address": "192.168.4.57" }),
+            ),
+        ] {
+            let (status, _, _) = send(
+                &state,
+                method,
+                path,
+                Some(&cookie),
+                Some(body.to_string()),
+                10,
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_node_surface_is_closed_to_anonymous_callers() {
+        let (state, _dir) = writable();
+        for (method, path) in [
+            ("PUT", "/api/nodes"),
+            ("PATCH", "/api/nodes/rx-1"),
+            ("POST", "/api/nodes/rx-1/hardware"),
+        ] {
+            let (status, _, _) = send(&state, method, path, None, Some("{}".to_owned()), 10).await;
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path} is open");
         }
     }

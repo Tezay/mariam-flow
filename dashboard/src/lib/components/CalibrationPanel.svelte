@@ -13,6 +13,7 @@
   import { defaultEnvironment } from '$lib/calibration';
   import { formattingLocale, t } from '$lib/i18n/i18n.svelte';
   import { nodeLagSeconds } from '$lib/live';
+  import { knownPositions } from '$lib/sensors';
   import LabelingScreen from '$components/LabelingScreen.svelte';
   import ModelsSection from '$components/ModelsSection.svelte';
   import RecordingsSection from '$components/RecordingsSection.svelte';
@@ -35,9 +36,7 @@
   let environment = $state(
     untrack(() => defaultEnvironment(status.site_name, new Date(), formattingLocale())),
   );
-  let positions = $state<Record<string, string>>(
-    untrack(() => Object.fromEntries(status.nodes.map((node) => [node.node_id, '']))),
-  );
+  let positions = $state<Record<string, string>>(untrack(() => knownPositions(status.nodes)));
   let snapshot = $state<LiveSnapshot | null>(null);
   let sessions = $state<RecordedSession[]>([]);
   let stopping = $state(false);

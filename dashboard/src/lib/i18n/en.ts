@@ -138,6 +138,25 @@ export const en = {
   'handout.privacy':
     'Only aggregated values ever leave the site — waiting time, density level, confidence, timestamp. No raw radio measurement leaves the appliance.',
 
+  'sensors.noneLead': 'Power the sensing nodes on and pair them from the installation assistant.',
+  'sensors.placeTitle': 'Where {node} sits',
+  'sensors.title': 'Sensors',
+  'sensors.lead': 'What the appliance hears, and what it is configured for.',
+  'sensors.transmitterLead': 'Never seen directly',
+  'sensors.heard': 'Sensed by the receivers',
+  'sensors.notHeard': 'Not sensed',
+  'sensors.noMac': 'No address recorded',
+  'sensors.noPosition': 'Position not described',
+  'sensors.neverHeard': 'Nothing has ever arrived from this one.',
+  'sensors.place': 'Describe where it sits',
+  'sensors.replace': 'Replace',
+  'sensors.replaceTitle': 'Replace {node}',
+  'sensors.replaceLead':
+    'The identifier stays, so recordings and the model in service keep fitting. Power the replacement on and it appears below.',
+  'sensors.replaceTransmitter':
+    'Power the replacement on. It appears once the receivers have sensed it.',
+  'sensors.adopt': 'Adopt',
+
   'models.title': 'Models',
   'models.lead': 'What the appliance estimates with. One is in service; the others are kept.',
   'model.rename': 'Rename',
@@ -215,7 +234,6 @@ export const en = {
   'system.unknownLead': 'This machine does not report it. Expected off a Raspberry Pi.',
   'system.memoryValue': '{available} MB free of {total} MB',
   'settings.site': 'Site',
-  'settings.nodes': 'Sensors',
   'settings.network': 'Network',
   'settings.levels': 'Density levels',
   'settings.hours': 'Service hours',

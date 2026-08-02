@@ -275,6 +275,13 @@ pub struct PairedNode {
     /// transmitter never joins the access point and therefore has none.
     #[serde(default)]
     pub address: Option<IpAddr>,
+    /// Where the node physically sits, in the operator's own words.
+    ///
+    /// A property of the installation rather than of one capture: a sensor
+    /// screwed to a wall does not move between recordings, so it is described
+    /// once and copied into every session recorded afterwards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<String>,
 }
 
 /// Per-site wait-estimation parameters.
@@ -595,6 +602,7 @@ mod tests {
             role,
             mac: Some(mac.into()),
             address: address.map(|a| a.parse().unwrap()),
+            position: None,
         }
     }
 
@@ -606,6 +614,7 @@ mod tests {
             role: NodeRole::Rx,
             mac: None,
             address: Some("192.168.4.51".parse().unwrap()),
+            position: None,
         }];
         config.validate().unwrap();
 
@@ -614,6 +623,7 @@ mod tests {
             role: NodeRole::Tx,
             mac: None,
             address: None,
+            position: None,
         });
         let error = config.validate().unwrap_err();
         assert!(

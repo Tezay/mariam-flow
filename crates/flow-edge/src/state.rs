@@ -289,12 +289,14 @@ mod tests {
                 role: NodeRole::Tx,
                 mac: Some("1a:00:00:00:00:00".into()),
                 address: None,
+                position: None,
             },
             PairedNode {
                 node_id: "rx-1".into(),
                 role: NodeRole::Rx,
                 mac: Some("aa:bb:cc:00:00:01".into()),
                 address: Some("192.168.4.51".parse().unwrap()),
+                position: None,
             },
         ];
         config.network.uplink = Some(Uplink::Offline);
