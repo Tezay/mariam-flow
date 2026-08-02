@@ -527,8 +527,22 @@ returns the surface to its own top. Printing neutralises the arrangement — a
 scroll container has no equivalent on paper, and the network request would
 otherwise print clipped to what happened to be on screen.
 
+The sensors screen is where a failing installation is diagnosed and repaired.
+It reports the transmitter first — a fault there explains every row beneath it —
+then each receiver with its rate, where it sits, and how long it has been quiet.
+Silence is measured against the newest frame of the whole stream rather than
+against the clock, because every sensor stopping is a different fault from one
+sensor stopping, and only the comparison between them tells the two apart.
+
+A failed node is replaced one at a time, keeping its identifier (ADR 0021): the
+identifier is what capture sessions are written against and what a density model
+was validated for, so a receiver renumbered by a repair would leave the site
+holding a model that no longer fits it. Where a sensor sits is likewise a
+property of the installation rather than of one capture, described once here and
+copied into every recording afterwards.
+
 The settings screen is a list of sections resolving to one detail — Site,
-Sensors, Network, Levels, Service hours, System. On a phone the list is the
+Network, Levels, Service hours, System. On a phone the list is the
 screen until a section is chosen; on a wide screen it is a rail beside the
 detail. One component, two shapes, so a section added later lands somewhere
 rather than lengthening a single page.

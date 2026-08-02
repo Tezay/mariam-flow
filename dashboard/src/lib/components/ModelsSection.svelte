@@ -100,7 +100,7 @@
 
   <!-- One surface: the model in service heads the list it belongs to rather
        than floating above it, so there is nothing to open or close. -->
-  <div class="mt-4 overflow-hidden rounded-xl bg-white ring-1 ring-ink-100">
+  <div class="mt-4 overflow-hidden rounded-md bg-white ring-1 ring-ink-200">
     {#if active}
       <div class="bg-mariam-600 p-5 text-white">
         <div class="flex items-start justify-between gap-3">

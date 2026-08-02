@@ -32,6 +32,8 @@ export type SensingNode = {
   /** Known from a DHCP lease; a receiver may be paired without one. */
   mac?: string;
   address?: string;
+  /** Where it physically sits, in the operator's own words. */
+  position?: string;
 };
 
 /** What joining the site's network asks of a device. */
@@ -294,6 +296,19 @@ export async function forgetModel(id: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Records where a node physically sits, or that it is unknown again. */
+export async function describeNode(nodeId: string, position: string): Promise<WriteOutcome> {
+  return send('PATCH', `/api/nodes/${encodeURIComponent(nodeId)}`, { position });
+}
+
+/** Points an existing node at the hardware that replaced it. */
+export async function adoptHardware(
+  nodeId: string,
+  hardware: { address?: string; mac?: string },
+): Promise<WriteOutcome> {
+  return send('POST', `/api/nodes/${encodeURIComponent(nodeId)}/hardware`, hardware);
 }
 
 /** Gives a stored model a new name. */

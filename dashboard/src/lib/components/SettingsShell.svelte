@@ -6,14 +6,13 @@
   import { t } from '$lib/i18n/i18n.svelte';
   import ClassesSection from '$components/ClassesSection.svelte';
   import NetworkSection from '$components/NetworkSection.svelte';
-  import NodesSection from '$components/NodesSection.svelte';
   import ServiceHoursPanel from '$components/ServiceHoursPanel.svelte';
   import SiteSection from '$components/SiteSection.svelte';
   import SystemSection from '$components/SystemSection.svelte';
 
   let { status, onupdated }: { status: Status; onupdated: (status: Status) => void } = $props();
 
-  const SECTIONS = ['site', 'nodes', 'network', 'levels', 'hours', 'system'] as const;
+  const SECTIONS = ['site', 'network', 'levels', 'hours', 'system'] as const;
   type Section = (typeof SECTIONS)[number];
 
   /* Nothing is selected to begin with, which is what makes one component
@@ -28,7 +27,7 @@
        a permanent rail once there is room for it beside the detail. -->
   <nav class:hidden={chosen !== null} class="lg:block!" aria-label={t('tab.settings')}>
     <ul
-      class="divide-y divide-ink-100 overflow-hidden rounded-xl bg-white ring-1 ring-ink-100
+      class="divide-y divide-ink-100 overflow-hidden rounded-md bg-white ring-1 ring-ink-200
              lg:space-y-1 lg:divide-y-0 lg:bg-transparent lg:ring-0"
     >
       {#each SECTIONS as name (name)}
@@ -60,13 +59,11 @@
       <ChevronLeft size={14} aria-hidden="true" />{t('settings.back')}
     </button>
 
-    <div class="rounded-xl bg-white p-5 ring-1 ring-ink-100">
+    <div class="rounded-md bg-white p-5 ring-1 ring-ink-100">
       <h2 class="text-sm font-medium text-ink-900">{t(`settings.${section}` as const)}</h2>
       <div class="mt-4">
         {#if section === 'site'}
           <SiteSection {status} {onupdated} />
-        {:else if section === 'nodes'}
-          <NodesSection {status} />
         {:else if section === 'network'}
           <NetworkSection {status} {onupdated} />
         {:else if section === 'levels'}

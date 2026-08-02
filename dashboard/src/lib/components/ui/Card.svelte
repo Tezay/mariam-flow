@@ -4,9 +4,10 @@
   let { padded = true, children }: { padded?: boolean; children: Snippet } = $props();
 </script>
 
-<!-- The one surface of the application. Sections that need to divide it use
-     `padded={false}` and pad their own rows, so a list still reads as one
-     object rather than as a stack of cards. -->
-<div class="overflow-hidden rounded-xl bg-white ring-1 ring-ink-100 {padded ? 'p-5' : ''}">
+<!-- The one surface of the application. An 8 px radius and a border that is
+     actually visible: a developer tool reads as a set of framed panels, not as
+     a stack of soft tiles. Sections that divide it pad their own rows, so a
+     list still reads as one object. -->
+<div class="overflow-hidden rounded-md bg-white ring-1 ring-ink-200 {padded ? 'p-4 sm:p-5' : ''}">
   {@render children()}
 </div>

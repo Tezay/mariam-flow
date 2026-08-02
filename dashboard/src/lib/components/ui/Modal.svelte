@@ -19,7 +19,7 @@
   aria-modal="true"
   aria-label={title}
 >
-  <div class="w-full max-w-sm rounded-xl bg-white p-5">
+  <div class="w-full max-w-sm rounded-lg bg-white p-5 ring-1 ring-ink-200 sm:rounded-md">
     <h2 class="text-base font-semibold text-ink-900">{title}</h2>
     {#if lead}
       <p class="mt-2 text-sm text-ink-500">{lead}</p>

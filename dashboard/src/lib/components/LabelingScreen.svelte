@@ -144,7 +144,7 @@
     role="dialog"
     aria-modal="true"
   >
-    <div class="w-full max-w-sm rounded-xl bg-white p-5 text-ink-900">
+    <div class="w-full max-w-sm rounded-md bg-white p-5 text-ink-900">
       <h2 class="text-base font-semibold">{t('cal.confirmStop')}</h2>
       <p class="mt-2 text-sm text-ink-500">{t('cal.confirmStopLead')}</p>
       <div class="mt-5 flex flex-col gap-2">

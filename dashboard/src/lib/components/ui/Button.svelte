@@ -29,20 +29,22 @@
     primary:
       'bg-mariam-600 text-white hover:bg-mariam-700 disabled:bg-ink-200 disabled:text-ink-500',
     outline:
-      'border border-mariam-600 text-mariam-600 hover:bg-mariam-50 disabled:border-ink-200 disabled:text-ink-300',
+      'bg-white text-ink-900 ring-1 ring-ink-200 hover:bg-ink-50 disabled:text-ink-300 disabled:hover:bg-white',
     quiet: 'text-ink-500 hover:bg-ink-100 hover:text-ink-900 disabled:text-ink-300',
     danger: 'bg-density-saturated text-white hover:opacity-90 disabled:bg-ink-200',
   } as const;
 
+  /* Comfortable under a thumb, compact under a pointer: the same appliance is
+     operated from a phone in a service hall and from a laptop in an office. */
   const SIZES = {
-    md: 'gap-2 rounded-md px-4 py-2 text-sm font-medium',
-    sm: 'gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium',
-    icon: 'rounded-md p-1.5',
+    md: 'h-9 gap-2 rounded-md px-3 text-sm font-medium sm:h-8',
+    sm: 'h-8 gap-1.5 rounded-md px-2.5 text-xs font-medium sm:h-7',
+    icon: 'size-9 rounded-md sm:size-7',
   } as const;
 
   const shape = $derived(
-    `inline-flex items-center justify-center transition-colors disabled:cursor-not-allowed
-     ${SIZES[size]} ${VARIANTS[variant]}`,
+    `inline-flex shrink-0 items-center justify-center transition-colors
+     disabled:cursor-not-allowed ${SIZES[size]} ${VARIANTS[variant]}`,
   );
 </script>
 

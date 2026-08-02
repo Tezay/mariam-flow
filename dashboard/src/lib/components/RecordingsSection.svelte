@@ -93,7 +93,7 @@
 <section>
   <SectionHeader icon={Archive} title={t('prepare.title')} lead={t('prepare.lead')} />
 
-  <div class="mt-4 overflow-hidden rounded-xl bg-white ring-1 ring-ink-100">
+  <div class="mt-4 overflow-hidden rounded-md bg-white ring-1 ring-ink-200">
     <div class="p-5">
       <label class="block text-sm font-medium text-ink-900">
         {t('cal.environment')}

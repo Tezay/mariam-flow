@@ -76,7 +76,7 @@
       {t('pair.heard', { count: discovery.candidates.length })}
     </p>
 
-    <div class="mt-3 rounded-xl bg-white p-4 ring-1 ring-ink-100">
+    <div class="mt-3 rounded-md bg-white p-4 ring-1 ring-ink-100">
       <h2 class="flex items-center gap-2 text-sm font-medium text-ink-900">
         <RadioTower size={16} aria-hidden="true" />{t('pair.transmitter')}
       </h2>
@@ -90,7 +90,7 @@
       {/if}
     </div>
 
-    <div class="mt-3 rounded-xl bg-white p-4 ring-1 ring-ink-100">
+    <div class="mt-3 rounded-md bg-white p-4 ring-1 ring-ink-100">
       <h2 class="flex items-center gap-2 text-sm font-medium text-ink-900">
         <Radio size={16} aria-hidden="true" />{t('pair.receivers')}
       </h2>

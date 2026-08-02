@@ -137,6 +137,25 @@ export const fr: Messages = {
   'handout.privacy':
     "Seules des valeurs agrégées quittent le site — temps d'attente, niveau de densité, confiance, horodatage. Aucune mesure radio brute ne sort du boîtier.",
 
+  'sensors.noneLead': 'Alimentez les capteurs et appairez-les depuis l’assistant d’installation.',
+  'sensors.placeTitle': 'Emplacement de {node}',
+  'sensors.title': 'Capteurs',
+  'sensors.lead': 'Ce que le boîtier entend, et ce pour quoi il est configuré.',
+  'sensors.transmitterLead': 'Jamais vu directement',
+  'sensors.heard': 'Mesuré par les récepteurs',
+  'sensors.notHeard': 'Non mesuré',
+  'sensors.noMac': 'Aucune adresse enregistrée',
+  'sensors.noPosition': 'Emplacement non décrit',
+  'sensors.neverHeard': 'Rien n’est jamais arrivé de celui-ci.',
+  'sensors.place': 'Décrire son emplacement',
+  'sensors.replace': 'Remplacer',
+  'sensors.replaceTitle': 'Remplacer {node}',
+  'sensors.replaceLead':
+    'L’identifiant est conservé, pour que les enregistrements et le modèle en service restent valides. Alimentez le remplaçant, il apparaît ci-dessous.',
+  'sensors.replaceTransmitter':
+    'Alimentez le remplaçant. Il apparaît dès que les récepteurs l’ont mesuré.',
+  'sensors.adopt': 'Adopter',
+
   'models.title': 'Modèles',
   'models.lead':
     'Ce avec quoi le boîtier estime. Un seul est en service ; les autres sont conservés.',
@@ -220,7 +239,6 @@ export const fr: Messages = {
   'system.unknownLead': "Cette machine ne le rapporte pas. Attendu en dehors d'un Raspberry Pi.",
   'system.memoryValue': '{available} Mo libres sur {total} Mo',
   'settings.site': 'Site',
-  'settings.nodes': 'Capteurs',
   'settings.network': 'Réseau',
   'settings.levels': 'Niveaux de densité',
   'settings.hours': 'Horaires de service',

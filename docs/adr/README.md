@@ -36,3 +36,4 @@ Conventions:
 | [0018](0018-network-interview-and-administrator-request.md) | Network interview and administrator request | accepted |
 | [0019](0019-calibration-recording-on-the-appliance.md) | Calibration recording on the appliance | accepted |
 | [0020](0020-model-bundles-and-the-appliance-library.md) | Model bundles and the appliance library | accepted |
+| [0021](0021-a-node-identifier-outlives-its-hardware.md) | A node identifier outlives its hardware | accepted |

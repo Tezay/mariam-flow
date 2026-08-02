@@ -53,7 +53,7 @@
         </h1>
         <p class="mt-2 text-base text-ink-500">{t(`wizard.stage.${stage}.lead` as const)}</p>
 
-        <div class="mt-6 rounded-xl bg-white p-5 ring-1 ring-ink-100">
+        <div class="mt-6 rounded-md bg-white p-5 ring-1 ring-ink-100">
           {#if stage === 'site'}
             <SiteStep initialName={status.site_name} onupdated={accept} />
           {:else if stage === 'nodes'}

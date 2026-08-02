@@ -277,9 +277,7 @@ fn supervise(
             Estimation::Ready(pipeline) => Some(*pipeline),
             Estimation::NotConfigured => None,
             Estimation::Broken(detail) => {
-                state.record(
-                    Event::new(EventKind::Stopped).with_detail(format!("model unusable: {detail}")),
-                );
+                state.record(Event::new(EventKind::ModelRejected).with_detail(detail));
                 None
             }
         };
@@ -531,6 +529,7 @@ mod tests {
             role: flow_core::NodeRole::Rx,
             mac: Some("aa:bb:cc:00:00:01".into()),
             address: Some("192.168.4.51".parse().unwrap()),
+            position: None,
         }];
         let options = LiveOptions {
             input: "udp://127.0.0.1:0".into(),

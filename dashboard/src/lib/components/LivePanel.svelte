@@ -72,7 +72,7 @@
 
 <div class="space-y-4" class:opacity-60={dropped}>
   <!-- The hero: one number, the thing the product exists to say. -->
-  <section class="rounded-xl bg-white p-5 ring-1 ring-ink-100">
+  <section class="rounded-md bg-white p-5 ring-1 ring-ink-100">
     {#if closed}
       <p class="text-xs font-medium uppercase tracking-wide text-ink-500">{t('live.wait')}</p>
       <p class="mt-1 text-4xl font-semibold text-ink-900">{t('live.closed')}</p>
@@ -127,7 +127,7 @@
 
   <HistoryFigure minutes={history} />
 
-  <section class="rounded-xl bg-white p-4 ring-1 ring-ink-100">
+  <section class="rounded-md bg-white p-4 ring-1 ring-ink-100">
     <h3 class="text-xs font-medium uppercase tracking-wide text-ink-500">{t('live.stream')}</h3>
     {#if nodes.length === 0}
       <p class="mt-2 text-sm text-ink-500">{t('live.noNodes')}</p>
