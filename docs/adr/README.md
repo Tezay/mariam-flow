@@ -23,7 +23,7 @@ Conventions:
 | [0005](0005-esp-csi-text-wire-format.md) | Node-to-edge frame format: esp-csi text lines | accepted |
 | [0006](0006-handbuilt-onnx-graph-export.md) | Hand-built core-operator ONNX graph for the v1 export | accepted |
 | [0007](0007-udp-intake-sender-identity.md) | UDP intake: sender-identified nodes, reception-time stamping | accepted |
-| [0008](0008-single-process-edge-appliance-daemon.md) | Single-process edge appliance daemon | accepted |
+| [0008](0008-single-process-edge-appliance-daemon.md) | Single-process edge appliance daemon | accepted (superseded in part by 0022) |
 | [0009](0009-dedicated-sensor-access-point-separate-uplink.md) | Dedicated sensor access point on a separate radio from the site uplink | accepted |
 | [0010](0010-per-device-secret-argon2id-credential.md) | Per-device secret as the administrator credential | accepted |
 | [0011](0011-cookie-sessions-and-login-throttling.md) | Cookie sessions, login throttling, and a deny-by-default surface | accepted |
@@ -37,3 +37,4 @@ Conventions:
 | [0019](0019-calibration-recording-on-the-appliance.md) | Calibration recording on the appliance | accepted |
 | [0020](0020-model-bundles-and-the-appliance-library.md) | Model bundles and the appliance library | accepted |
 | [0021](0021-a-node-identifier-outlives-its-hardware.md) | A node identifier outlives its hardware | accepted |
+| [0022](0022-the-appliance-publishes-the-estimate-itself.md) | The appliance publishes the estimate itself | accepted |

@@ -38,7 +38,6 @@ picture.
 | `crates/flow-core` | Canonical domain types (CSI frames, density classes, sessions) |
 | `crates/flow-ingest` | Frame parsing, UDP intake, session storage, `csi-replay` |
 | `crates/flow-infer` | Feature extraction, ONNX inference, Little's Law, smoothing, `csi-infer` |
-| `crates/flow-api` | Local REST API serving the live estimate |
 | `crates/flow-capture` | Labeled capture: recording plus the phone labeling page (`csi-capture`) |
 | `crates/flow-edge` | Appliance daemon: configuration, installation lifecycle, credential, journal *(in progress)* |
 | `dashboard/` | Svelte single-page dashboard, embedded in the daemon *(in progress)* |

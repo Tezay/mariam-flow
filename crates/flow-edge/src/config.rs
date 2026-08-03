@@ -13,7 +13,7 @@
 //! leaves the previous configuration intact rather than a truncated one.
 //!
 //! [`SiteTuning`] mirrors the `site.json` shape already consumed by
-//! `csi-infer` and `flow-api`, field for field, so a tuning file produced
+//! `csi-infer`, field for field, so a tuning file produced
 //! during lab work can be pasted into the appliance configuration and vice
 //! versa.
 
@@ -287,7 +287,7 @@ pub struct PairedNode {
 /// Per-site wait-estimation parameters.
 ///
 /// Field-for-field mirror of the `site.json` files consumed by
-/// `csi-infer` and `flow-api`; [`SiteTuning::wait_config`] converts it to
+/// `csi-infer`; [`SiteTuning::wait_config`] converts it to
 /// the domain type owned by `flow-infer`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SiteTuning {

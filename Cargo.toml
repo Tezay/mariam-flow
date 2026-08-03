@@ -4,7 +4,6 @@ members = [
     "crates/flow-core",
     "crates/flow-ingest",
     "crates/flow-infer",
-    "crates/flow-api",
     "crates/flow-capture",
     "crates/flow-edge",
 ]
