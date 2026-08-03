@@ -23,7 +23,8 @@ interaction required from the people in the queue.
                        │               session storage        │
                        │ flow-infer    features → ONNX model  │
                        │               → density → wait time  │
-                       │ flow-api      local REST + push      │
+                       │ flow-edge     public estimate +      │
+                       │               appliance dashboard    │
                        └──────────────────────────────────────┘
                                    │ HTTPS — aggregated estimates only:
                                    │ {wait, class, confidence, timestamp}
@@ -41,13 +42,12 @@ upstream.
 |---|---|---|
 | `crates/flow-core` | Canonical domain types: CSI frames, density classes, labels, session metadata | Implemented |
 | `crates/flow-ingest` | Frame parsing (esp-csi text format, see ADR 0005), stream reading with loss statistics, immutable on-disk session storage, `csi-replay` tool, UDP intake and the unified frame source | Implemented |
-| `crates/flow-infer` | Window feature extraction (mirror of `flow_ml`), ONNX inference (`tract`), Little's Law, output smoothing, live pipeline and `csi-infer` tool | Full inference chain implemented; REST exposure planned |
-| `crates/flow-api` | Local REST API (`axum`): live estimate, sessions, control; outbound push | Live-estimate surface and edge daemon implemented; sessions/control/push planned |
-| `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export, visual reports | Loading, windowing, v1 features, training, grouped evaluation, ONNX export and reporting implemented |
+| `crates/flow-infer` | Window feature extraction (mirror of `flow_ml`), ONNX inference (`tract`), Little's Law, output smoothing, live pipeline and `csi-infer` tool | Implemented |
+| `ml/` | Python package (`flow_ml`): session loading, feature engineering, training, ONNX export, model bundles, visual reports | Implemented; awaiting real captures to train on |
 | `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi`; TX or RX role via sdkconfig; RX streams over serial (bring-up) or UDP (ADR 0007) | Serial capture validated on ESP32-C6; UDP path pending |
 | `crates/flow-capture` | Labeled capture: session recording plus the phone labeling page (`csi-capture`) | Implemented |
-| `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, administrator credential, authenticated HTTP surface, live estimation, event journal and estimate history, and the embedded dashboard | Configuration, lifecycle, credential, sessions, journal, live pipeline, history and dashboard serving implemented; pairing, network integration and calibration control planned |
-| `dashboard/` | Svelte 5 single-page dashboard: sign-in, installation wizard shell, live supervision; built to static assets and embedded in the daemon | Toolchain, brand tokens, translations, sign-in, shell and the live view implemented; wizard steps and calibration planned |
+| `crates/flow-edge` | The appliance daemon: validated configuration, installation lifecycle, administrator credential, authenticated HTTP surface, the public estimate contract, live estimation, node pairing, calibration recording and the model library, event journal and estimate history, and the embedded dashboard | Implemented; the real network backend arrives with the hardware |
+| `dashboard/` | Svelte 5 single-page dashboard: sign-in, installation wizard, live supervision, sensors, calibration and models, settings and journal; built to static assets and embedded in the daemon | Implemented |
 
 The edge components are plain Rust binaries with no board-specific
 dependency; any Linux/macOS machine can play the edge role during
@@ -121,7 +121,7 @@ tools accept every transport through one input specification — a file,
 csi-capture --input udp://0.0.0.0:5566 \
             --node rx-1=192.168.4.11 --node rx-2=192.168.4.12 \
             --meta meta.json
-flow-api    --input udp://0.0.0.0:5566 --node rx-1=192.168.4.11 \
+csi-infer   --input udp://0.0.0.0:5566 --node rx-1=192.168.4.11 \
             --node rx-2=192.168.4.12 --model model.onnx --config site.json
 ```
 
@@ -327,28 +327,38 @@ cat /dev/ttyUSB0 | csi-capture --input - --meta meta.json --node-id rx-1
 # then open http://<edge-ip>:8088 on a phone
 ```
 
-## Local REST API
+## The public estimate
 
-The `flow-api` binary is the edge daemon: the blocking stream loop runs on
-its own thread and publishes each estimate into a `watch` channel; the
-async HTTP server (`axum`) reads the latest value. It binds to localhost
-by default and never exposes raw CSI.
+Everything else the appliance serves is administration, behind a session. One
+route is not: `GET /estimate`, which is what the product exists to say. It is
+served by `flow-edge` itself — there is no second implementation to keep in
+step — and it publishes the aggregate and nothing else, never a measurement.
 
-- `GET /health` — liveness probe.
-- `GET /estimate` — the public contract. Only **reliable** (confidence
-  above the site threshold) and **fresh** (younger than `--max-age-s`)
-  estimates are exposed; anything else answers
-  `{"status":"unavailable"}` without leaking values. Staleness masking
-  means a dead stream degrades to "unavailable" on its own — a frozen
-  wait time can never stay on display.
-- `GET /internal/estimate` — operator view: the full internal state
-  (people, level, reliability) plus whether and why the public endpoint
-  masks it.
+Three states, because two would lie. A **closed** site is not a fault, and
+reporting it as one would leave every display in every hall announcing a
+breakdown all night, after which nobody notices a real one. An estimate is
+published only when it is **reliable** — confidence above the site threshold —
+and **fresh**: an estimate outlives the window it was computed from, so a dead
+stream would otherwise leave the last good number on display looking true.
 
-```sh
-flow-api --input - --model model.onnx --config site.json \
-         --listen 127.0.0.1:8080 --max-age-s 15
 ```
+GET /estimate                       (no session, no cookie)
+
+{ "status": "ok", "wait_min": 6.5, "class": "medium",
+  "confidence": 0.81, "ts_us": 1785713000000000 }
+
+{ "status": "closed", "opens_at_us": 1785740400000000 }
+
+{ "status": "unavailable" }
+```
+
+The refusal carries no reason. This is the surface a hall display reads, and
+why the appliance cannot estimate is an operator's business — the dashboard and
+the journal both say it. The route answers with
+`Access-Control-Allow-Origin: *`, alone on the whole surface: a display is not
+hosted by the appliance, it takes no credential, and what it publishes is meant
+to be on a screen. Nothing else on the appliance carries a CORS header, and the
+dashboard remains strictly same-origin.
 
 ## Edge appliance
 

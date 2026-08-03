@@ -712,6 +712,7 @@ pub fn router(state: EdgeState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/estimate", get(public_estimate))
         .route("/api/session", post(login).delete(logout))
         .merge(protected)
         // Anything the API does not claim is the dashboard: its assets, or
@@ -884,6 +885,77 @@ async fn live(
             Some(Ok(event))
         });
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// How old an estimate may be before it stops being published.
+///
+/// An estimate outlives the window it was computed from: if the sensors have
+/// gone quiet, the last good number stays true-looking for as long as nobody
+/// replaces it. A queue changes on the scale of a minute, so anything older
+/// than this describes a hall that has since emptied or filled.
+const PUBLIC_MAX_AGE_US: u64 = 90 * 1_000_000;
+
+/// The waiting time as anyone may read it.
+///
+/// Three states rather than two. A site outside its service hours is not a
+/// fault, and reporting it as one would leave every display in every hall
+/// announcing a breakdown all night — after which nobody notices a real one.
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+enum PublicEstimate {
+    /// A fresh, reliable estimate during service.
+    Ok {
+        wait_min: f32,
+        class: String,
+        confidence: f32,
+        ts_us: u64,
+    },
+    /// The site is not serving.
+    Closed {
+        /// When it next opens, if the schedule says.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        opens_at_us: Option<u64>,
+    },
+    /// Serving, but with nothing worth showing.
+    ///
+    /// Carries no reason: this is the surface a hall display reads, and an
+    /// explanation of *why* the appliance cannot estimate is an operator's
+    /// business — the dashboard and the journal both say it.
+    Unavailable {},
+}
+
+/// Publishes the waiting time, and nothing else.
+///
+/// The one route that answers without a session: it is what the product
+/// exists to say. Raw measurement never appears here, only the aggregate the
+/// privacy invariant allows to leave the appliance at all.
+async fn public_estimate(State(state): State<EdgeState>) -> Response {
+    let service = state.service_state();
+    let body = if service.open {
+        match state.latest_estimate() {
+            Some(estimate)
+                if estimate.reliable
+                    && now_us().saturating_sub(estimate.ts_us) <= PUBLIC_MAX_AGE_US =>
+            {
+                PublicEstimate::Ok {
+                    wait_min: estimate.wait_minutes,
+                    class: estimate.display_class.to_string(),
+                    confidence: estimate.confidence,
+                    ts_us: estimate.ts_us,
+                }
+            }
+            _ => PublicEstimate::Unavailable {},
+        }
+    } else {
+        PublicEstimate::Closed {
+            opens_at_us: service.changes_at_us,
+        }
+    };
+
+    // Readable from a page served anywhere: a hall display is not hosted by
+    // the appliance. Only this route says so, it takes no credential, and it
+    // publishes what is meant to be on a screen in the first place.
+    ([(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")], Json(body)).into_response()
 }
 
 /// How far back `/api/estimates` reaches unless asked otherwise.
@@ -3321,6 +3393,115 @@ mod tests {
             let (status, _, _) = send(&state, method, path, None, Some("{}".to_owned()), 10).await;
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path} is open");
         }
+    }
+
+    /// A state serving now, with `estimate` published.
+    ///
+    /// An appliance with no declared schedule serves, which is what an
+    /// installation that has not reached the hours step does.
+    fn serving(estimate: flow_infer::WaitEstimate) -> (EdgeState, tempfile::TempDir) {
+        let (state, dir) = writable();
+        state.publish_estimate(estimate);
+        (state, dir)
+    }
+
+    /// A schedule that is closed at every hour of every day.
+    fn never_open() -> serde_json::Value {
+        serde_json::json!({
+            "timezone": "Europe/Paris",
+            "weekly": {
+                "monday": [], "tuesday": [], "wednesday": [], "thursday": [],
+                "friday": [], "saturday": [], "sunday": [],
+            },
+            "closures": [],
+        })
+    }
+
+    fn estimate_at(ts_us: u64, reliable: bool) -> flow_infer::WaitEstimate {
+        flow_infer::WaitEstimate {
+            ts_us,
+            wait_minutes: 6.5,
+            people: 13.0,
+            level: 2.1,
+            display_class: DensityClass::Medium,
+            confidence: 0.81,
+            reliable,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_waiting_time_is_published_without_a_session() {
+        // The one thing the product exists to say, and the only route that
+        // says it to anyone.
+        let (state, _dir) = serving(estimate_at(now_us(), true));
+
+        let (status, headers, body) = send(&state, "GET", "/estimate", None, None, 10).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["class"], "medium");
+        assert!((body["wait_min"].as_f64().unwrap() - 6.5).abs() < 0.01);
+        // A hall display is not hosted by the appliance.
+        assert_eq!(
+            headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(),
+            "*"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_site_is_not_reported_as_a_fault() {
+        // Every display in every hall announcing a breakdown all night is how
+        // nobody notices a real one.
+        let (state, _dir) = serving(estimate_at(now_us(), true));
+        let cookie = session_of(&state).await;
+        send(
+            &state,
+            "PUT",
+            "/api/service-window",
+            Some(&cookie),
+            Some(never_open().to_string()),
+            10,
+        )
+        .await;
+
+        let (_, _, body) = send(&state, "GET", "/estimate", None, None, 10).await;
+
+        assert_eq!(body["status"], "closed");
+        assert!(
+            body.get("wait_min").is_none(),
+            "a closed site has no number"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_doubtful_or_aged_number_is_never_published() {
+        for (label, estimate) in [
+            ("unreliable", estimate_at(now_us(), false)),
+            (
+                "stale",
+                estimate_at(now_us() - 10 * PUBLIC_MAX_AGE_US, true),
+            ),
+        ] {
+            let (state, _dir) = serving(estimate);
+            let (_, _, body) = send(&state, "GET", "/estimate", None, None, 10).await;
+            assert_eq!(body["status"], "unavailable", "{label} was published");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_public_route_never_carries_a_measurement() {
+        // The privacy invariant, asserted rather than assumed: only the
+        // aggregate leaves the appliance.
+        let (state, _dir) = serving(estimate_at(now_us(), true));
+
+        let (_, _, body) = send(&state, "GET", "/estimate", None, None, 10).await;
+
+        let fields: Vec<&String> = body.as_object().unwrap().keys().collect();
+        assert_eq!(
+            fields,
+            vec!["class", "confidence", "status", "ts_us", "wait_min"],
+            "the public payload gained a field"
+        );
     }
 
     #[tokio::test]
