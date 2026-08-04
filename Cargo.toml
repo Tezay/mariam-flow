@@ -13,6 +13,9 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "PolyForm-Noncommercial-1.0.0"
+# Never published: this also lets the supply-chain gate tell our own path
+# dependencies from a wildcard on a name someone else could take over.
+publish = false
 
 [workspace.dependencies]
 argon2 = "0.5"

@@ -1,0 +1,36 @@
+# Minor and patch updates are grouped per ecosystem; majors stay separate,
+# since those are the ones that need reading.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      rust-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /dashboard
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      dashboard-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: pip
+    directory: /ml
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      ml-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Actions pin third-party code that no manifest records.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

@@ -19,5 +19,8 @@ dashboard/.svelte-kit/
 # the `dashboard` feature; its output is never versioned.
 dashboard/build/
 
+# Editor
+.vscode/
+
 # OS
 .DS_Store

@@ -49,6 +49,9 @@
 </script>
 
 {#if href}
+  <!-- These hrefs are appliance endpoints a browser downloads, not client
+       routes, so the router must not resolve them. -->
+  <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
   <a {href} {download} {title} aria-label={label} class={shape}>{@render children()}</a>
 {:else}
   <button {type} {disabled} {onclick} {title} aria-label={label} class={shape}>
