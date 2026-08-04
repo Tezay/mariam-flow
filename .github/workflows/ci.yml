@@ -14,7 +14,7 @@ jobs:
     name: Rust (fmt, clippy, tests, cross-check)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No toolchain action: installing "stable" would override the pin that
       # rust-toolchain.toml sets and rustup honours.
@@ -50,7 +50,7 @@ jobs:
       run:
         working-directory: dashboard
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No version here on purpose: pnpm/action-setup reads it from the
       # `packageManager` field of dashboard/package.json, so CI and a
@@ -102,7 +102,7 @@ jobs:
       run:
         working-directory: ml
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -128,7 +128,7 @@ jobs:
     name: Supply chain (advisories, licences, sources)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Advisories move without the code changing, so this job can fail on a
       # commit that passed yesterday.
