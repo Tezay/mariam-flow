@@ -55,7 +55,7 @@ jobs:
       # No version here on purpose: pnpm/action-setup reads it from the
       # `packageManager` field of dashboard/package.json, so CI and a
       # developer's machine cannot drift apart.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.0.9
         with:
           package_json_file: dashboard/package.json
 
@@ -136,7 +136,7 @@ jobs:
         with:
           command: check
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.0.9
         with:
           package_json_file: dashboard/package.json
 
