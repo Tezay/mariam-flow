@@ -11,7 +11,7 @@
     type StoredModel,
   } from '$lib/api';
   import { defaultEnvironment } from '$lib/calibration';
-  import { formattingLocale, t } from '$lib/i18n/i18n.svelte';
+  import { formattingLocale } from '$lib/i18n/i18n.svelte';
   import { knownPositions, receiverState } from '$lib/sensors';
   import LabelingScreen from '$components/LabelingScreen.svelte';
   import ModelsSection from '$components/ModelsSection.svelte';

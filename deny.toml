@@ -1,0 +1,42 @@
+[advisories]
+yanked = "deny"
+ignore = [
+    # `time` stack exhaustion when parsing. Reaches the tree only through
+    # `[build-dependencies]` of `tract-linalg` and is never linked into the
+    # appliance; the input it parses is that crate's own templates. Lifts when
+    # tract's `liquid` moves past time 0.3.47.
+    "RUSTSEC-2026-0009",
+    # `paste` is unmaintained rather than vulnerable, and is a proc-macro: it
+    # runs during compilation and ships nothing. No safe upgrade exists.
+    "RUSTSEC-2024-0436",
+]
+
+[licenses]
+# An allow-list rather than a deny-list: a copyleft dependency would contradict
+# the licence this project ships under, and would arrive unannounced.
+allow = [
+    "PolyForm-Noncommercial-1.0.0",
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+# A wildcard on a registry dependency accepts whatever the name resolves to
+# tomorrow; on our own path dependencies it means nothing.
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

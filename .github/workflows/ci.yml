@@ -16,10 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-          targets: aarch64-unknown-linux-gnu
+      # No toolchain action: installing "stable" would override the pin that
+      # rust-toolchain.toml sets and rustup honours.
+      - name: Materialise the pinned toolchain
+        run: rustup show
 
       - uses: Swatinem/rust-cache@v2
 
@@ -44,7 +44,7 @@ jobs:
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
 
   dashboard:
-    name: Dashboard (format, types, tests, build)
+    name: Dashboard (format, lint, types, tests, build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -71,6 +71,9 @@ jobs:
       - name: Check formatting
         run: pnpm run format:check
 
+      - name: Lint
+        run: pnpm run lint
+
       - name: Type-check
         run: pnpm run check
 
@@ -82,7 +85,9 @@ jobs:
 
       # The Rust job builds without the dashboard feature, so this is the
       # only place the embedding is exercised against real files.
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Materialise the pinned toolchain
+        working-directory: .
+        run: rustup show
 
       - uses: Swatinem/rust-cache@v2
 
@@ -118,3 +123,29 @@ jobs:
 
       - name: Tests
         run: uv run pytest
+
+  supply-chain:
+    name: Supply chain (advisories, licences, sources)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Advisories move without the code changing, so this job can fail on a
+      # commit that passed yesterday.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: dashboard/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: dashboard/.nvmrc
+
+      - name: Audit dashboard dependencies
+        working-directory: dashboard
+        # Moderate and above: low-severity findings here are build-time only,
+        # and would train everyone to ignore this job.
+        run: pnpm audit --audit-level moderate

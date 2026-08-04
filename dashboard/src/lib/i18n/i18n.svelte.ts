@@ -31,7 +31,7 @@ export function toggleLocale(): void {
  * the browser's preferences decide.
  */
 export function initLocale(): void {
-  let stored: string | null = null;
+  let stored: string | null;
   try {
     stored = localStorage.getItem(STORAGE_KEY);
   } catch {
@@ -43,7 +43,7 @@ export function initLocale(): void {
   // The clock cycle is a separate preference from the language: a French
   // operator may still want a 12-hour clock, and an English one a 24-hour
   // clock. Default to 24 hours, which is what an operations screen wants.
-  let clock: string | null = null;
+  let clock: string | null;
   try {
     clock = localStorage.getItem(CLOCK_KEY);
   } catch {
