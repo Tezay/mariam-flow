@@ -143,8 +143,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: dashboard/.nvmrc
-          cache: pnpm
-          cache-dependency-path: dashboard/pnpm-lock.yaml
 
       - name: Audit dashboard dependencies
         working-directory: dashboard
