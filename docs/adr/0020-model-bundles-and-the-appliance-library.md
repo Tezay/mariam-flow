@@ -2,6 +2,9 @@
 
 - Status: accepted
 - Date: 2026-08-01
+- Amended by: [0023](0023-the-site-owns-what-a-density-is-worth.md), which
+  moves what a site turns a density into a waiting time with out of the bundle
+  and renames `site.json` to `analysis.json`
 
 ## Context and Problem Statement
 

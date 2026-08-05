@@ -48,7 +48,7 @@ it (see ADR 0001). Option 3 discards calibration, confidence, and the
 continuous signal for no gain. Option 4 conflates the state of the queue
 (observable in CSI) with the service rate (not observable in CSI), making
 the learned mapping non-stationary under staffing changes; Little's Law
-separates these concerns explicitly (see `docs/architecture.md`).
+separates these concerns explicitly (see `docs/data-model.md`).
 
 ### Consequences
 

@@ -35,7 +35,7 @@ Conventions:
 | [0017](0017-intake-independent-of-inference.md) | Intake independent of inference | accepted |
 | [0018](0018-network-interview-and-administrator-request.md) | Network interview and administrator request | accepted |
 | [0019](0019-calibration-recording-on-the-appliance.md) | Calibration recording on the appliance | accepted |
-| [0020](0020-model-bundles-and-the-appliance-library.md) | Model bundles and the appliance library | accepted |
+| [0020](0020-model-bundles-and-the-appliance-library.md) | Model bundles and the appliance library | accepted, amended by 0023 |
 | [0021](0021-a-node-identifier-outlives-its-hardware.md) | A node identifier outlives its hardware | accepted |
 | [0022](0022-the-appliance-publishes-the-estimate-itself.md) | The appliance publishes the estimate itself | accepted |
 | [0023](0023-the-site-owns-what-a-density-is-worth.md) | The site owns what a density is worth | accepted |
