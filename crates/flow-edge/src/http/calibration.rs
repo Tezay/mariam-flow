@@ -8,7 +8,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
-use super::{Rename, error_response, refusal};
+use super::{Rename, error_response};
 use crate::calibration::{
     RecordedSession, SessionRequest, recorded_sessions, session_id, session_meta, write_archive,
 };
@@ -166,28 +166,6 @@ pub(super) async fn session_archive(
         body,
     )
         .into_response()
-}
-
-/// Records what each density class means at this site.
-///
-/// A property of the queue rather than of one capture, so it is answered once
-/// and copied into every session recorded afterwards.
-pub(super) async fn set_classes(
-    State(state): State<EdgeState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    Json(classes): Json<Option<flow_core::ClassMapping>>,
-) -> Response {
-    match state.write_config(|config| config.classes = classes) {
-        Ok(()) => {
-            state.record(
-                Event::new(EventKind::ConfigurationChanged)
-                    .from_client(peer.ip())
-                    .with_detail("density classes described".to_owned()),
-            );
-            (StatusCode::OK, Json(state.status())).into_response()
-        }
-        Err(rejection) => refusal(&rejection),
-    }
 }
 
 /// Starts recording a labeled capture session.

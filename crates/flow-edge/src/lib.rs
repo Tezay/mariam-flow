@@ -62,7 +62,7 @@ mod views;
 
 pub use config::{
     Addressing, ApplianceConfig, DEFAULT_HOP_US, DEFAULT_SENSOR_CHANNEL, DEFAULT_WINDOW_US,
-    Identity, NetworkConfig, PairedNode, SensorAp, SiteTuning, Uplink, WifiSecurity,
+    Identity, NetworkConfig, PairedNode, SensorAp, Uplink, WaitTuning, WifiSecurity,
 };
 pub use credential::{AdminCredential, CREDENTIAL_FILE, ResetOutcome, apply_pending_reset};
 pub use edge_state::EdgeState;
@@ -84,6 +84,9 @@ pub use throttle::Throttle;
 
 /// File name of the active density model inside the data directory.
 pub const ACTIVE_MODEL: &str = "model.onnx";
+
+/// Analysis geometry of the model in service, beside it.
+pub const ACTIVE_ANALYSIS: &str = "analysis.json";
 
 /// Current Unix time in microseconds — the appliance clock.
 ///

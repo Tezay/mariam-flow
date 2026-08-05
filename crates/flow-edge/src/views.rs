@@ -27,6 +27,9 @@ pub(crate) struct StatusResponse {
     pub(crate) survey: Option<NetworkSurvey>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) classes: Option<flow_core::ClassMapping>,
+    /// How this site turns a density into a waiting time, once described.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) wait: Option<crate::config::WaitTuning>,
     /// Which stored model is estimating, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) active_model: Option<String>,

@@ -7,6 +7,7 @@ import {
   formatDay,
   formatWindow,
   modelName,
+  queueComplete,
   blankClasses,
   buttonLabel,
   buttonOrder,
@@ -140,5 +141,24 @@ describe('formatDay', () => {
   it('spells the day out rather than abbreviating it', () => {
     const rendered = formatDay(Date.UTC(2026, 7, 12, 10) * 1000, 'fr-FR');
     expect(rendered).toMatch(/\p{L}{4,}/u);
+  });
+});
+
+describe('queueComplete', () => {
+  it('needs every count and a service rate', () => {
+    expect(queueComplete([0, 4, 12, 25], 6)).toBe(true);
+    expect(queueComplete([0, 4, 12, null], 6)).toBe(false);
+    expect(queueComplete([0, 4, 12, 25], null)).toBe(false);
+  });
+
+  it('refuses what the appliance would refuse', () => {
+    // A queue served at zero people per minute never empties, and the
+    // estimator says so rather than dividing by it.
+    expect(queueComplete([0, 4, 12, 25], 0)).toBe(false);
+    expect(queueComplete([0, -1, 12, 25], 6)).toBe(false);
+  });
+
+  it('needs one count per density class', () => {
+    expect(queueComplete([0, 4, 12], 6)).toBe(false);
   });
 });

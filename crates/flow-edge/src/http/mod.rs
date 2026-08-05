@@ -40,10 +40,10 @@ mod schedule;
 
 use self::auth::{login, logout, require_session, security_headers};
 use self::calibration::{
-    add_label, delete_session, rename_session, session_archive, sessions, set_classes,
-    start_calibration, stop_calibration,
+    add_label, delete_session, rename_session, session_archive, sessions, start_calibration,
+    stop_calibration,
 };
-use self::install::{set_installation, set_network_survey, set_site, set_uplink};
+use self::install::{set_installation, set_network_survey, set_queue, set_site, set_uplink};
 use self::journal::{events, events_csv};
 use self::live::{estimates, live, public_estimate};
 use self::models::{MAX_BUNDLE_BYTES, forget_model, import_model, models, rename_model, use_model};
@@ -80,7 +80,7 @@ pub fn router(state: EdgeState) -> Router {
                 .post(use_model)
                 .patch(rename_model),
         )
-        .route("/api/classes", put(set_classes))
+        .route("/api/queue", put(set_queue))
         .route(
             "/api/calibration",
             post(start_calibration).delete(stop_calibration),

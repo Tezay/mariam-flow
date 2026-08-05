@@ -9,10 +9,11 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
 use super::{error_response, refusal};
-use crate::config::{NetworkSurvey, Uplink};
+use crate::config::{NetworkSurvey, Uplink, WaitTuning};
 use crate::edge_state::EdgeState;
 use crate::journal::{Event, EventKind};
 use crate::lifecycle::Stage;
+use flow_core::ClassMapping;
 
 #[derive(Deserialize)]
 pub(super) struct SiteBody {
@@ -90,6 +91,44 @@ pub(super) async fn set_network_survey(
                 Event::new(EventKind::ConfigurationChanged)
                     .from_client(peer.ip())
                     .with_detail(described),
+            );
+            (StatusCode::OK, Json(state.status())).into_response()
+        }
+        Err(rejection) => refusal(&rejection),
+    }
+}
+
+/// What the installer says about the queue at this site.
+#[derive(Deserialize)]
+pub(super) struct QueueBody {
+    /// What each density looks like, in the operator's own words.
+    #[serde(default)]
+    classes: Option<ClassMapping>,
+    wait: WaitTuning,
+}
+
+/// Records what the queue looks like and how fast it is served.
+///
+/// The words and the counts are answered together and stored together: a
+/// screen that saved one without the other would leave the appliance able to
+/// label a queue it cannot time, or the reverse.
+pub(super) async fn set_queue(
+    State(state): State<EdgeState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(body): Json<QueueBody>,
+) -> Response {
+    match state.write_config(|config| {
+        config.classes = body.classes;
+        config.wait = Some(body.wait);
+    }) {
+        Ok(()) => {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(format!(
+                        "queue described, {} served per minute",
+                        body.wait.service_rate_per_min
+                    )),
             );
             (StatusCode::OK, Json(state.status())).into_response()
         }

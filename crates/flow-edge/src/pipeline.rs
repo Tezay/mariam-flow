@@ -212,8 +212,16 @@ fn build(
 fn assemble(config: &ApplianceConfig, data_dir: &Path, source: &FrameSource) -> Estimation {
     let rx_nodes = source.rx_node_ids();
     let model_path = data_dir.join(crate::ACTIVE_MODEL);
-    let (Some(site), true, false) = (config.site, model_path.is_file(), rx_nodes.is_empty()) else {
+    let (Some(wait), true, false) = (config.wait, model_path.is_file(), rx_nodes.is_empty()) else {
         return Estimation::NotConfigured;
+    };
+
+    // Beside the model rather than in the configuration: the geometry belongs
+    // to the run that produced the weights, and a copy kept apart from them
+    // would eventually describe a model that is no longer there.
+    let analysis = match crate::model::active_analysis(data_dir) {
+        Ok(analysis) => analysis,
+        Err(err) => return Estimation::Broken(err.to_string()),
     };
 
     let model = match DensityModel::load(&model_path) {
@@ -224,10 +232,10 @@ fn assemble(config: &ApplianceConfig, data_dir: &Path, source: &FrameSource) -> 
     match LivePipeline::new(
         model,
         LiveConfig {
-            window_us: site.window_us,
-            hop_us: site.hop_us,
+            window_us: analysis.window_us,
+            hop_us: analysis.hop_us,
             rx_nodes,
-            wait: site.wait_config(),
+            wait: wait.wait_config(),
         },
     ) {
         Ok(pipeline) => Estimation::Ready(Box::new(pipeline)),
@@ -607,14 +615,12 @@ mod tests {
         std::fs::write(dir.path().join(crate::ACTIVE_MODEL), b"not an onnx graph").unwrap();
         let mut config =
             ApplianceConfig::factory("KIT-0001", "mariam-flow-0001", "correct-horse-battery");
-        config.site = Some(crate::config::SiteTuning {
+        config.wait = Some(crate::config::WaitTuning {
             people_per_class: [0.0, 4.0, 12.0, 25.0],
             service_rate_per_min: 6.0,
             smoothing_tau_s: 30.0,
             hysteresis_margin: 0.15,
             min_confidence: 0.5,
-            window_us: 5_000_000,
-            hop_us: 1_000_000,
         });
         config.nodes = vec![crate::config::PairedNode {
             node_id: "rx-1".into(),

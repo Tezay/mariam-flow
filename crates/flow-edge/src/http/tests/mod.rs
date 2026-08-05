@@ -12,7 +12,7 @@ use tower::util::ServiceExt;
 use super::journal::{MAX_EVENT_LIMIT, csv_field, utc_instant};
 use super::live::PUBLIC_MAX_AGE_US;
 use super::*;
-use crate::config::{Addressing, ApplianceConfig, PairedNode, SiteTuning, Uplink, WifiSecurity};
+use crate::config::{Addressing, ApplianceConfig, PairedNode, Uplink, WaitTuning, WifiSecurity};
 use crate::credential::AdminCredential;
 use crate::journal::{Event, EventKind, EventPage, Journal};
 use crate::lifecycle::{Phase, Runtime, Stage};
@@ -66,14 +66,12 @@ fn installed() -> ApplianceConfig {
         },
         addressing: Addressing::Dhcp,
     });
-    config.site = Some(SiteTuning {
+    config.wait = Some(WaitTuning {
         people_per_class: [0.0, 4.0, 12.0, 25.0],
         service_rate_per_min: 6.0,
         smoothing_tau_s: 30.0,
         hysteresis_margin: 0.15,
         min_confidence: 0.5,
-        window_us: 5_000_000,
-        hop_us: 1_000_000,
     });
     config.onboarding_completed = true;
     config

@@ -217,11 +217,30 @@ export const en = {
   'model.import': 'Import and activate',
   'model.importing': 'Checking…',
 
-  'cal.classesLead':
-    'Decided once for the site. Two people labelling the same queue have to draw the boundaries in the same place.',
-  'cal.classesSaved': 'Descriptions saved.',
   'cal.wizardLead':
-    'You are about to mark the queue as it happens. Stand where you can see it, press the level that matches what you see, and correct it as soon as it changes. Allow about twenty minutes.',
+    'The appliance cannot yet tell a busy queue from an empty one; it has to be shown. Stand where you can see the queue, press the level that matches what you see, and correct it the moment it changes. Record at the busiest time you can — what it never sees, it never learns. Allow about twenty minutes.',
+  'queue.lead': 'Two answers per level: what the queue looks like, and how many people that is.',
+  'queue.looksLike': 'What it looks like',
+  'queue.people': 'People',
+  'queue.peopleAt': 'People in the queue at {level}',
+  'queue.rate': 'How fast is the queue served?',
+  'queue.ratePerMinute': 'people per minute',
+  'queue.rateHint':
+    'Time one person from the moment they reach the till. Six per minute is a common canteen figure.',
+  'queue.saved': 'Queue description saved.',
+  'queue.advanced': 'Advanced',
+  'queue.smoothing': 'Smoothing (seconds)',
+  'queue.hysteresis': 'Level hysteresis',
+  'queue.confidence': 'Reliability threshold',
+  'queue.hint.empty': 'nobody waiting',
+  'queue.hint.low': 'a few people',
+  'queue.hint.medium': 'the queue reaches the pillars',
+  'queue.hint.saturated': 'the queue leaves the building',
+  'queue.wizardLead':
+    'The appliance measures how busy the queue is, not how long people wait. These answers are what turn one into the other.',
+  'settings.queue': 'Queue',
+  'pair.placement':
+    'Put the transmitter on one side of the queue and the two receivers on the other, so each radio path crosses it. Same height, about a metre, antennas clear, on something that is not metal — two to four metres apart with nothing solid in between.',
   'cal.environment': 'What is being recorded',
   'cal.environmentHint': 'For example: main hall, lunch service, rainy day.',
   'cal.positions': 'Where the sensors are',
@@ -270,7 +289,6 @@ export const en = {
   'system.memoryValue': '{available} MB free of {total} MB',
   'settings.site': 'Site',
   'settings.network': 'Network',
-  'settings.levels': 'Density levels',
   'settings.hours': 'Service hours',
   'settings.system': 'System',
   'settings.back': 'Settings',
@@ -353,12 +371,14 @@ export const en = {
   'wizard.stage.site': 'Name the site',
   'wizard.stage.nodes': 'Connect the sensors',
   'wizard.stage.network': 'Connect to the network',
+  'wizard.stage.queue': 'Describe the queue',
   'wizard.stage.calibration': 'Calibrate',
   'wizard.stage.complete': 'Ready',
   'wizard.stage.site.lead': 'Give this installation a name you will recognise later.',
   'wizard.stage.nodes.lead': 'Power the three sensors and wait for them to appear.',
   'wizard.stage.network.lead':
     'Choose how the appliance reaches the site network, or stay offline.',
+  'wizard.stage.queue.lead': 'What the queue looks like at each level, and how fast it is served.',
   'wizard.stage.calibration.lead': 'Teach the appliance what a busy queue looks like at this site.',
   'wizard.stage.complete.lead': 'Everything is set. The appliance is ready to serve.',
 } as const;

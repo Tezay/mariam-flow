@@ -69,6 +69,10 @@
   }
 </script>
 
+<!-- Placement decides whether anything can be sensed at all, and it is the
+     one thing a screen cannot check for the installer. -->
+<p class="mb-4 rounded-md bg-mariam-50 p-3 text-sm text-ink-900">{t('pair.placement')}</p>
+
 <div class="max-w-md">
   {#if !discovery || discovery.candidates.length === 0}
     <p class="text-sm text-ink-500">{t('pair.waiting')}</p>

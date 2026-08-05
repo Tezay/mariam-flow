@@ -399,10 +399,10 @@ load and every save, and written atomically — a power cut during a write
 leaves the previous configuration intact, and an invalid value is rejected
 before it can reach the disk and lock the unit out of its next boot. It
 carries the appliance identity, the sensor access point, the uplink, the
-paired nodes, the service hours and the per-site wait-estimation tuning;
-that tuning is a field-for-field mirror of the `site.json` the laboratory
-tools read, so a tuning produced in the lab moves into an appliance
-unchanged. Historical
+paired nodes, the service hours, and what this site turns a density into a
+waiting time with — how many people each class represents and how fast the
+queue is served (ADR 0023). The analysis geometry a model was trained under is
+deliberately not there: it belongs to the model and travels with it. Historical
 series — node health, estimates, events — belong in SQLite instead, where
 queries and retention are the natural operations.
 

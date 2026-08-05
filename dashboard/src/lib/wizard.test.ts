@@ -19,6 +19,7 @@ function status(readiness: Partial<Readiness>, stage: Stage): Status {
     site_named: false,
     nodes_paired: false,
     uplink_decided: false,
+    queue_described: false,
     site_captured: false,
     model_ready: false,
     ...readiness,

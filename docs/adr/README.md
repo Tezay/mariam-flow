@@ -38,3 +38,4 @@ Conventions:
 | [0020](0020-model-bundles-and-the-appliance-library.md) | Model bundles and the appliance library | accepted |
 | [0021](0021-a-node-identifier-outlives-its-hardware.md) | A node identifier outlives its hardware | accepted |
 | [0022](0022-the-appliance-publishes-the-estimate-itself.md) | The appliance publishes the estimate itself | accepted |
+| [0023](0023-the-site-owns-what-a-density-is-worth.md) | The site owns what a density is worth | accepted |

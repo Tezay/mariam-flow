@@ -49,22 +49,28 @@ function stubTransport() {
 describe('WizardFrame', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  // Named one by one rather than counted: the stepper's own buttons are on
-  // screen at every stage, so a count would pass for a stage showing nothing.
-  const ASKS: [Stage, RegExp][] = [
-    ['site', /continue/i],
-    ['nodes', /pair these sensors/i],
-    ['network', /continue/i],
-    ['calibration', /start recording/i],
-    ['complete', /finish installation/i],
-  ];
+  /* Named one by one rather than counted: the stepper's own buttons are on
+     screen at every stage, so a count would pass for a stage showing nothing.
+     Typed as a record of every stage, so adding one to the wizard fails to
+     compile until it has a control here. */
+  const ASKS: Record<Stage, RegExp> = {
+    site: /continue/i,
+    nodes: /pair these sensors/i,
+    network: /continue/i,
+    queue: /continue/i,
+    calibration: /start recording/i,
+    complete: /finish installation/i,
+  };
 
-  it.each(ASKS)('gives the %s step something to act on', (stage, control) => {
-    // A step with no branch renders an empty card, which reads as a screen
-    // still loading rather than as a wizard that cannot be finished.
-    stubTransport();
-    render(WizardFrame, { props: { status: status(stage), onupdated() {} } });
+  it.each(Object.entries(ASKS) as [Stage, RegExp][])(
+    'gives the %s step something to act on',
+    (stage, control) => {
+      // A step with no branch renders an empty card, which reads as a screen
+      // still loading rather than as a wizard that cannot be finished.
+      stubTransport();
+      render(WizardFrame, { props: { status: status(stage), onupdated() {} } });
 
-    expect(screen.getByRole('button', { name: control })).toBeInTheDocument();
-  });
+      expect(screen.getByRole('button', { name: control })).toBeInTheDocument();
+    },
+  );
 });

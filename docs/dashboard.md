@@ -86,6 +86,19 @@ itself, which also lets it show steps satisfied out of order. Each screen is
 one question, with a reserved frame beside it on a wide screen and above it on
 a phone; the frame holds its space whether or not it has artwork in it.
 
+Its fourth step asks what the queue looks like at each density, how many
+people that is, and how fast it is served — the answers that turn a density
+into a waiting time (ADR 0023). It comes before the recording because the
+words are needed before someone spends twenty minutes pressing them, and
+because nothing in a training run can supply them: a labelled capture says the
+queue was medium, never how many people that was. Nothing is defaulted, since a
+head count nobody entered would produce waiting times that look measured.
+
+The same component serves the settings, so a site that opens a second till
+corrects one number rather than reinstalling. The three thresholds that shape
+the display — smoothing, hysteresis, the reliability floor — are folded away
+there and never asked during an installation.
+
 Its last step records the site's first capture, because nothing else can:
 closing an installation requires one, and the screen that records later ones
 only appears once the installation is closed.
@@ -137,7 +150,7 @@ look like an appliance that had never done anything.
 ## Settings
 
 The settings screen is a list of sections resolving to one detail — Site,
-Network, Levels, Service hours, System, Journal. On a phone the list is the
+Network, Queue, Service hours, System, Journal. On a phone the list is the
 screen until a section is chosen; on a wide screen it is a rail beside the
 detail. One component, two shapes, so a section added later lands somewhere
 rather than lengthening a single page.

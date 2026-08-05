@@ -1,8 +1,10 @@
 //! Receiving a density model trained elsewhere.
 //!
-//! A model and the tuning it was trained under travel together (`model.onnx`
-//! and `site.json`), because pairing a model with a window it never saw
-//! produces estimates that look plausible and are not.
+//! A model and the analysis geometry it was trained under travel together
+//! (`model.onnx` and `analysis.json`), because pairing a model with a window
+//! it never saw produces estimates that look plausible and are not. What the
+//! site turns a density into a waiting time with is deliberately not in here:
+//! nothing in a training run counts heads (ADR 0023).
 //!
 //! Nothing is trusted on arrival: the archive comes from a browser, so its
 //! members are checked by name and by size before anything is written, and
@@ -11,17 +13,69 @@
 
 use std::path::{Path, PathBuf};
 
-use flow_infer::{DensityModel, LiveConfig, LivePipeline};
+use flow_infer::{DensityModel, LiveConfig, LivePipeline, WaitConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::config::SiteTuning;
+use crate::config::{
+    DEFAULT_HOP_US, DEFAULT_HYSTERESIS_MARGIN, DEFAULT_MIN_CONFIDENCE, DEFAULT_SMOOTHING_TAU_S,
+    DEFAULT_WINDOW_US,
+};
+
+/// Stands in while a bundle is checked, and is never stored.
+const PLACEHOLDER_WAIT: WaitConfig = WaitConfig {
+    people_per_class: [0.0, 1.0, 2.0, 3.0],
+    service_rate_per_min: 1.0,
+    smoothing_tau_s: DEFAULT_SMOOTHING_TAU_S,
+    hysteresis_margin: DEFAULT_HYSTERESIS_MARGIN,
+    min_confidence: DEFAULT_MIN_CONFIDENCE,
+};
 use crate::error::ModelError;
 
 /// The model file inside a bundle.
 pub const BUNDLE_MODEL: &str = "model.onnx";
 
-/// The tuning file inside a bundle.
-pub const BUNDLE_SITE: &str = "site.json";
+/// The geometry file inside a bundle.
+pub const BUNDLE_ANALYSIS: &str = "analysis.json";
+
+/// The analysis geometry a model was trained under.
+///
+/// Read from the bundle of the model in service rather than copied into the
+/// appliance configuration: a window that disagreed with its model would be
+/// impossible to notice, and a value stored twice is a value that will
+/// eventually differ from itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisWindow {
+    /// Analysis window in µs — must match the training window.
+    #[serde(default = "default_window_us")]
+    pub window_us: u64,
+    /// Emission period in µs of stream time.
+    #[serde(default = "default_hop_us")]
+    pub hop_us: u64,
+}
+
+fn default_window_us() -> u64 {
+    DEFAULT_WINDOW_US
+}
+
+fn default_hop_us() -> u64 {
+    DEFAULT_HOP_US
+}
+
+impl AnalysisWindow {
+    /// Checks that the geometry is usable.
+    ///
+    /// # Errors
+    ///
+    /// [`ModelError::Tuning`] when either value is zero.
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if self.window_us == 0 || self.hop_us == 0 {
+            return Err(ModelError::Tuning(
+                "the analysis window and hop must both be positive".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
 
 /// Largest bundle accepted, uncompressed.
 ///
@@ -75,8 +129,7 @@ pub struct StoredModel {
 pub struct StagedBundle {
     /// Where the candidate model was written.
     pub model_path: PathBuf,
-    /// The tuning it was trained under.
-    pub tuning: SiteTuning,
+    pub analysis: AnalysisWindow,
     /// What it says about itself, when it says anything.
     pub manifest: Option<Manifest>,
 }
@@ -116,7 +169,7 @@ pub fn stage(archive: &[u8], staging: &Path) -> Result<StagedBundle, ModelError>
         {
             return Err(ModelError::UnexpectedMember(name.into_owned()));
         }
-        if name != BUNDLE_MODEL && name != BUNDLE_SITE && name != BUNDLE_MANIFEST {
+        if name != BUNDLE_MODEL && name != BUNDLE_ANALYSIS && name != BUNDLE_MANIFEST {
             continue;
         }
         if entry.size() > MAX_MEMBER_BYTES {
@@ -133,13 +186,11 @@ pub fn stage(archive: &[u8], staging: &Path) -> Result<StagedBundle, ModelError>
     if !model_path.is_file() {
         return Err(ModelError::MissingMember(BUNDLE_MODEL));
     }
-    let site = std::fs::read(staging.join(BUNDLE_SITE))
-        .map_err(|_| ModelError::MissingMember(BUNDLE_SITE))?;
-    let tuning: SiteTuning =
-        serde_json::from_slice(&site).map_err(|err| ModelError::Tuning(err.to_string()))?;
-    tuning
-        .validate()
-        .map_err(|err| ModelError::Tuning(err.to_string()))?;
+    let geometry = std::fs::read(staging.join(BUNDLE_ANALYSIS))
+        .map_err(|_| ModelError::MissingMember(BUNDLE_ANALYSIS))?;
+    let analysis: AnalysisWindow =
+        serde_json::from_slice(&geometry).map_err(|err| ModelError::Tuning(err.to_string()))?;
+    analysis.validate()?;
 
     // Absent rather than fatal: an older bundle predates the manifest, and
     // refusing it would strand a model that works.
@@ -149,7 +200,7 @@ pub fn stage(archive: &[u8], staging: &Path) -> Result<StagedBundle, ModelError>
 
     Ok(StagedBundle {
         model_path,
-        tuning,
+        analysis,
         manifest,
     })
 }
@@ -167,13 +218,17 @@ pub fn stage(archive: &[u8], staging: &Path) -> Result<StagedBundle, ModelError>
 pub fn check(bundle: &StagedBundle, rx_nodes: Vec<String>) -> Result<(), ModelError> {
     let model = DensityModel::load(&bundle.model_path)
         .map_err(|err| ModelError::Unusable(err.to_string()))?;
+    // What is checked here is the analysis geometry and the receiver count.
+    // The wait tuning belongs to the site and has no bearing on whether a
+    // model fits, so a placeholder stands in rather than a value invented
+    // here and then mistaken for the site's own.
     LivePipeline::new(
         model,
         LiveConfig {
-            window_us: bundle.tuning.window_us,
-            hop_us: bundle.tuning.hop_us,
+            window_us: bundle.analysis.window_us,
+            hop_us: bundle.analysis.hop_us,
             rx_nodes,
-            wait: bundle.tuning.wait_config(),
+            wait: PLACEHOLDER_WAIT,
         },
     )
     .map(|_| ())
@@ -186,7 +241,7 @@ pub fn library_dir(data_dir: &Path) -> PathBuf {
 }
 
 /// Files an appliance keeps for each model it holds.
-const KEPT: [&str; 3] = [BUNDLE_MODEL, BUNDLE_SITE, BUNDLE_MANIFEST];
+const KEPT: [&str; 3] = [BUNDLE_MODEL, BUNDLE_ANALYSIS, BUNDLE_MANIFEST];
 
 /// Files a staged bundle into the library and returns its handle.
 ///
@@ -224,20 +279,31 @@ pub fn store(bundle: &StagedBundle, data_dir: &Path, now_us: u64) -> Result<Stri
 /// # Errors
 ///
 /// [`ModelError::Unknown`] if no such model is held, or a copy failure.
-pub fn activate(data_dir: &Path, id: &str) -> Result<SiteTuning, ModelError> {
+pub fn activate(data_dir: &Path, id: &str) -> Result<(), ModelError> {
     let dir = library_dir(data_dir).join(id);
     if !dir.is_dir() {
         return Err(ModelError::Unknown(id.to_owned()));
     }
-    let tuning: SiteTuning = serde_json::from_slice(
-        &std::fs::read(dir.join(BUNDLE_SITE))
-            .map_err(|err| ModelError::Staging(err.to_string()))?,
-    )
-    .map_err(|err| ModelError::Tuning(err.to_string()))?;
-
     std::fs::copy(dir.join(BUNDLE_MODEL), data_dir.join(crate::ACTIVE_MODEL))
         .map_err(|err| ModelError::Staging(err.to_string()))?;
-    Ok(tuning)
+    std::fs::copy(
+        dir.join(BUNDLE_ANALYSIS),
+        data_dir.join(crate::ACTIVE_ANALYSIS),
+    )
+    .map_err(|err| ModelError::Staging(err.to_string()))?;
+    Ok(())
+}
+
+/// Reads the analysis geometry of the model in service.
+///
+/// # Errors
+///
+/// [`ModelError::Tuning`] when the file is missing or malformed.
+pub fn active_analysis(data_dir: &Path) -> Result<AnalysisWindow, ModelError> {
+    let path = data_dir.join(crate::ACTIVE_ANALYSIS);
+    let bytes = std::fs::read(&path)
+        .map_err(|err| ModelError::Tuning(format!("{}: {err}", path.display())))?;
+    serde_json::from_slice(&bytes).map_err(|err| ModelError::Tuning(err.to_string()))
 }
 
 /// Gives a stored model a new name.
@@ -304,8 +370,8 @@ pub fn library(data_dir: &Path, active: Option<&str>) -> Vec<StoredModel> {
 
 fn describe(dir: &Path, active: Option<&str>) -> Option<StoredModel> {
     let id = dir.file_name()?.to_string_lossy().into_owned();
-    let tuning: SiteTuning =
-        serde_json::from_slice(&std::fs::read(dir.join(BUNDLE_SITE)).ok()?).ok()?;
+    let analysis: AnalysisWindow =
+        serde_json::from_slice(&std::fs::read(dir.join(BUNDLE_ANALYSIS)).ok()?).ok()?;
     let manifest: Option<Manifest> = std::fs::read(dir.join(BUNDLE_MANIFEST))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok());
@@ -316,7 +382,7 @@ fn describe(dir: &Path, active: Option<&str>) -> Option<StoredModel> {
     Some(StoredModel {
         active: active == Some(id.as_str()),
         imported_at_us: imported_at(&id).unwrap_or(0),
-        window_us: tuning.window_us,
+        window_us: analysis.window_us,
         receivers,
         manifest,
         id,
@@ -408,13 +474,16 @@ mod tests {
     #[test]
     fn a_bundle_yields_its_model_and_the_tuning_it_was_trained_under() {
         let dir = tempfile::tempdir().unwrap();
-        let bytes = archive(&[(BUNDLE_MODEL, &real_model()), (BUNDLE_SITE, &site_json())]);
+        let bytes = archive(&[
+            (BUNDLE_MODEL, &real_model()),
+            (BUNDLE_ANALYSIS, &site_json()),
+        ]);
 
         let staged = stage(&bytes, &dir.path().join("staging")).unwrap();
 
         assert!(staged.model_path.is_file());
         // The value that must never be chosen apart from the run.
-        assert_eq!(staged.tuning.window_us, 5_000_000);
+        assert_eq!(staged.analysis.window_us, 5_000_000);
     }
 
     /// A tar entry written byte by byte, so a name the `tar` builder refuses
@@ -478,7 +547,7 @@ mod tests {
             ("._model.onnx", b"apple metadata"),
             ("README.txt", b"trained 2026-08-01"),
             (BUNDLE_MODEL, &real_model()),
-            (BUNDLE_SITE, &site_json()),
+            (BUNDLE_ANALYSIS, &site_json()),
         ]);
 
         let staged = stage(&bytes, &dir.path().join("staging")).unwrap();
@@ -497,11 +566,11 @@ mod tests {
         );
         assert!(matches!(
             without_tuning,
-            Err(ModelError::MissingMember(BUNDLE_SITE))
+            Err(ModelError::MissingMember(BUNDLE_ANALYSIS))
         ));
 
         let without_model = stage(
-            &archive(&[(BUNDLE_SITE, &site_json())]),
+            &archive(&[(BUNDLE_ANALYSIS, &site_json())]),
             &dir.path().join("b"),
         );
         assert!(matches!(
@@ -518,17 +587,11 @@ mod tests {
     }
 
     #[test]
-    fn unusable_tuning_is_refused_before_anything_is_activated() {
+    fn an_unusable_analysis_window_is_refused_before_anything_is_activated() {
         let dir = tempfile::tempdir().unwrap();
         let bytes = archive(&[
             (BUNDLE_MODEL, &real_model()),
-            (
-                BUNDLE_SITE,
-                br#"{"people_per_class":[0.0,4.0,12.0,25.0],
-                "service_rate_per_min":0.0,"smoothing_tau_s":30.0,
-                "hysteresis_margin":0.15,"min_confidence":0.5,
-                "window_us":5000000,"hop_us":1000000}"#,
-            ),
+            (BUNDLE_ANALYSIS, br#"{"window_us":0,"hop_us":1000000}"#),
         ]);
 
         assert!(matches!(
@@ -542,7 +605,10 @@ mod tests {
         // The fixture model was trained for one receiver; an appliance with
         // two of them must not take it, and must say why.
         let dir = tempfile::tempdir().unwrap();
-        let bytes = archive(&[(BUNDLE_MODEL, &real_model()), (BUNDLE_SITE, &site_json())]);
+        let bytes = archive(&[
+            (BUNDLE_MODEL, &real_model()),
+            (BUNDLE_ANALYSIS, &site_json()),
+        ]);
         let staged = stage(&bytes, &dir.path().join("staging")).unwrap();
 
         let outcome = check(&staged, vec!["rx-1".into(), "rx-2".into()]);
@@ -560,7 +626,7 @@ mod tests {
     fn staged_at(data: &std::path::Path, name: &str) -> StagedBundle {
         let bytes = archive(&[
             (BUNDLE_MODEL, &real_model()),
-            (BUNDLE_SITE, &site_json()),
+            (BUNDLE_ANALYSIS, &site_json()),
             (
                 BUNDLE_MANIFEST,
                 format!(r#"{{"name":"{name}","trained_at":"2026-08-12","sessions":3}}"#).as_bytes(),
@@ -627,9 +693,9 @@ mod tests {
         )
         .unwrap();
 
-        let tuning = activate(data, &id).unwrap();
+        activate(data, &id).unwrap();
 
-        assert_eq!(tuning.window_us, 5_000_000);
+        assert_eq!(active_analysis(data).unwrap().window_us, 5_000_000);
         assert!(data.join(crate::ACTIVE_MODEL).is_file());
     }
 
@@ -652,7 +718,10 @@ mod tests {
         // moment it arrived.
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path();
-        let bytes = archive(&[(BUNDLE_MODEL, &real_model()), (BUNDLE_SITE, &site_json())]);
+        let bytes = archive(&[
+            (BUNDLE_MODEL, &real_model()),
+            (BUNDLE_ANALYSIS, &site_json()),
+        ]);
         let bundle = stage(&bytes, &data.join("staging")).unwrap();
         assert!(bundle.manifest.is_none());
 
@@ -668,7 +737,7 @@ mod tests {
         let data = dir.path();
         let bytes = archive(&[
             (BUNDLE_MODEL, &real_model()),
-            (BUNDLE_SITE, &site_json()),
+            (BUNDLE_ANALYSIS, &site_json()),
             (
                 BUNDLE_MANIFEST,
                 br#"{"name":"campagne-juin","trained_at":"2026-06-24","sessions":3}"#,
@@ -693,7 +762,10 @@ mod tests {
     fn renaming_an_anonymous_bundle_gives_it_a_manifest() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path();
-        let bytes = archive(&[(BUNDLE_MODEL, &real_model()), (BUNDLE_SITE, &site_json())]);
+        let bytes = archive(&[
+            (BUNDLE_MODEL, &real_model()),
+            (BUNDLE_ANALYSIS, &site_json()),
+        ]);
         let bundle = stage(&bytes, &data.join("staging")).unwrap();
         let id = store(&bundle, data, 1_785_600_000_000_000).unwrap();
 

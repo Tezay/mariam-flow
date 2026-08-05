@@ -95,3 +95,17 @@ export function modelName(model: { id: string; manifest?: { name: string } }): s
   const declared = model.manifest?.name?.trim();
   return declared && declared.length > 0 ? declared : model.id;
 }
+
+/**
+ * Whether the queue description holds enough to be sent.
+ *
+ * Mirrors what the appliance's estimator refuses: a service rate must be
+ * positive, and a head count cannot be negative. Nothing is defaulted — a
+ * count nobody entered would produce waiting times that look measured.
+ */
+export function queueComplete(people: (number | null)[], ratePerMin: number | null): boolean {
+  if (people.length !== 4 || people.some((count) => count === null || !(count >= 0))) {
+    return false;
+  }
+  return ratePerMin !== null && ratePerMin > 0;
+}

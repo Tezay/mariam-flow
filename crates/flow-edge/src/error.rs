@@ -95,7 +95,7 @@ pub enum ConfigError {
     /// A site-tuning value is unusable (delegated to the wait estimator,
     /// the single source of truth for what a valid tuning is).
     #[error("site tuning: {0}")]
-    SiteTuning(String),
+    WaitTuning(String),
     /// The service schedule is unusable.
     #[error("service schedule: {0}")]
     Service(#[from] ScheduleError),
