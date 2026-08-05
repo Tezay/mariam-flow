@@ -9,10 +9,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   rust:
-    name: Rust (fmt, clippy, tests, cross-check)
+    name: Rust (fmt, clippy, tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -27,18 +31,33 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
+
+  # Its own job because it reaches an Ubuntu mirror: when that is slow, the
+  # verdict on formatting, lints and tests is already in and must not wait
+  # behind it.
+  cross-compile:
+    name: Cross-compilation (aarch64 Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Materialise the pinned toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Install aarch64 cross C toolchain
         # tract-linalg builds C/assembly sources at compile time, so even
         # `cargo check` for the edge target needs a cross C compiler.
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      - name: Cross-check (aarch64 Linux edge target)
-        run: cargo check --workspace --target aarch64-unknown-linux-gnu
+      - name: Check the workspace for the edge target
+        run: cargo check --workspace --locked --target aarch64-unknown-linux-gnu
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
@@ -46,6 +65,7 @@ jobs:
   dashboard:
     name: Dashboard (format, lint, types, tests, build)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: dashboard
@@ -93,11 +113,12 @@ jobs:
 
       - name: Check the dashboard embeds into the daemon
         working-directory: .
-        run: cargo check -p flow-edge --features dashboard
+        run: cargo check -p flow-edge --features dashboard --locked
 
   python:
     name: Python (ruff, pyright, pytest)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: ml
@@ -127,6 +148,7 @@ jobs:
   supply-chain:
     name: Supply chain (advisories, licences, sources)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
