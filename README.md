@@ -43,7 +43,7 @@ picture.
 | `dashboard/` | Svelte single-page dashboard, embedded in the daemon |
 | `ml/` | Python package: features, training, evaluation, ONNX export, reports |
 | `firmware/csi-node` | ESP32-C6 firmware based on `espressif/esp-csi` |
-| `docs/` | Architecture and dashboard documentation, and ADRs |
+| `docs/` | Architecture, dashboard and local-run documentation, and ADRs |
 
 ## Getting started
 
@@ -78,6 +78,11 @@ build turns it on:
 ```sh
 cargo build --release -p flow-edge --features dashboard
 ```
+
+The appliance carries no board-specific dependency and runs on a development
+machine with no sensors attached — provisioning, installation, capture and
+the dashboard included. See
+[docs/running-locally.md](docs/running-locally.md).
 
 ## Project status
 

@@ -96,6 +96,26 @@ struct ProvisionArgs {
     #[arg(short, long, default_value = "/var/lib/mariam-flow")]
     data_dir: PathBuf,
 
+    /// Also write this unit's factory configuration here.
+    #[arg(short, long, requires_all = ["kit_id", "ap_ssid", "ap_passphrase"])]
+    config: Option<PathBuf>,
+
+    /// Kit identifier.
+    #[arg(long, requires = "config")]
+    kit_id: Option<String>,
+
+    /// Network name the sensor access point announces.
+    #[arg(long, requires = "config")]
+    ap_ssid: Option<String>,
+
+    /// WPA2 passphrase of the sensor access point, 8..=63 characters.
+    ///
+    /// Supplied rather than generated: the nodes are flashed with it before
+    /// the appliance is provisioned, and one invented here would leave them
+    /// unable to join.
+    #[arg(long, requires = "config")]
+    ap_passphrase: Option<String>,
+
     /// Replace an existing credential.
     ///
     /// Off by default: re-provisioning a unit that is already in service
@@ -331,6 +351,29 @@ fn provision(args: &ProvisionArgs) -> Result<(), Box<dyn Error>> {
             args.data_dir.display()
         )
         .into());
+    }
+    if let Some(path) = &args.config
+        && !args.force
+        && path.exists()
+    {
+        return Err(format!(
+            "{} already exists; pass --force to replace it",
+            path.display()
+        )
+        .into());
+    }
+
+    // Written before the credential: a refused configuration must not leave a
+    // unit holding a secret that has already been printed and cannot be read
+    // back.
+    if let Some(path) = &args.config {
+        let (Some(kit_id), Some(ssid), Some(passphrase)) =
+            (&args.kit_id, &args.ap_ssid, &args.ap_passphrase)
+        else {
+            return Err("--config needs --kit-id, --ap-ssid and --ap-passphrase".into());
+        };
+        ApplianceConfig::factory(kit_id, ssid, passphrase).save(path)?;
+        eprintln!("factory configuration written to {}", path.display());
     }
 
     let secret = DeviceSecret::generate();
