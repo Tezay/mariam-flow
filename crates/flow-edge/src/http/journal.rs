@@ -128,8 +128,6 @@ pub(super) fn csv_row(event: &RecordedEvent) -> String {
     )
 }
 
-/// Quotes a field so that a comma, a quote or a newline in an operator's own
-/// words cannot end the field early — RFC 4180, doubling the quote.
 /// The instant an event carries, in UTC and in a form a spreadsheet sorts.
 ///
 /// UTC rather than the site's zone: an export is read elsewhere, and a naive
@@ -143,6 +141,8 @@ pub(super) fn utc_instant(ts_us: u64) -> String {
     )
 }
 
+/// Quotes a field so that a comma, a quote or a newline in an operator's own
+/// words cannot end the field early — RFC 4180, doubling the quote.
 pub(super) fn csv_field(value: &str) -> String {
     if value.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", value.replace('"', "\"\""))
