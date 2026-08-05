@@ -23,6 +23,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::edge_state::{EdgeState, WriteRejection};
+use crate::system::SystemReport;
 use crate::views::StatusResponse;
 
 #[cfg(test)]
@@ -34,19 +35,20 @@ mod install;
 mod journal;
 mod live;
 mod models;
+mod nodes;
+mod schedule;
 
 use self::auth::{login, logout, require_session, security_headers};
 use self::calibration::{
     add_label, delete_session, rename_session, session_archive, sessions, set_classes,
     start_calibration, stop_calibration,
 };
-use self::install::{
-    adopt_hardware, describe_node, discovery, service_window, set_installation, set_network_survey,
-    set_nodes, set_service_window, set_site, set_uplink, system,
-};
+use self::install::{set_installation, set_network_survey, set_site, set_uplink};
 use self::journal::{events, events_csv};
 use self::live::{estimates, live, public_estimate};
 use self::models::{MAX_BUNDLE_BYTES, forget_model, import_model, models, rename_model, use_model};
+use self::nodes::{adopt_hardware, describe_node, discovery, set_nodes};
+use self::schedule::{service_window, set_service_window};
 
 /// Builds the appliance router.
 ///
@@ -152,6 +154,14 @@ pub(super) async fn health() -> Json<Health> {
 
 pub(super) async fn status(State(state): State<EdgeState>) -> Json<StatusResponse> {
     Json(state.status())
+}
+
+/// Reports what the machine says about itself.
+///
+/// Read on each request rather than cached: uptime, load and temperature are
+/// the point, and a stale temperature is worse than none.
+pub(super) async fn system() -> Json<SystemReport> {
+    Json(SystemReport::read())
 }
 
 /// A new name for something the appliance holds.

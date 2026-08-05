@@ -25,6 +25,8 @@ mod install;
 mod journal;
 mod live;
 mod models;
+mod nodes;
+mod schedule;
 
 const AP_PASSPHRASE: &str = "correct-horse-battery";
 

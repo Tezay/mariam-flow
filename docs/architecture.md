@@ -452,11 +452,18 @@ calibration session an installer is halfway through.
 
 ### HTTP surface
 
-The surface is **denied by default** (ADR 0011). Exactly two routes are
-open: `GET /health`, a liveness probe that reveals nothing, and
-`POST /api/session`, the login itself. Protected routes sit behind the
-session guard as a group, so a route added there is protected by
-construction rather than by remembering to protect it.
+The surface is **denied by default** (ADR 0011). Exactly three routes are
+open: `GET /health`, a liveness probe that reveals nothing;
+`POST /api/session`, the login itself; and `GET /estimate`, the public
+estimate. Protected routes sit behind the session guard as a group, so a
+route added there is protected by construction rather than by remembering to
+protect it.
+
+The handlers are grouped by subject — the session, the installation, the
+sensing nodes, the service schedule, calibration, models, the journal, the
+live stream — each in its own module beside the tests that exercise it
+through the router. The router itself is the one place that says which of
+them is protected.
 
 Writes follow one rule: the candidate configuration is validated before the
 save that would validate it anyway, because only that error names the field at
