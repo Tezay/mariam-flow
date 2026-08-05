@@ -49,13 +49,16 @@ async fn what_the_classes_mean_travels_with_the_session() {
     let cookie = session_of(&state).await;
     put(
         &state,
-        "/api/classes",
+        "/api/queue",
         &cookie,
         json!({
-            "empty": "personne",
-            "low": "quelques personnes",
-            "medium": "file constituée",
-            "saturated": "file au-delà de la porte",
+            "classes": {
+                "empty": "personne",
+                "low": "quelques personnes",
+                "medium": "file constituée",
+                "saturated": "file au-delà de la porte",
+            },
+            "wait": { "people_per_class": [0.0, 4.0, 12.0, 25.0], "service_rate_per_min": 6.0 },
         }),
     )
     .await;

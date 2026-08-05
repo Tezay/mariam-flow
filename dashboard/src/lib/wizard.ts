@@ -10,7 +10,7 @@ import { type Proposal } from './api/nodes';
 import { type SensingNode, type Stage, type Status } from './api/status';
 
 /** The guided steps, in order. `complete` is the end, not a step. */
-export const STEPS: Stage[] = ['site', 'nodes', 'network', 'calibration'];
+export const STEPS: Stage[] = ['site', 'nodes', 'network', 'queue', 'calibration'];
 
 /** Receivers the system is designed around: two, framing the queue. */
 export const EXPECTED_RECEIVERS = 2;
@@ -21,6 +21,7 @@ export function completion(status: Status): Record<Stage, boolean> {
     site: status.readiness.site_named,
     nodes: status.readiness.nodes_paired,
     network: status.readiness.uplink_decided,
+    queue: status.readiness.queue_described,
     calibration: status.readiness.site_captured,
     complete: false,
   };

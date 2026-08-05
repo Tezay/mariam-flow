@@ -1,13 +1,13 @@
 """The deployable output of a training run.
 
-An appliance needs two things to estimate, and they are produced by the same
-run: the model, and the site tuning it was trained under. Shipping them apart
-is an invitation to pair a model with a window it was never trained on, which
-produces estimates that look plausible and are not.
+A model and the analysis geometry it was trained under are produced by the
+same run and ship together: pairing a model with a window it was never trained
+on produces estimates that look plausible and are not.
 
-The bundle is therefore a directory holding ``model.onnx`` and ``site.json``,
-both already canonical formats — ``site.json`` is what the laboratory tools
-read, and the appliance mirrors it field for field.
+What a site turns a density into a waiting time with is deliberately absent.
+Nothing in a training run counts heads, so how many people a class represents
+is a human observation — it is answered on the appliance and belongs to the
+site, not to the model.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import onnx
 from flow_ml.windows import DEFAULT_HOP_US, DEFAULT_WINDOW_US
 
 MODEL_FILE = "model.onnx"
-SITE_FILE = "site.json"
+ANALYSIS_FILE = "analysis.json"
 MANIFEST_FILE = "model.json"
 
 
@@ -44,46 +44,32 @@ class Manifest:
 
 
 @dataclass(frozen=True)
-class SiteTuning:
-    """What the appliance needs besides the weights.
+class AnalysisWindow:
+    """The geometry the run was trained under.
 
-    ``window_us`` and ``hop_us`` come from the training run and must never be
-    chosen independently of it. The rest are operational values a site can
-    revise from the dashboard without retraining.
+    Chosen by the training run and never independently of it: a model fed
+    windows of a different length sees a signal it was never shown.
     """
 
-    people_per_class: tuple[float, float, float, float]
-    service_rate_per_min: float
     window_us: int = DEFAULT_WINDOW_US
     hop_us: int = DEFAULT_HOP_US
-    smoothing_tau_s: float = 30.0
-    hysteresis_margin: float = 0.15
-    min_confidence: float = 0.5
 
     def as_dict(self) -> dict[str, object]:
-        """The `site.json` payload, field for field as the appliance reads it."""
-        return {
-            "people_per_class": list(self.people_per_class),
-            "service_rate_per_min": self.service_rate_per_min,
-            "smoothing_tau_s": self.smoothing_tau_s,
-            "hysteresis_margin": self.hysteresis_margin,
-            "min_confidence": self.min_confidence,
-            "window_us": self.window_us,
-            "hop_us": self.hop_us,
-        }
+        """The `analysis.json` payload, field for field as the appliance reads it."""
+        return {"window_us": self.window_us, "hop_us": self.hop_us}
 
 
 def write_bundle(
     out_dir: Path,
     model: onnx.ModelProto,
-    tuning: SiteTuning,
+    analysis: AnalysisWindow,
     manifest: Manifest,
 ) -> Path:
-    """Writes the model, its tuning and its manifest, and returns the directory."""
+    """Writes the model, its analysis geometry and its manifest."""
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / MODEL_FILE).write_bytes(model.SerializeToString())
-    (out_dir / SITE_FILE).write_text(
-        json.dumps(tuning.as_dict(), indent=2) + "\n", encoding="utf-8"
+    (out_dir / ANALYSIS_FILE).write_text(
+        json.dumps(analysis.as_dict(), indent=2) + "\n", encoding="utf-8"
     )
     (out_dir / MANIFEST_FILE).write_text(
         json.dumps(manifest.as_dict(), indent=2) + "\n", encoding="utf-8"
@@ -98,6 +84,6 @@ def archive_bundle(bundle_dir: Path, destination: Path) -> Path:
     the appliance reads two known names instead of guessing a prefix.
     """
     with tarfile.open(destination, "w:gz") as archive:
-        for name in (MODEL_FILE, SITE_FILE, MANIFEST_FILE):
+        for name in (MODEL_FILE, ANALYSIS_FILE, MANIFEST_FILE):
             archive.add(bundle_dir / name, arcname=name)
     return destination

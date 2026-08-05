@@ -12,10 +12,9 @@
 //! (write to a temporary file, then rename): a power cut during a write
 //! leaves the previous configuration intact rather than a truncated one.
 //!
-//! [`SiteTuning`] mirrors the `site.json` shape already consumed by
-//! `csi-infer`, field for field, so a tuning file produced
-//! during lab work can be pasted into the appliance configuration and vice
-//! versa.
+//! [`WaitTuning`] holds what the operator answers about their queue. The
+//! analysis geometry a model was trained under is not here: it travels with
+//! the model, and is read from the bundle in service.
 
 use std::collections::HashSet;
 use std::net::IpAddr;
@@ -45,6 +44,10 @@ pub const DEFAULT_WINDOW_US: u64 = 5_000_000;
 /// Default emission period, in µs of stream time.
 pub const DEFAULT_HOP_US: u64 = 1_000_000;
 
+pub(crate) const DEFAULT_SMOOTHING_TAU_S: f32 = 30.0;
+pub(crate) const DEFAULT_HYSTERESIS_MARGIN: f32 = 0.15;
+pub(crate) const DEFAULT_MIN_CONFIDENCE: f32 = 0.5;
+
 /// The complete persisted configuration of one appliance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ApplianceConfig {
@@ -55,10 +58,10 @@ pub struct ApplianceConfig {
     /// Sensing nodes paired with this appliance.
     #[serde(default)]
     pub nodes: Vec<PairedNode>,
-    /// Per-site wait-estimation parameters, absent until the site is
-    /// calibrated.
+    /// How this site turns a density into a waiting time, absent until the
+    /// installer has described its queue.
     #[serde(default)]
-    pub site: Option<SiteTuning>,
+    pub wait: Option<WaitTuning>,
     /// What each density class means at this site.
     ///
     /// Decided once per site rather than per capture: two people labelling
@@ -284,44 +287,46 @@ pub struct PairedNode {
     pub position: Option<String>,
 }
 
-/// Per-site wait-estimation parameters.
+/// What this site turns a density into a waiting time with.
 ///
-/// Field-for-field mirror of the `site.json` files consumed by
-/// `csi-infer`; [`SiteTuning::wait_config`] converts it to
-/// the domain type owned by `flow-infer`.
+/// Answered by the operator, never by a training run: nothing in a labelled
+/// capture counts heads, so how many people a class represents is a human
+/// observation. The analysis geometry a model was trained under is a
+/// different thing and travels with the model.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct SiteTuning {
-    /// Calibrated people count per density class, in class order.
+pub struct WaitTuning {
+    /// People counted in the queue at each density class, in class order.
     pub people_per_class: [f32; 4],
     /// Service rate λ, in people served per minute.
     pub service_rate_per_min: f32,
     /// Time constant τ of the output smoothing, in seconds.
+    #[serde(default = "default_smoothing_tau_s")]
     pub smoothing_tau_s: f32,
     /// Hysteresis half-width on the 0–3 level scale.
+    #[serde(default = "default_hysteresis_margin")]
     pub hysteresis_margin: f32,
     /// Confidence below which an estimate is flagged unreliable.
+    #[serde(default = "default_min_confidence")]
     pub min_confidence: f32,
-    /// Analysis window in µs — must match the training window.
-    #[serde(default = "default_window_us")]
-    pub window_us: u64,
-    /// Emission period in µs of stream time.
-    #[serde(default = "default_hop_us")]
-    pub hop_us: u64,
 }
 
 fn default_sensor_channel() -> u8 {
     DEFAULT_SENSOR_CHANNEL
 }
 
-fn default_window_us() -> u64 {
-    DEFAULT_WINDOW_US
+fn default_smoothing_tau_s() -> f32 {
+    DEFAULT_SMOOTHING_TAU_S
 }
 
-fn default_hop_us() -> u64 {
-    DEFAULT_HOP_US
+fn default_hysteresis_margin() -> f32 {
+    DEFAULT_HYSTERESIS_MARGIN
 }
 
-impl SiteTuning {
+fn default_min_confidence() -> f32 {
+    DEFAULT_MIN_CONFIDENCE
+}
+
+impl WaitTuning {
     /// Converts to the wait-estimator configuration owned by `flow-infer`.
     #[must_use]
     pub fn wait_config(&self) -> WaitConfig {
@@ -342,17 +347,10 @@ impl SiteTuning {
     ///
     /// # Errors
     ///
-    /// [`ConfigError::SiteTuning`] for a rejected estimator parameter, or
-    /// [`ConfigError::NotPositive`] for a zero window or hop.
+    /// [`ConfigError::WaitTuning`] for a rejected estimator parameter.
     pub fn validate(&self) -> Result<(), ConfigError> {
         WaitEstimator::new(self.wait_config())
-            .map_err(|err| ConfigError::SiteTuning(err.to_string()))?;
-        if self.window_us == 0 {
-            return Err(ConfigError::NotPositive { field: "window_us" });
-        }
-        if self.hop_us == 0 {
-            return Err(ConfigError::NotPositive { field: "hop_us" });
-        }
+            .map_err(|err| ConfigError::WaitTuning(err.to_string()))?;
         Ok(())
     }
 }
@@ -383,7 +381,7 @@ impl ApplianceConfig {
             classes: None,
             active_model: None,
             nodes: Vec::new(),
-            site: None,
+            wait: None,
             service: None,
             onboarding_completed: false,
         }
@@ -428,8 +426,8 @@ impl ApplianceConfig {
         }
         self.network.validate()?;
         self.validate_nodes()?;
-        if let Some(site) = &self.site {
-            site.validate()?;
+        if let Some(wait) = &self.wait {
+            wait.validate()?;
         }
         if let Some(service) = &self.service {
             service.validate().map_err(ConfigError::Service)?;
@@ -632,15 +630,13 @@ mod tests {
         );
     }
 
-    fn tuning() -> SiteTuning {
-        SiteTuning {
+    fn tuning() -> WaitTuning {
+        WaitTuning {
             people_per_class: [0.0, 4.0, 12.0, 25.0],
             service_rate_per_min: 6.0,
             smoothing_tau_s: 30.0,
             hysteresis_margin: 0.15,
             min_confidence: 0.5,
-            window_us: DEFAULT_WINDOW_US,
-            hop_us: DEFAULT_HOP_US,
         }
     }
 
@@ -814,17 +810,8 @@ mod tests {
         let mut config = factory();
         let mut bad = tuning();
         bad.service_rate_per_min = 0.0;
-        config.site = Some(bad);
-        assert!(matches!(config.validate(), Err(ConfigError::SiteTuning(_))));
-
-        let mut config = factory();
-        let mut bad = tuning();
-        bad.hop_us = 0;
-        config.site = Some(bad);
-        assert_eq!(
-            config.validate(),
-            Err(ConfigError::NotPositive { field: "hop_us" })
-        );
+        config.wait = Some(bad);
+        assert!(matches!(config.validate(), Err(ConfigError::WaitTuning(_))));
     }
 
     #[test]
@@ -859,7 +846,7 @@ mod tests {
                 Some("192.168.4.51"),
             ),
         ];
-        config.site = Some(tuning());
+        config.wait = Some(tuning());
 
         config.save(&path).unwrap();
         assert_eq!(ApplianceConfig::load(&path).unwrap(), config);

@@ -218,11 +218,31 @@ export const fr: Messages = {
   'model.import': 'Importer et activer',
   'model.importing': 'Vérification…',
 
-  'cal.classesLead':
-    'Décidé une fois pour le site. Deux personnes qui labellisent la même file doivent placer les frontières au même endroit.',
-  'cal.classesSaved': 'Descriptions enregistrées.',
   'cal.wizardLead':
-    "Vous allez marquer la file en direct. Placez-vous face à elle, appuyez sur le niveau qui correspond à ce que vous voyez, et corrigez dès qu'il change. Comptez une vingtaine de minutes.",
+    "Le boîtier ne sait pas encore distinguer une file chargée d'une file vide ; il faut la lui montrer. Placez-vous face à la file, appuyez sur le niveau qui correspond à ce que vous voyez, et corrigez dès qu'il change. Enregistrez au moment le plus chargé possible — ce qu'il ne voit jamais, il ne l'apprend pas. Comptez une vingtaine de minutes.",
+  'queue.lead':
+    'Deux réponses par niveau : à quoi ressemble la file, et combien de personnes cela fait.',
+  'queue.looksLike': "Ce qu'on voit",
+  'queue.people': 'Personnes',
+  'queue.peopleAt': 'Personnes dans la file au niveau {level}',
+  'queue.rate': 'À quelle vitesse la file est-elle servie ?',
+  'queue.ratePerMinute': 'personnes par minute',
+  'queue.rateHint':
+    'Chronométrez une personne à partir du moment où elle arrive à la caisse. Six par minute est un ordre de grandeur courant en restauration collective.',
+  'queue.saved': 'Description de la file enregistrée.',
+  'queue.advanced': 'Avancé',
+  'queue.smoothing': 'Lissage (secondes)',
+  'queue.hysteresis': 'Hystérésis de niveau',
+  'queue.confidence': 'Seuil de fiabilité',
+  'queue.hint.empty': 'personne dans la file',
+  'queue.hint.low': 'quelques personnes',
+  'queue.hint.medium': 'la file atteint les colonnes',
+  'queue.hint.saturated': 'la file sort du bâtiment',
+  'queue.wizardLead':
+    "Le boîtier mesure l'affluence de la file, pas le temps d'attente. Ce sont ces réponses qui transforment l'une en l'autre.",
+  'settings.queue': "File d'attente",
+  'pair.placement':
+    "Placez l'émetteur d'un côté de la file et les deux récepteurs de l'autre, pour que chaque trajet radio la traverse. Même hauteur, environ un mètre, antennes dégagées, sur un support non métallique — deux à quatre mètres d'écart, sans obstacle plein entre eux.",
   'cal.environment': "Ce qu'on enregistre",
   'cal.environmentHint': 'Par exemple : hall principal, service du midi, jour de pluie.',
   'cal.positions': 'Où sont les capteurs',
@@ -275,7 +295,6 @@ export const fr: Messages = {
   'system.memoryValue': '{available} Mo libres sur {total} Mo',
   'settings.site': 'Site',
   'settings.network': 'Réseau',
-  'settings.levels': 'Niveaux de densité',
   'settings.hours': 'Horaires de service',
   'settings.system': 'Système',
   'settings.back': 'Réglages',
@@ -359,12 +378,15 @@ export const fr: Messages = {
   'wizard.stage.site': 'Nommer le site',
   'wizard.stage.nodes': 'Brancher les capteurs',
   'wizard.stage.network': 'Connecter au réseau',
+  'wizard.stage.queue': 'Décrire la file',
   'wizard.stage.calibration': 'Calibrer',
   'wizard.stage.complete': 'Prêt',
   'wizard.stage.site.lead': 'Donnez à cette installation un nom que vous reconnaîtrez plus tard.',
   'wizard.stage.nodes.lead': 'Alimentez les trois capteurs et attendez qu’ils apparaissent.',
   'wizard.stage.network.lead':
     'Choisissez comment le boîtier rejoint le réseau du site, ou restez hors ligne.',
+  'wizard.stage.queue.lead':
+    'À quoi ressemble la file à chaque niveau, et à quelle vitesse elle est servie.',
   'wizard.stage.calibration.lead':
     'Apprenez au boîtier à quoi ressemble une file chargée sur ce site.',
   'wizard.stage.complete.lead': 'Tout est en place. Le boîtier est prêt.',

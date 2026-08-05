@@ -71,13 +71,13 @@ pub(super) fn put_in_service(
     id: &str,
     named: &str,
 ) -> Response {
-    let tuning = match model::activate(data_dir, id) {
-        Ok(tuning) => tuning,
-        Err(err) => return error_response(StatusCode::CONFLICT, &err.to_string()),
-    };
+    if let Err(err) = model::activate(data_dir, id) {
+        return error_response(StatusCode::CONFLICT, &err.to_string());
+    }
     let handle = id.to_owned();
+    // Only which model is in service: what the site turns a density into a
+    // waiting time with is the operator's and is never written from here.
     if let Err(rejection) = state.write_config(|config| {
-        config.site = Some(tuning);
         config.active_model = Some(handle);
     }) {
         return refusal(&rejection);

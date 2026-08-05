@@ -27,6 +27,7 @@ const STATUS: Status = {
     site_named: true,
     nodes_paired: true,
     uplink_decided: false,
+    queue_described: true,
     site_captured: false,
     model_ready: false,
   },

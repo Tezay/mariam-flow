@@ -184,7 +184,7 @@ async fn the_survey_cannot_be_written_without_a_session() {
 
 #[tokio::test]
 async fn reopening_the_uplink_question_is_not_the_same_as_going_offline() {
-    let (state, _dir) = writable();
+    let (state, _dir) = writable_with(factory(), false);
     let cookie = session_of(&state).await;
 
     let (status, body) = put(&state, "/api/uplink", &cookie, serde_json::Value::Null).await;
@@ -273,4 +273,72 @@ async fn the_onboarding_writes_are_closed_to_anonymous_callers() {
         let (status, _, _) = send(&state, "PUT", path, None, Some(body.to_string()), 10).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{path} is open");
     }
+}
+
+#[tokio::test]
+async fn describing_the_queue_stores_the_words_and_the_counts_together() {
+    let (state, _dir) = writable();
+    let cookie = session_of(&state).await;
+
+    let (status, body) = put(
+        &state,
+        "/api/queue",
+        &cookie,
+        json!({
+            "classes": { "empty": "personne", "low": "quelques-uns",
+                         "medium": "jusqu'aux colonnes", "saturated": "dehors" },
+            "wait": { "people_per_class": [0.0, 4.0, 12.0, 25.0], "service_rate_per_min": 6.0 },
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["readiness"]["queue_described"], json!(true));
+    assert_eq!(body["classes"]["medium"], json!("jusqu'aux colonnes"));
+    assert_eq!(body["wait"]["service_rate_per_min"], json!(6.0));
+}
+
+#[tokio::test]
+async fn a_queue_that_is_never_served_is_refused() {
+    // Dividing a head count by zero people per minute is not a long wait, it
+    // is no answer at all.
+    let (state, _dir) = writable_with(factory(), false);
+    let cookie = session_of(&state).await;
+
+    let (status, _) = put(
+        &state,
+        "/api/queue",
+        &cookie,
+        json!({
+            "wait": { "people_per_class": [0.0, 4.0, 12.0, 25.0], "service_rate_per_min": 0.0 },
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!state.status().readiness.queue_described);
+}
+
+#[tokio::test]
+async fn an_installation_stops_at_the_queue_until_it_is_described() {
+    // Without this step an appliance could finish installing and never turn a
+    // density into a waiting time.
+    let (state, _dir) = writable_with(factory(), false);
+    let cookie = session_of(&state).await;
+    put(&state, "/api/site", &cookie, json!({ "site_name": "RU" })).await;
+    put(
+        &state,
+        "/api/nodes",
+        &cookie,
+        json!([
+            { "node_id": "tx-1", "role": "tx", "mac": "1a:00:00:00:00:00" },
+            { "node_id": "rx-1", "role": "rx", "address": "192.168.4.51" },
+        ]),
+    )
+    .await;
+    put(&state, "/api/uplink", &cookie, json!({ "mode": "offline" })).await;
+
+    let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
+
+    assert_eq!(body["phase"]["stage"], json!("queue"));
 }

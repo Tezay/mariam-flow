@@ -4,7 +4,7 @@
 
   import { type Status } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
-  import ClassesSection from '$components/settings/ClassesSection.svelte';
+  import QueueSection from '$components/settings/QueueSection.svelte';
   import JournalSection from '$components/settings/JournalSection.svelte';
   import NetworkSection from '$components/network/NetworkSection.svelte';
   import ServiceHoursPanel from '$components/settings/ServiceHoursPanel.svelte';
@@ -13,7 +13,7 @@
 
   let { status, onupdated }: { status: Status; onupdated: (status: Status) => void } = $props();
 
-  const SECTIONS = ['site', 'network', 'levels', 'hours', 'system', 'journal'] as const;
+  const SECTIONS = ['site', 'network', 'queue', 'hours', 'system', 'journal'] as const;
   type Section = (typeof SECTIONS)[number];
 
   /* Nothing is selected to begin with, which is what makes one component
@@ -67,8 +67,8 @@
           <SiteSection {status} {onupdated} />
         {:else if section === 'network'}
           <NetworkSection {status} {onupdated} />
-        {:else if section === 'levels'}
-          <ClassesSection {status} {onupdated} />
+        {:else if section === 'queue'}
+          <QueueSection {status} advanced submitLabel={t('settings.save')} {onupdated} />
         {:else if section === 'hours'}
           <ServiceHoursPanel />
         {:else if section === 'system'}

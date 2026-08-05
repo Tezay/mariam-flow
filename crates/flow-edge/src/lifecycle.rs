@@ -40,6 +40,8 @@ pub enum Stage {
     Nodes,
     /// Decide how (or whether) the appliance reaches the site network.
     Network,
+    /// Say what each density means at this site, and how fast it is served.
+    Queue,
     /// Calibrate the site and obtain a density model.
     Calibration,
     /// Every step is satisfied; the installation can be closed.
@@ -52,6 +54,7 @@ impl fmt::Display for Stage {
             Self::Site => "site identification",
             Self::Nodes => "node pairing",
             Self::Network => "network connection",
+            Self::Queue => "queue description",
             Self::Calibration => "calibration",
             Self::Complete => "completion",
         };
@@ -76,6 +79,9 @@ pub struct Readiness {
     /// Holding the wizard open until then would lock the site out of every
     /// other screen in the meantime.
     pub site_captured: bool,
+    /// The installer has said what the queue looks like at each density and
+    /// how fast it is served (ADR 0023).
+    pub queue_described: bool,
     /// A density model is installed and the site is tuned, so live
     /// inference can actually run.
     ///
@@ -96,8 +102,9 @@ impl Readiness {
             site_named: config.identity.site_name.is_some(),
             nodes_paired: config.transmitter().is_some() && !config.rx_node_ids().is_empty(),
             uplink_decided: config.network.uplink.is_some(),
+            queue_described: config.wait.is_some(),
             site_captured,
-            model_ready: model_installed && config.site.is_some(),
+            model_ready: model_installed && config.wait.is_some(),
         }
     }
 
@@ -110,6 +117,8 @@ impl Readiness {
             Stage::Nodes
         } else if !self.uplink_decided {
             Stage::Network
+        } else if !self.queue_described {
+            Stage::Queue
         } else if !self.site_captured {
             Stage::Calibration
         } else {
@@ -277,7 +286,7 @@ mod tests {
     use flow_core::NodeRole;
 
     use super::*;
-    use crate::config::{PairedNode, SiteTuning, Uplink};
+    use crate::config::{PairedNode, Uplink, WaitTuning};
 
     fn configured() -> ApplianceConfig {
         let mut config =
@@ -300,14 +309,12 @@ mod tests {
             },
         ];
         config.network.uplink = Some(Uplink::Offline);
-        config.site = Some(SiteTuning {
+        config.wait = Some(WaitTuning {
             people_per_class: [0.0, 4.0, 12.0, 25.0],
             service_rate_per_min: 6.0,
             smoothing_tau_s: 30.0,
             hysteresis_margin: 0.15,
             min_confidence: 0.5,
-            window_us: 5_000_000,
-            hop_us: 1_000_000,
         });
         config
     }
@@ -346,7 +353,7 @@ mod tests {
         );
 
         config.network.uplink = full.network.uplink.clone();
-        config.site = full.site;
+        config.wait = full.wait;
         assert_eq!(
             Readiness::evaluate(&config, true, false).stage(),
             Stage::Calibration,

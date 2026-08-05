@@ -593,6 +593,7 @@ impl EdgeState {
             uplink: UplinkView::of(config.network.uplink.as_ref()),
             survey: config.network.survey,
             classes: config.classes.clone(),
+            wait: config.wait,
             active_model: inner.config.active_model.clone(),
             journal_failure: self.journal_failure(),
             nodes: config

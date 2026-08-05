@@ -4,6 +4,7 @@
   import { STEPS, completion, visibleStage } from '$lib/wizard';
   import CalibrationStep from '$components/wizard/CalibrationStep.svelte';
   import CompleteStep from '$components/wizard/CompleteStep.svelte';
+  import QueueStep from '$components/wizard/QueueStep.svelte';
   import NetworkStep from '$components/wizard/NetworkStep.svelte';
   import PairingStep from '$components/wizard/PairingStep.svelte';
   import SiteStep from '$components/wizard/SiteStep.svelte';
@@ -66,6 +67,8 @@
               initialSsid={status.uplink.ssid ?? null}
               onupdated={accept}
             />
+          {:else if stage === 'queue'}
+            <QueueStep {status} onupdated={accept} />
           {:else if stage === 'calibration'}
             <CalibrationStep {status} onupdated={accept} />
           {:else if stage === 'complete'}

@@ -1,7 +1,6 @@
 /** Recording a labelled capture, and what becomes of it afterwards. */
 
-import { put, rename, send, type WriteOutcome } from './http';
-import type { ClassMapping } from './status';
+import { rename, send, type WriteOutcome } from './http';
 
 /** One capture recorded at this site. */
 export type RecordedSession = {
@@ -50,11 +49,6 @@ export async function deleteSession(sessionId: string): Promise<boolean> {
 /** Gives a recorded capture a new description. */
 export async function renameSession(sessionId: string, name: string): Promise<boolean> {
   return rename(`/api/sessions/${encodeURIComponent(sessionId)}`, name);
-}
-
-/** Records what each density class means at this site. */
-export function saveClasses(classes: ClassMapping | null): Promise<WriteOutcome> {
-  return put('/api/classes', classes);
 }
 
 /** Starts recording a labeled capture. */

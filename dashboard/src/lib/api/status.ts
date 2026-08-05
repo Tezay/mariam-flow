@@ -1,6 +1,6 @@
 /** What the appliance says it is, and what the machine under it says. */
 
-export type Stage = 'site' | 'nodes' | 'network' | 'calibration' | 'complete';
+export type Stage = 'site' | 'nodes' | 'network' | 'queue' | 'calibration' | 'complete';
 
 export type Phase = { phase: 'onboarding'; stage: Stage } | { phase: 'operational' };
 
@@ -13,6 +13,8 @@ export type Readiness = {
   site_named: boolean;
   nodes_paired: boolean;
   uplink_decided: boolean;
+  /** The installer has said what the queue looks like and how fast it is served. */
+  queue_described: boolean;
   /** A calibration session has been recorded — what finishes an installation. */
   site_captured: boolean;
   /** Reported, but not required to finish installing: the model is trained
@@ -33,6 +35,17 @@ export type SensingNode = {
 /** What joining the site's network asks of a device. */
 export type SiteAuthentication =
   'nothing' | 'shared-password' | 'account' | 'certificate' | 'sign-in-page' | 'unknown';
+
+/** What this site turns a density into a waiting time with (ADR 0023). */
+export type WaitTuning = {
+  /** People counted in the queue at each density class, in class order. */
+  people_per_class: [number, number, number, number];
+  /** Service rate λ, in people served per minute. */
+  service_rate_per_min: number;
+  smoothing_tau_s: number;
+  hysteresis_margin: number;
+  min_confidence: number;
+};
 
 /** What each density class means at this site. */
 export type ClassMapping = {
@@ -76,6 +89,8 @@ export type Status = {
   uplink: Uplink;
   survey?: NetworkSurvey;
   classes?: ClassMapping;
+  /** How this site turns a density into a waiting time, once described. */
+  wait?: WaitTuning;
   /** Which stored model is estimating, if any. */
   active_model?: string;
   /** Since when the journal has been unable to write, if it cannot. */
