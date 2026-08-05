@@ -7,13 +7,13 @@
   import Upload from '@lucide/svelte/icons/upload';
 
   import {
+    type StoredModel,
     forgetModel,
     importModel,
     renameModel,
     useModel,
-    type Status,
-    type StoredModel,
-  } from '$lib/api';
+  } from '$lib/api/models';
+  import { type Status } from '$lib/api/status';
   import { formatDay, formatWindow, modelName } from '$lib/calibration';
   import { page } from '$lib/paging';
   import { formattingLocale, t } from '$lib/i18n/i18n.svelte';

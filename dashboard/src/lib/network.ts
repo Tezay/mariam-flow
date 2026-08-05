@@ -7,7 +7,7 @@
  * translates between the two.
  */
 
-import type { NetworkSurvey, SiteAuthentication, Status } from './api';
+import { type NetworkSurvey, type SiteAuthentication, type Status } from './api/status';
 
 /** The answers offered, in the order they are shown. */
 export const AUTHENTICATION_CHOICES: SiteAuthentication[] = [

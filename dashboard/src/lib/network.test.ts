@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { NetworkSurvey, SiteAuthentication, Status } from './api';
+import { type NetworkSurvey, type SiteAuthentication, type Status } from './api/status';
 import {
   AUTHENTICATION_CHOICES,
   applianceFacts,

@@ -2,7 +2,7 @@
   import LineChart from '@lucide/svelte/icons/chart-line';
   import Table from '@lucide/svelte/icons/table';
 
-  import { DENSITY_CLASSES, type MinuteSummary } from '$lib/api';
+  import { DENSITY_CLASSES, type MinuteSummary } from '$lib/api/live';
   import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';
   import {
     DENSITY_FILL,

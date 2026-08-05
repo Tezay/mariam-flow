@@ -21,7 +21,7 @@ identically there.
 dashboard/src/
   routes/                 the single page, and the layout that disables SSR
   lib/
-    api.ts                every call to the daemon, and the types it carries
+    api/                  every call to the daemon, and the types it carries
     <domain>.ts           the rules a screen applies, each beside its tests
     paging.ts             list paging, shared by both histories
     i18n/                 the dictionaries; English is the reference
@@ -55,6 +55,15 @@ settings configure the same thing — the site uplink is answered during
 installation and revisited afterwards, from one set of components. And nothing
 under `ui/` may import a domain module: a primitive that knows what a
 calibration is stops being reusable, and the next screen copies it instead.
+
+`lib/api/` carries one file per module of the daemon's HTTP surface — the
+session, the installation, the sensing nodes, the service schedule,
+calibration, models, the journal, the live stream — plus the status the whole
+application revolves around and the transport the rest share. Changing a route
+therefore means opening two files of the same name, one on each side. Every
+type in there mirrors what `flow-edge` serializes, so a change on the Rust
+side surfaces as a type error in the screens rather than as `undefined` at
+runtime.
 
 Tests sit beside what they test: `Foo.svelte` and `Foo.svelte.test.ts`. Suites
 run under Node by default and opt into a DOM with a `@vitest-environment

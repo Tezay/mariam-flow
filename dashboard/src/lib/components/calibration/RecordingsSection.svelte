@@ -7,14 +7,13 @@
   import Trash2 from '@lucide/svelte/icons/trash-2';
 
   import {
+    type RecordedSession,
     archiveUrl,
     deleteSession,
     renameSession,
     startCalibration,
-    type RecordedSession,
-    type SensingNode,
-    type Status,
-  } from '$lib/api';
+  } from '$lib/api/calibration';
+  import { type SensingNode, type Status } from '$lib/api/status';
   import { formatDay } from '$lib/calibration';
   import { page } from '$lib/paging';
   import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';

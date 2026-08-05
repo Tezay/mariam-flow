@@ -2,7 +2,9 @@
   import Square from '@lucide/svelte/icons/square';
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
-  import { addLabel, DENSITY_CLASSES, type ClassMapping, type DensityClass } from '$lib/api';
+  import { addLabel } from '$lib/api/calibration';
+  import { DENSITY_CLASSES, type DensityClass } from '$lib/api/live';
+  import { type ClassMapping } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
   import {
     buttonLabel,

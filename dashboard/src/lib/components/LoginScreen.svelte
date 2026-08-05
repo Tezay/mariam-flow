@@ -1,7 +1,7 @@
 <script lang="ts">
   import ScanLine from '@lucide/svelte/icons/scan-line';
 
-  import { login, takeSecretFromFragment, type LoginOutcome } from '$lib/api';
+  import { type LoginOutcome, login, takeSecretFromFragment } from '$lib/api/auth';
   import { t } from '$lib/i18n/i18n.svelte';
   import LocaleToggle from '$components/ui/LocaleToggle.svelte';
 

@@ -3,7 +3,8 @@ import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 
 import RecordingsSection from './RecordingsSection.svelte';
-import type { RecordedSession, SensingNode } from '$lib/api';
+import { type RecordedSession } from '$lib/api/calibration';
+import { type SensingNode } from '$lib/api/status';
 
 const NODES: SensingNode[] = [{ node_id: 'rx-1', role: 'rx', address: '192.168.4.51' }];
 const SESSION: RecordedSession = {

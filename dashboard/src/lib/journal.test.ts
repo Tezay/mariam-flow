@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { RecordedEvent } from './api';
+import { type RecordedEvent } from './api/journal';
 import { byDay, hasMore, newest, oldest, PAGE, prepend, toneOf } from './journal';
 
 function event(id: number, ts_us: number): RecordedEvent {

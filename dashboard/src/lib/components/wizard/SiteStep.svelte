@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
 
-  import { saveSite, type Status } from '$lib/api';
+  import { saveSite } from '$lib/api/install';
+  import { type Status } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
   import Button from '$components/ui/Button.svelte';
 

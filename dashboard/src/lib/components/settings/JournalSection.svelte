@@ -25,12 +25,12 @@
 
   import {
     EVENT_CATEGORIES,
-    fetchEvents,
-    subscribeLive,
     type EventCategory,
     type EventKind,
     type RecordedEvent,
-  } from '$lib/api';
+    fetchEvents,
+  } from '$lib/api/journal';
+  import { subscribeLive } from '$lib/api/live';
   import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';
   import { AUTO_PAGES, byDay, hasMore, newest, oldest, PAGE, prepend, toneOf } from '$lib/journal';
   import { formatClock } from '$lib/live';

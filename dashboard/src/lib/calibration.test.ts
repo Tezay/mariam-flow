@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ClassMapping } from './api';
+import { type ClassMapping } from './api/status';
 import {
   GRACE_SECONDS,
   defaultEnvironment,

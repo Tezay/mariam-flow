@@ -1,7 +1,9 @@
 <script lang="ts">
   import { untrack } from 'svelte';
 
-  import { DENSITY_CLASSES, saveClasses, type ClassMapping, type Status } from '$lib/api';
+  import { saveClasses } from '$lib/api/calibration';
+  import { DENSITY_CLASSES } from '$lib/api/live';
+  import { type ClassMapping, type Status } from '$lib/api/status';
   import { blankClasses } from '$lib/calibration';
   import { t } from '$lib/i18n/i18n.svelte';
   import Button from '$components/ui/Button.svelte';

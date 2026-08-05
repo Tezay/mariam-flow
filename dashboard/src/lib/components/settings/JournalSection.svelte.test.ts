@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import JournalSection from './JournalSection.svelte';
-import type { RecordedEvent } from '$lib/api';
+import { type RecordedEvent } from '$lib/api/journal';
 
 function event(id: number, kind: RecordedEvent['kind'] = 'service-opened'): RecordedEvent {
   return { id, ts_us: Date.UTC(2026, 7, 2, 12) * 1000, category: 'lifecycle', kind };

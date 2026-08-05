@@ -6,7 +6,9 @@
  * tested without a browser.
  */
 
-import type { Candidate, Discovery, NodeHealth, SensingNode } from './api';
+import { type NodeHealth } from './api/live';
+import { type Candidate, type Discovery } from './api/nodes';
+import { type SensingNode } from './api/status';
 
 /** A node lagging the stream by more than this is treated as silent. */
 export const SILENT_AFTER_US = 10_000_000;

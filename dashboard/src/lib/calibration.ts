@@ -6,7 +6,8 @@
  * the next. Everything here follows from that.
  */
 
-import { DENSITY_CLASSES, type ClassMapping, type DensityClass } from './api';
+import { DENSITY_CLASSES, type DensityClass } from './api/live';
+import { type ClassMapping } from './api/status';
 
 /** The class meanings a site starts from, before anyone describes them. */
 export function blankClasses(): ClassMapping {

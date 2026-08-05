@@ -7,7 +7,7 @@
  * it. It also reports every problem at once, where the API returns the first.
  */
 
-import { WEEKDAYS, type Interval, type ServiceWindow, type Weekday } from './api';
+import { type Interval, type ServiceWindow, WEEKDAYS, type Weekday } from './api/schedule';
 
 /** A time of day the appliance would accept, `HH:MM` on a real clock. */
 export function isValidTime(value: string): boolean {

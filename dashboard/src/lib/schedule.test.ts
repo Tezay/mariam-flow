@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { WEEKDAYS } from './api';
+import { WEEKDAYS } from './api/schedule';
 import {
   cloneWindow,
   copyDayToAll,

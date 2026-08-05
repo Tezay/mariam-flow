@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Candidate, Discovery, NodeHealth, SensingNode } from './api';
+import { type NodeHealth } from './api/live';
+import { type Candidate, type Discovery } from './api/nodes';
+import { type SensingNode } from './api/status';
 import {
   knownPositions,
   receiverState,

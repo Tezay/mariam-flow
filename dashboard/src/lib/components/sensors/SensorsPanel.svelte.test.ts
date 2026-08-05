@@ -3,7 +3,8 @@ import { render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SensorsPanel from './SensorsPanel.svelte';
-import type { LiveSnapshot, SensingNode, Status } from '$lib/api';
+import { type LiveSnapshot } from '$lib/api/live';
+import { type SensingNode, type Status } from '$lib/api/status';
 
 const NOW = Date.UTC(2026, 7, 2, 12) * 1000;
 const SILENT = 30_000_000;

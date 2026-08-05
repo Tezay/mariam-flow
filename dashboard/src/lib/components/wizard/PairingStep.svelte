@@ -2,7 +2,8 @@
   import Radio from '@lucide/svelte/icons/radio';
   import RadioTower from '@lucide/svelte/icons/radio-tower';
 
-  import { fetchDiscovery, saveNodes, type Discovery, type Status } from '$lib/api';
+  import { type Discovery, fetchDiscovery, saveNodes } from '$lib/api/nodes';
+  import { type Status } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
   import Button from '$components/ui/Button.svelte';
   import {
