@@ -8,7 +8,7 @@
   import { DENSITY_SWATCH } from '$lib/live';
   import { receiverState } from '$lib/sensors';
   import { formatNextChange } from '$lib/schedule';
-  import HistoryFigure from '$components/HistoryFigure.svelte';
+  import HistoryFigure from '$components/live/HistoryFigure.svelte';
 
   let { modelName = null }: { modelName?: string | null } = $props();
 

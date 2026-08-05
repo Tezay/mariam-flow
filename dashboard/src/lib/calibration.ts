@@ -74,21 +74,6 @@ export function defaultEnvironment(siteName: string | null, at: Date, locale: st
   return siteName ? `${siteName} — ${when}` : when;
 }
 
-/** How many recordings a page of the history shows. */
-export const PAGE_SIZE = 8;
-
-/** The slice of the history a given page shows, clamped to what exists. */
-export function page<T>(items: T[], index: number): T[] {
-  const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
-  const clamped = Math.min(Math.max(0, index), pages - 1);
-  return items.slice(clamped * PAGE_SIZE, clamped * PAGE_SIZE + PAGE_SIZE);
-}
-
-/** How many pages the history needs. */
-export function pageCount(total: number): number {
-  return Math.max(1, Math.ceil(total / PAGE_SIZE));
-}
-
 /** A day, spelled out — what a reader compares two models by. */
 export function formatDay(us: number, locale: string): string {
   return new Date(us / 1000).toLocaleDateString(locale, {

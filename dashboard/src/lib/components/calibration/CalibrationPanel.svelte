@@ -13,9 +13,9 @@
   import { defaultEnvironment } from '$lib/calibration';
   import { formattingLocale } from '$lib/i18n/i18n.svelte';
   import { knownPositions, receiverState } from '$lib/sensors';
-  import LabelingScreen from '$components/LabelingScreen.svelte';
-  import ModelsSection from '$components/ModelsSection.svelte';
-  import RecordingsSection from '$components/RecordingsSection.svelte';
+  import LabelingScreen from '$components/calibration/LabelingScreen.svelte';
+  import ModelsSection from '$components/calibration/ModelsSection.svelte';
+  import RecordingsSection from '$components/calibration/RecordingsSection.svelte';
 
   let {
     status,

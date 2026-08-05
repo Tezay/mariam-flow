@@ -4,12 +4,12 @@
 
   import type { Status } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
-  import ClassesSection from '$components/ClassesSection.svelte';
-  import JournalSection from '$components/JournalSection.svelte';
-  import NetworkSection from '$components/NetworkSection.svelte';
-  import ServiceHoursPanel from '$components/ServiceHoursPanel.svelte';
-  import SiteSection from '$components/SiteSection.svelte';
-  import SystemSection from '$components/SystemSection.svelte';
+  import ClassesSection from '$components/settings/ClassesSection.svelte';
+  import JournalSection from '$components/settings/JournalSection.svelte';
+  import NetworkSection from '$components/network/NetworkSection.svelte';
+  import ServiceHoursPanel from '$components/settings/ServiceHoursPanel.svelte';
+  import SiteSection from '$components/settings/SiteSection.svelte';
+  import SystemSection from '$components/settings/SystemSection.svelte';
 
   let { status, onupdated }: { status: Status; onupdated: (status: Status) => void } = $props();
 

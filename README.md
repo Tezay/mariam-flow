@@ -39,11 +39,11 @@ picture.
 | `crates/flow-ingest` | Frame parsing, UDP intake, session storage, `csi-replay` |
 | `crates/flow-infer` | Feature extraction, ONNX inference, Little's Law, smoothing, `csi-infer` |
 | `crates/flow-capture` | Labeled capture: recording plus the phone labeling page (`csi-capture`) |
-| `crates/flow-edge` | Appliance daemon: configuration, installation lifecycle, credential, journal *(in progress)* |
-| `dashboard/` | Svelte single-page dashboard, embedded in the daemon *(in progress)* |
+| `crates/flow-edge` | Appliance daemon: configuration, installation lifecycle, credential, pairing, calibration, models, journal *(the real network backend arrives with the hardware)* |
+| `dashboard/` | Svelte single-page dashboard, embedded in the daemon |
 | `ml/` | Python package: features, training, evaluation, ONNX export, reports |
 | `firmware/csi-node` | ESP32-C6 firmware based on `espressif/esp-csi` |
-| `docs/` | Architecture documentation and ADRs |
+| `docs/` | Architecture and dashboard documentation, and ADRs |
 
 ## Getting started
 

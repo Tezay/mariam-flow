@@ -14,7 +14,8 @@
     type Status,
     type StoredModel,
   } from '$lib/api';
-  import { formatDay, formatWindow, modelName, page } from '$lib/calibration';
+  import { formatDay, formatWindow, modelName } from '$lib/calibration';
+  import { page } from '$lib/paging';
   import { formattingLocale, t } from '$lib/i18n/i18n.svelte';
   import Button from '$components/ui/Button.svelte';
   import ConfirmDialog from '$components/ui/ConfirmDialog.svelte';

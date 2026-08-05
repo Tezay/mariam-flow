@@ -4,9 +4,9 @@
   import type { NetworkSurvey, Status, Uplink } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
   import { requiresAdministrator, verdict } from '$lib/network';
-  import NetworkHandout from '$components/NetworkHandout.svelte';
-  import NetworkInterview from '$components/NetworkInterview.svelte';
-  import UplinkForm from '$components/UplinkForm.svelte';
+  import NetworkHandout from '$components/network/NetworkHandout.svelte';
+  import NetworkInterview from '$components/network/NetworkInterview.svelte';
+  import UplinkForm from '$components/network/UplinkForm.svelte';
 
   let {
     status,

@@ -50,8 +50,6 @@ export const en = {
   'runtime.calibrating': 'Calibrating',
   'runtime.live': 'Estimating',
   'nodes.none': 'No node paired yet.',
-  'nodes.role.tx': 'Transmitter',
-  'nodes.role.rx': 'Receiver',
 
   'header.language': 'Switch to French',
   'header.clock': 'Use a 12-hour clock',

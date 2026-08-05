@@ -3,7 +3,7 @@
   import { t } from '$lib/i18n/i18n.svelte';
   import LoginScreen from '$components/LoginScreen.svelte';
   import TabShell from '$components/TabShell.svelte';
-  import WizardFrame from '$components/WizardFrame.svelte';
+  import WizardFrame from '$components/wizard/WizardFrame.svelte';
 
   type Screen =
     | { view: 'loading' }
