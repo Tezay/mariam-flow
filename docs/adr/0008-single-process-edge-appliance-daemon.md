@@ -90,4 +90,5 @@ Two structural choices inside the daemon follow from the same reasoning:
 - Bad: some duplication between the daemon's persisted configuration and
   the ad-hoc `site.json` the laboratory tools read. Kept deliberately
   field-for-field identical so a tuning produced in the lab can be moved
-  into an appliance unchanged.
+  into an appliance unchanged. Removed by ADR 0023: the two no longer hold
+  the same fields.
