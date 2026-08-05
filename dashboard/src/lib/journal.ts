@@ -6,7 +6,7 @@
  * move while it is being read.
  */
 
-import type { EventKind, RecordedEvent } from './api';
+import { type EventKind, type RecordedEvent } from './api/journal';
 
 /** How many rows a page of the journal holds. */
 export const PAGE = 25;

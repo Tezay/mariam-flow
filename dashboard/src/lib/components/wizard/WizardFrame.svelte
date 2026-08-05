@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Stage, Status } from '$lib/api';
+  import { type Stage, type Status } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
   import { STEPS, completion, visibleStage } from '$lib/wizard';
   import CompleteStep from '$components/wizard/CompleteStep.svelte';

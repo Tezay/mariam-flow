@@ -8,7 +8,7 @@
  * makes each of these behaviours checkable in isolation.
  */
 
-import { DENSITY_CLASSES, type DensityClass } from './api';
+import { DENSITY_CLASSES, type DensityClass } from './api/live';
 
 /**
  * Utility classes carrying each density colour.

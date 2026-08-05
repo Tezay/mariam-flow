@@ -1,15 +1,10 @@
 <script lang="ts">
   import { untrack } from 'svelte';
 
-  import {
-    fetchSessions,
-    stopCalibration,
-    subscribeLive,
-    type LiveSnapshot,
-    type RecordedSession,
-    type Status,
-    type StoredModel,
-  } from '$lib/api';
+  import { type RecordedSession, fetchSessions, stopCalibration } from '$lib/api/calibration';
+  import { type LiveSnapshot, subscribeLive } from '$lib/api/live';
+  import { type StoredModel } from '$lib/api/models';
+  import { type Status } from '$lib/api/status';
   import { defaultEnvironment } from '$lib/calibration';
   import { formattingLocale } from '$lib/i18n/i18n.svelte';
   import { knownPositions, receiverState } from '$lib/sensors';

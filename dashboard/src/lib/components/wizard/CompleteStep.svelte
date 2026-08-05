@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { setInstallation, type Status } from '$lib/api';
+  import { setInstallation } from '$lib/api/install';
+  import { type Status } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
   import Button from '$components/ui/Button.svelte';
 

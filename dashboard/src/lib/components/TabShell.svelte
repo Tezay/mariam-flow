@@ -5,7 +5,8 @@
   import Settings from '@lucide/svelte/icons/settings';
   import Target from '@lucide/svelte/icons/target';
 
-  import { fetchModels, type Status, type StoredModel } from '$lib/api';
+  import { type StoredModel, fetchModels } from '$lib/api/models';
+  import { type Status } from '$lib/api/status';
   import { modelName } from '$lib/calibration';
   import { hour12, locale, t, toggleHourCycle, toggleLocale } from '$lib/i18n/i18n.svelte';
   import CalibrationPanel from '$components/calibration/CalibrationPanel.svelte';

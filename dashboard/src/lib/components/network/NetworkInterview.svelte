@@ -2,7 +2,8 @@
   import CircleCheck from '@lucide/svelte/icons/circle-check';
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
-  import { saveNetworkSurvey, type NetworkSurvey, type Status } from '$lib/api';
+  import { saveNetworkSurvey } from '$lib/api/install';
+  import { type NetworkSurvey, type Status } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
   import { AUTHENTICATION_CHOICES, verdict } from '$lib/network';
   import Saved from '$components/ui/Saved.svelte';

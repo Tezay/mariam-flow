@@ -6,7 +6,8 @@
  * facts say it stands, whatever the browser was showing.
  */
 
-import type { Proposal, SensingNode, Stage, Status } from './api';
+import { type Proposal } from './api/nodes';
+import { type SensingNode, type Stage, type Status } from './api/status';
 
 /** The guided steps, in order. `complete` is the end, not a step. */
 export const STEPS: Stage[] = ['site', 'nodes', 'network', 'calibration'];

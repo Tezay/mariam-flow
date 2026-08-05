@@ -10,7 +10,7 @@ import {
   nearestIndex,
   plotGeometry,
 } from './live';
-import { DENSITY_CLASSES } from './api';
+import { DENSITY_CLASSES } from './api/live';
 
 const BOX = { width: 320, top: 8, height: 96 };
 const BASELINE = BOX.top + BOX.height;

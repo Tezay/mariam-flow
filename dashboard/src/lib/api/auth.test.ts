@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { interpretLogin } from './api';
+import { interpretLogin } from './auth';
 
 describe('interpretLogin', () => {
   it('reads a granted session', () => {

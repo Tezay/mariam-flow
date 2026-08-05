@@ -4,12 +4,12 @@
   import X from '@lucide/svelte/icons/x';
 
   import {
+    type ServiceWindow,
     WEEKDAYS,
+    type Weekday,
     fetchServiceWindow,
     saveServiceWindow,
-    type ServiceWindow,
-    type Weekday,
-  } from '$lib/api';
+  } from '$lib/api/schedule';
   import { t } from '$lib/i18n/i18n.svelte';
   import Button from '$components/ui/Button.svelte';
   import {

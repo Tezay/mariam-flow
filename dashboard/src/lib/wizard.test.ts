@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Proposal, Readiness, Stage, Status } from './api';
+import { type Proposal } from './api/nodes';
+import { type Readiness, type Stage, type Status } from './api/status';
 import {
   EXPECTED_RECEIVERS,
   canConfirmPairing,

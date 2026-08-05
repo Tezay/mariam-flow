@@ -3,7 +3,12 @@
   import Radio from '@lucide/svelte/icons/radio';
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
-  import { fetchHistory, subscribeLive, type LiveSnapshot, type MinuteSummary } from '$lib/api';
+  import {
+    type LiveSnapshot,
+    type MinuteSummary,
+    fetchHistory,
+    subscribeLive,
+  } from '$lib/api/live';
   import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';
   import { DENSITY_SWATCH } from '$lib/live';
   import { receiverState } from '$lib/sensors';

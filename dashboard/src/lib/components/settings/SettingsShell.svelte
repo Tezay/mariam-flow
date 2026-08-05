@@ -2,7 +2,7 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
 
-  import type { Status } from '$lib/api';
+  import { type Status } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
   import ClassesSection from '$components/settings/ClassesSection.svelte';
   import JournalSection from '$components/settings/JournalSection.svelte';

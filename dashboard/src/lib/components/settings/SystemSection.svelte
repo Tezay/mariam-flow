@@ -1,7 +1,7 @@
 <script lang="ts">
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
-  import { fetchSystem, type Status, type SystemReport } from '$lib/api';
+  import { type Status, type SystemReport, fetchSystem } from '$lib/api/status';
   import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';
   import { formatClock } from '$lib/live';
   import { asMegabytes, formatUptime } from '$lib/system';

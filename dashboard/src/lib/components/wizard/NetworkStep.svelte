@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
 
-  import type { NetworkSurvey, Status, Uplink } from '$lib/api';
+  import { type NetworkSurvey, type Status, type Uplink } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
   import { requiresAdministrator, verdict } from '$lib/network';
   import NetworkHandout from '$components/network/NetworkHandout.svelte';

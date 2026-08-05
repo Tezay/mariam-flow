@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 
 import ModelsSection from './ModelsSection.svelte';
-import type { StoredModel } from '$lib/api';
+import { type StoredModel } from '$lib/api/models';
 
 function model(id: string, name: string, active = false): StoredModel {
   return {

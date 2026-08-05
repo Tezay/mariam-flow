@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { fetchStatus, logout, type Status } from '$lib/api';
+  import { logout } from '$lib/api/auth';
+  import { type Status, fetchStatus } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
   import LoginScreen from '$components/LoginScreen.svelte';
   import TabShell from '$components/TabShell.svelte';

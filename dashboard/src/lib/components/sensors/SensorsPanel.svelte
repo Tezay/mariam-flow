@@ -3,16 +3,9 @@
   import MapPin from '@lucide/svelte/icons/map-pin';
   import Radio from '@lucide/svelte/icons/radio';
 
-  import {
-    adoptHardware,
-    describeNode,
-    fetchDiscovery,
-    subscribeLive,
-    type Discovery,
-    type LiveSnapshot,
-    type SensingNode,
-    type Status,
-  } from '$lib/api';
+  import { type LiveSnapshot, subscribeLive } from '$lib/api/live';
+  import { type Discovery, adoptHardware, describeNode, fetchDiscovery } from '$lib/api/nodes';
+  import { type SensingNode, type Status } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
   import {
     receiverState,
