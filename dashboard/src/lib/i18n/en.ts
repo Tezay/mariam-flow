@@ -220,6 +220,8 @@ export const en = {
   'cal.classesLead':
     'Decided once for the site. Two people labelling the same queue have to draw the boundaries in the same place.',
   'cal.classesSaved': 'Descriptions saved.',
+  'cal.wizardLead':
+    'You are about to mark the queue as it happens. Stand where you can see it, press the level that matches what you see, and correct it as soon as it changes. Allow about twenty minutes.',
   'cal.environment': 'What is being recorded',
   'cal.environmentHint': 'For example: main hall, lunch service, rainy day.',
   'cal.positions': 'Where the sensors are',
@@ -359,5 +361,4 @@ export const en = {
     'Choose how the appliance reaches the site network, or stay offline.',
   'wizard.stage.calibration.lead': 'Teach the appliance what a busy queue looks like at this site.',
   'wizard.stage.complete.lead': 'Everything is set. The appliance is ready to serve.',
-  'wizard.comingNext': 'This step is not built yet.',
 } as const;
