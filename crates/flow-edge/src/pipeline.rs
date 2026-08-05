@@ -32,8 +32,8 @@ use flow_infer::{DensityModel, LiveConfig, LivePipeline};
 use flow_ingest::{FrameSource, MacAddr, SenderKey, SourceConfig, SourceError};
 use serde::Serialize;
 
-use crate::api::EdgeState;
 use crate::config::ApplianceConfig;
+use crate::edge_state::EdgeState;
 use crate::error::PipelineError;
 use crate::history::MinuteAggregator;
 use crate::journal::{Event, EventKind};

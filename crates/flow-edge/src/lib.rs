@@ -39,44 +39,47 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-mod api;
 mod assets;
 mod calibration;
 mod config;
 mod credential;
 mod discovery;
+mod edge_state;
 mod error;
 mod history;
+mod http;
 mod journal;
+mod lifecycle;
 mod model;
 mod pipeline;
 mod schedule;
 mod secret;
 mod session;
-mod state;
 mod store;
 mod system;
 mod throttle;
+mod views;
 
-pub use api::{EdgeState, router};
 pub use config::{
     Addressing, ApplianceConfig, DEFAULT_HOP_US, DEFAULT_SENSOR_CHANNEL, DEFAULT_WINDOW_US,
     Identity, NetworkConfig, PairedNode, SensorAp, SiteTuning, Uplink, WifiSecurity,
 };
 pub use credential::{AdminCredential, CREDENTIAL_FILE, ResetOutcome, apply_pending_reset};
+pub use edge_state::EdgeState;
 pub use error::{
     ConfigError, CredentialError, JournalError, PipelineError, ScheduleError, SecretError,
     StoreError, TransitionError,
 };
 pub use history::{MINUTE_US, MinuteAggregator, MinuteSummary};
+pub use http::router;
 pub use journal::{
     Event, EventCategory, EventKind, JOURNAL_FILE, Journal, MAX_EVENTS, RETENTION_US, RecordedEvent,
 };
+pub use lifecycle::{Phase, Readiness, Runtime, RuntimeMode, Stage};
 pub use pipeline::{LiveOptions, NodeHealth, StreamHealth, spawn_pipeline};
 pub use schedule::{Closure, Interval, LocalTime, ServiceState, ServiceWindow, WeeklyHours};
 pub use secret::{DeviceSecret, SECRET_ENTROPY_BITS};
 pub use session::{ABSOLUTE_LIFETIME_US, IDLE_TIMEOUT_US, SessionStore};
-pub use state::{Phase, Readiness, Runtime, RuntimeMode, Stage};
 pub use throttle::Throttle;
 
 /// File name of the active density model inside the data directory.
