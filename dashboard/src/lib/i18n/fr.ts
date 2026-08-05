@@ -48,8 +48,6 @@ export const fr: Messages = {
   'runtime.calibrating': 'Calibration',
   'runtime.live': 'Estimation',
   'nodes.none': 'Aucun capteur appairé pour le moment.',
-  'nodes.role.tx': 'Émetteur',
-  'nodes.role.rx': 'Récepteur',
 
   'header.language': 'Switch to English',
   'header.clock': 'Passer en 12 heures',

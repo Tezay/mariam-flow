@@ -3,7 +3,7 @@
 
   import { login, takeSecretFromFragment, type LoginOutcome } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
-  import LocaleToggle from '$components/LocaleToggle.svelte';
+  import LocaleToggle from '$components/ui/LocaleToggle.svelte';
 
   let { onauthenticated }: { onauthenticated: () => void } = $props();
 

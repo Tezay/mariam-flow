@@ -8,10 +8,10 @@
   import { fetchModels, type Status, type StoredModel } from '$lib/api';
   import { modelName } from '$lib/calibration';
   import { hour12, locale, t, toggleHourCycle, toggleLocale } from '$lib/i18n/i18n.svelte';
-  import CalibrationPanel from '$components/CalibrationPanel.svelte';
-  import LivePanel from '$components/LivePanel.svelte';
-  import SensorsPanel from '$components/SensorsPanel.svelte';
-  import SettingsShell from '$components/SettingsShell.svelte';
+  import CalibrationPanel from '$components/calibration/CalibrationPanel.svelte';
+  import LivePanel from '$components/live/LivePanel.svelte';
+  import SensorsPanel from '$components/sensors/SensorsPanel.svelte';
+  import SettingsShell from '$components/settings/SettingsShell.svelte';
 
   let {
     status,

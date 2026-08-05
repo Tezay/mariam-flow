@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PAGE_SIZE, pageCount } from '$lib/calibration';
+  import { PAGE_SIZE, pageCount } from '$lib/paging';
   import { t } from '$lib/i18n/i18n.svelte';
   import Button from '$components/ui/Button.svelte';
 

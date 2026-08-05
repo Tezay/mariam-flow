@@ -2,12 +2,12 @@
   import type { Stage, Status } from '$lib/api';
   import { t } from '$lib/i18n/i18n.svelte';
   import { STEPS, completion, visibleStage } from '$lib/wizard';
-  import CompleteStep from '$components/CompleteStep.svelte';
-  import NetworkStep from '$components/NetworkStep.svelte';
-  import PairingStep from '$components/PairingStep.svelte';
-  import SiteStep from '$components/SiteStep.svelte';
-  import WizardIllustration from '$components/WizardIllustration.svelte';
-  import WizardStepper from '$components/WizardStepper.svelte';
+  import CompleteStep from '$components/wizard/CompleteStep.svelte';
+  import NetworkStep from '$components/wizard/NetworkStep.svelte';
+  import PairingStep from '$components/wizard/PairingStep.svelte';
+  import SiteStep from '$components/wizard/SiteStep.svelte';
+  import WizardIllustration from '$components/wizard/WizardIllustration.svelte';
+  import WizardStepper from '$components/wizard/WizardStepper.svelte';
 
   let { status, onupdated }: { status: Status; onupdated: (status: Status) => void } = $props();
 
