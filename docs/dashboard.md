@@ -86,6 +86,10 @@ itself, which also lets it show steps satisfied out of order. Each screen is
 one question, with a reserved frame beside it on a wide screen and above it on
 a phone; the frame holds its space whether or not it has artwork in it.
 
+Its last step records the site's first capture, because nothing else can:
+closing an installation requires one, and the screen that records later ones
+only appears once the installation is closed.
+
 The tabbed shell is sized to the viewport and scrolls its content, not the
 document: the tabs are part of the frame rather than something the reader has
 to scroll back to. That is what pins them, rather than a fixed position paired
@@ -140,12 +144,20 @@ rather than lengthening a single page.
 
 ## Calibration
 
-The calibration screen holds the two ends of the training loop side by side on
-a wide screen and stacked on a phone: the models the appliance holds, and the
-recordings the next one will be trained from. Each carries its own history, so
-neither reads as a step of the other. The model in service is the head of the
-list it belongs to rather than a card above it — there is one collection, and
-one of its members is in use.
+Recording a capture is one component, used by the wizard's fourth step and by
+the calibration screen alike. It owns the live subscription, the rule that says
+a receiver has gone quiet, the description and placements a capture is written
+against, and the full-frame labelling surface — so an installation and a later
+campaign cannot drift into recording different things. Only the words above the
+form differ: the wizard adds a line saying what the operator is about to do,
+because that is where labelling is met for the first time.
+
+Below it, the calibration screen holds the two ends of the training loop side
+by side on a wide screen and stacked on a phone: the models the appliance
+holds, and the recordings the next one will be trained from. Each carries its
+own history, so neither reads as a step of the other. The model in service is
+the head of the list it belongs to rather than a card above it — there is one
+collection, and one of its members is in use.
 
 Both histories page at the same length, through the same control, and the model
 library is held by the shell rather than fetched by each screen that shows it:

@@ -221,6 +221,8 @@ export const fr: Messages = {
   'cal.classesLead':
     'Décidé une fois pour le site. Deux personnes qui labellisent la même file doivent placer les frontières au même endroit.',
   'cal.classesSaved': 'Descriptions enregistrées.',
+  'cal.wizardLead':
+    "Vous allez marquer la file en direct. Placez-vous face à elle, appuyez sur le niveau qui correspond à ce que vous voyez, et corrigez dès qu'il change. Comptez une vingtaine de minutes.",
   'cal.environment': "Ce qu'on enregistre",
   'cal.environmentHint': 'Par exemple : hall principal, service du midi, jour de pluie.',
   'cal.positions': 'Où sont les capteurs',
@@ -366,5 +368,4 @@ export const fr: Messages = {
   'wizard.stage.calibration.lead':
     'Apprenez au boîtier à quoi ressemble une file chargée sur ce site.',
   'wizard.stage.complete.lead': 'Tout est en place. Le boîtier est prêt.',
-  'wizard.comingNext': 'Cette étape n’est pas encore construite.',
 };

@@ -2,6 +2,7 @@
   import { type Stage, type Status } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
   import { STEPS, completion, visibleStage } from '$lib/wizard';
+  import CalibrationStep from '$components/wizard/CalibrationStep.svelte';
   import CompleteStep from '$components/wizard/CompleteStep.svelte';
   import NetworkStep from '$components/wizard/NetworkStep.svelte';
   import PairingStep from '$components/wizard/PairingStep.svelte';
@@ -65,10 +66,10 @@
               initialSsid={status.uplink.ssid ?? null}
               onupdated={accept}
             />
+          {:else if stage === 'calibration'}
+            <CalibrationStep {status} onupdated={accept} />
           {:else if stage === 'complete'}
             <CompleteStep onupdated={accept} />
-          {:else}
-            <p class="text-sm text-ink-500">{t('wizard.comingNext')}</p>
           {/if}
         </div>
       </div>
