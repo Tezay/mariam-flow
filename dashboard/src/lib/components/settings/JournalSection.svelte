@@ -239,7 +239,7 @@
                   </span>
                 </span>
                 {#if event.detail || event.client}
-                  <span class="mt-0.5 block text-xs break-words text-ink-500">
+                  <span class="mt-0.5 block text-xs wrap-break-word text-ink-500">
                     {event.detail ?? ''}
                     {#if event.client}
                       <span class="font-mono">{event.client}</span>

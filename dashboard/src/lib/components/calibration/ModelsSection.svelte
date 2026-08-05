@@ -122,7 +122,7 @@
             <Pencil size={14} aria-hidden="true" />
           </button>
         </div>
-        <h3 class="mt-2 text-xl font-semibold break-words">{named(active)}</h3>
+        <h3 class="mt-2 text-xl font-semibold wrap-break-word">{named(active)}</h3>
         <p class="mt-1 text-sm text-white/80">
           {#if active.manifest?.trained_at}
             {t('model.trained', { when: active.manifest.trained_at })} ·
@@ -152,7 +152,9 @@
         {#each shown as model (model.id)}
           <li class="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
             <span class="min-w-0 flex-1">
-              <span class="block text-sm font-medium break-words text-ink-900">{named(model)}</span>
+              <span class="block text-sm font-medium wrap-break-word text-ink-900"
+                >{named(model)}</span
+              >
               <span class="block text-xs text-ink-500">
                 {t('model.importedOn', {
                   when: formatDay(model.imported_at_us, formattingLocale()),

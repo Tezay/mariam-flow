@@ -74,7 +74,7 @@
         {#each shown as session (session.session_id)}
           <li class="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
             <span class="min-w-0 flex-1">
-              <span class="block text-sm font-medium break-words text-ink-900">
+              <span class="block text-sm font-medium wrap-break-word text-ink-900">
                 {session.environment || session.session_id}
               </span>
               <span class="block text-xs text-ink-500">
