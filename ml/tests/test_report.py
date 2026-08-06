@@ -7,11 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from flow_ml import evaluate_grouped, synthetic_session
+from flow_ml import evaluate_grouped, load_sessions, synthetic_session
 from flow_ml.report import (
     demo_sessions,
     evaluation_figure,
-    load_sessions_dir,
     main,
     session_figure,
 )
@@ -80,11 +79,11 @@ def test_main_reads_sessions_directory(tmp_path: Path) -> None:
     assert not (out / "evaluation.png").exists()
 
 
-def test_load_sessions_dir_skips_recording_directories(tmp_path: Path) -> None:
+def test_load_sessions_skips_recording_directories(tmp_path: Path) -> None:
     frames = [frame_obj(0), frame_obj(1)]
     write_session(tmp_path, frames=frames, labels=[])
     (tmp_path / "crashed.recording").mkdir()
-    sessions = load_sessions_dir(tmp_path)
+    sessions = load_sessions(tmp_path)
     assert [s.meta.session_id for s in sessions] == ["s-test-001"]
 
 

@@ -30,7 +30,7 @@ import numpy as np
 from matplotlib.figure import Figure
 
 from flow_ml.features import MIN_FRAMES_PER_NODE, NODE_FEATURES, node_features
-from flow_ml.session import DensityClass, Session, load_session
+from flow_ml.session import DensityClass, Session, load_sessions
 from flow_ml.synthetic import synthetic_session
 from flow_ml.training import EvaluationReport, evaluate_grouped
 from flow_ml.windows import DEFAULT_HOP_US, DEFAULT_WINDOW_US, sliding_windows
@@ -170,16 +170,6 @@ def _label_segments(session: Session) -> list[tuple[float, float, DensityClass]]
     return segments
 
 
-def load_sessions_dir(root: Path) -> list[Session]:
-    """Loads every sealed session directory under `root`, sorted by id."""
-    sessions: list[Session] = []
-    for child in sorted(root.iterdir()):
-        sealed = child.is_dir() and not child.name.endswith(".recording")
-        if sealed and (child / "meta.json").exists():
-            sessions.append(load_session(child))
-    return sessions
-
-
 def demo_sessions(count: int) -> list[Session]:
     """Synthetic sessions for trying the reports without any capture."""
     return [
@@ -208,7 +198,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--hop-us", type=int, default=DEFAULT_HOP_US)
     args = parser.parse_args(argv)
 
-    sessions = demo_sessions(args.demo) if args.demo else load_sessions_dir(args.sessions)
+    sessions = demo_sessions(args.demo) if args.demo else load_sessions(args.sessions)
     if not sessions:
         raise SystemExit("no session found")
     args.out.mkdir(parents=True, exist_ok=True)

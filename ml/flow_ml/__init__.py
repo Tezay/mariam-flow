@@ -25,6 +25,7 @@ from flow_ml.session import (
     SessionFormatError,
     SessionMeta,
     load_session,
+    load_sessions,
 )
 from flow_ml.synthetic import synthetic_session
 from flow_ml.training import (
@@ -51,6 +52,7 @@ __all__ = [
     "feature_names",
     "label_at",
     "load_session",
+    "load_sessions",
     "make_classifier",
     "node_features",
     "session_dataset",

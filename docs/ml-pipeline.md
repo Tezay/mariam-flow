@@ -92,3 +92,22 @@ class represents is answered on the appliance (ADR 0023).
 
 The bundle is packed as a gzipped tar with its members at the archive root and
 imported from the dashboard. See [models.md](models.md).
+
+## Training a bundle
+
+One command reads recorded captures — session directories, or the archives the
+dashboard exports — evaluates the classifier by holding whole sessions out,
+fits on everything, and writes the bundle:
+
+```sh
+uv run python -m flow_ml.train --sessions data/sessions \
+                               --out models --name campagne-juin
+uv run python -m flow_ml.train --demo 6 --out /tmp/models --name trial
+```
+
+It runs off the appliance. A deployed unit carries no Python runtime, and the
+board it runs on has neither the memory nor the time for a training run.
+
+Sessions are the unit of the cross-validation split, so the run needs at least
+as many sessions as folds; fewer is refused by name rather than by a
+traceback.
