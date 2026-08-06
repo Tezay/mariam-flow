@@ -14,6 +14,8 @@ timestamp ordering, class range, and node declarations.
 from __future__ import annotations
 
 import json
+import tarfile
+import tempfile
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -137,6 +139,35 @@ def load_session(path: Path) -> Session:
         labels.append(label)
 
     return Session(meta=meta, frames=tuple(frames), labels=tuple(labels))
+
+
+def load_sessions(root: Path) -> list[Session]:
+    """Loads every sealed session under `root`, sorted by name.
+
+    Accepts both shapes a capture arrives in: a session directory, and the
+    gzipped tar the appliance exports, whose members sit under the session
+    identifier.
+    """
+    sessions: list[Session] = []
+    for child in sorted(root.iterdir()):
+        if child.is_dir() and not child.name.endswith(".recording"):
+            if (child / META_FILE).exists():
+                sessions.append(load_session(child))
+        elif child.name.endswith(".tar.gz"):
+            sessions.append(_load_archive(child))
+    return sessions
+
+
+def _load_archive(path: Path) -> Session:
+    with tempfile.TemporaryDirectory() as staging:
+        with tarfile.open(path, "r:gz") as archive:
+            archive.extractall(staging, filter="data")
+        found = [d for d in Path(staging).iterdir() if (d / META_FILE).exists()]
+        if len(found) != 1:
+            raise SessionFormatError(
+                f"{path}: expected one session directory in the archive, found {len(found)}"
+            )
+        return load_session(found[0])
 
 
 def _read_json(path: Path) -> JsonObj:
