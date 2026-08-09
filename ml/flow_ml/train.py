@@ -49,13 +49,14 @@ def train(
     manifest = Manifest(
         name=name,
         trained_at=datetime.date.today().isoformat(),
-        sessions=len(sessions),
+        sessions=report.n_sessions,
     )
     directory = write_bundle(
         out / name,
         export_pipeline(classifier),
         AnalysisWindow(window_us=window_us, hop_us=hop_us),
         manifest,
+        report,
     )
     return archive_bundle(directory, out / f"{name}.tar.gz")
 

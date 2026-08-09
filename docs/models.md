@@ -1,9 +1,10 @@
 # Models coming back
 
 A model returns from training as an archive carrying `model.onnx`, the
-`analysis.json` geometry it was trained under, and an optional `model.json`
-manifest naming the run (ADR 0020). The geometry travels with the model: a
-window a model never saw produces estimates that are plausible and wrong.
+`analysis.json` geometry it was trained under, the `evaluation.json` scores it
+earned, and an optional `model.json` manifest naming the run (ADR 0020). The
+geometry travels with the model: a window a model never saw produces estimates
+that are plausible and wrong.
 
 What the site turns a density into a waiting time with is not in the archive
 and is never written by an import (ADR 0023).
@@ -18,6 +19,33 @@ Compatibility is decided by building the pipeline the bundle would run, rather
 than by a check of its own — most often a model trained for a different number
 of receivers. Only then are the files moved into the library, so a refused
 import leaves nothing behind.
+
+## Reading how a model scored
+
+A model reports what its training run measured, which is the only evidence the
+appliance has that one model is better than another. `GET /api/models/{id}`
+answers one model with its evaluation; the listing carries only whether there
+is one, since a library is read on every visit to the calibration screen and a
+matrix is read once someone has chosen a model.
+
+What the screen shows is derived from the confusion matrix rather than copied
+out of it, because a single accuracy figure says whether a model is right and
+never how it is wrong:
+
+- whether an empty zone is told from an occupied one, the three occupied
+  classes merged — the floor, below which nothing else can be trusted;
+- what share of the mistakes land on a neighbouring class, since the classes
+  are ordered and hesitating on a boundary is not the same fault as answering
+  at random;
+- whether the exact level is found, alongside the majority-class baseline it
+  has to beat.
+
+The captures a model was trained on are named, and resolved against the
+recordings the appliance still holds: a capture exported and removed is
+reported as gone rather than silently omitted.
+
+A bundle that arrived before training runs reported their scores says so, and
+estimates normally.
 
 ## The library
 

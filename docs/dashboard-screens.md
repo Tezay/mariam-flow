@@ -108,6 +108,16 @@ Both histories page at the same length, through the same control, and the model
 library is held by the shell rather than fetched by each screen that shows it:
 renaming a model on one tab must not leave another naming it the old way.
 
+Opening a model replaces the calibration surface rather than adding a tab: the
+question "is this model any good" is asked about one model at a time, and an
+operator who only ever configures the appliance is never shown that the screen
+exists. The detail reads from the general to the technical — four figures, then
+three sentences saying what the model can and cannot do, then the confusion
+matrix and the captures it was trained on, both behind a disclosure. The matrix
+is a table with its truth in the rows and its headers marked as such, so it can
+be read without sight; intensity carries the share within a row and weight
+carries the diagonal, so it can be read without colour.
+
 ## Shared pieces
 
 The shared pieces — the button, the surface, the section header, the pager, the

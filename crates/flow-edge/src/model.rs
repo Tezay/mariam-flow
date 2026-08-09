@@ -1,10 +1,11 @@
 //! Receiving a density model trained elsewhere.
 //!
-//! A model and the analysis geometry it was trained under travel together
-//! (`model.onnx` and `analysis.json`), because pairing a model with a window
-//! it never saw produces estimates that look plausible and are not. What the
-//! site turns a density into a waiting time with is deliberately not in here:
-//! nothing in a training run counts heads (ADR 0023).
+//! A model, the analysis geometry it was trained under and the scores it
+//! earned travel together (`model.onnx`, `analysis.json`, `evaluation.json`),
+//! because pairing a model with a window it never saw produces estimates that
+//! look plausible and are not (ADR 0024). What the site turns a density into a
+//! waiting time with is deliberately not in here: nothing in a training run
+//! counts heads (ADR 0023).
 //!
 //! Nothing is trusted on arrival: the archive comes from a browser, so its
 //! members are checked by name and by size before anything is written, and
@@ -106,6 +107,54 @@ pub struct Manifest {
     pub sessions: u32,
 }
 
+/// The evaluation a bundle carries.
+pub const BUNDLE_EVALUATION: &str = "evaluation.json";
+
+/// Payload version this appliance knows how to read.
+///
+/// An appliance can be older than the run that trained the model it is given.
+/// A payload announcing a version this one has never seen is reported as no
+/// evaluation at all, rather than read field by field until something fits.
+const EVALUATION_SCHEMA: u32 = 1;
+
+/// What one recorded capture contributed to a training run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrainingSession {
+    pub session_id: String,
+    pub windows: u32,
+    /// Windows per class, in `empty, low, medium, saturated` order.
+    #[serde(default)]
+    pub support: Vec<u32>,
+}
+
+/// How a model scored against captures it was never shown.
+///
+/// Produced by the training run and carried in the bundle: the appliance holds
+/// neither the captures a model was trained on nor a training runtime, so it
+/// cannot recompute any of this.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Evaluation {
+    pub schema: u32,
+    /// Share of windows predicted correctly, session-grouped.
+    pub accuracy: f64,
+    /// What always answering the majority class would have scored.
+    pub baseline_accuracy: f64,
+    /// Rows are truth, columns are prediction, in `empty..saturated` order.
+    ///
+    /// The orientation is part of the format: read the other way round, every
+    /// conclusion drawn from the matrix is inverted.
+    pub confusion: Vec<Vec<u32>>,
+    pub windows: u32,
+    /// Cross-validation folds the run used.
+    pub splits: u32,
+    /// Receivers the run was trained against, which a re-cabled site may no
+    /// longer match.
+    #[serde(default)]
+    pub receivers: Vec<String>,
+    #[serde(default)]
+    pub sessions: Vec<TrainingSession>,
+}
+
 /// One model held by the appliance.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StoredModel {
@@ -122,6 +171,11 @@ pub struct StoredModel {
     pub receivers: usize,
     /// Whether it is the one estimating right now.
     pub active: bool,
+    /// Whether it carries scores this appliance can read.
+    ///
+    /// A flag rather than the scores themselves: the list is read on every
+    /// visit to the calibration screen.
+    pub has_evaluation: bool,
 }
 
 /// A bundle unpacked but not yet in service.
@@ -169,7 +223,7 @@ pub fn stage(archive: &[u8], staging: &Path) -> Result<StagedBundle, ModelError>
         {
             return Err(ModelError::UnexpectedMember(name.into_owned()));
         }
-        if name != BUNDLE_MODEL && name != BUNDLE_ANALYSIS && name != BUNDLE_MANIFEST {
+        if !KEPT.contains(&name.as_ref()) {
             continue;
         }
         if entry.size() > MAX_MEMBER_BYTES {
@@ -240,8 +294,26 @@ pub fn library_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("models")
 }
 
+/// The directory a handle names, or nothing if it names anything else.
+///
+/// Refused rather than sanitised, as a session identifier is: the handle is a
+/// directory name, and a value that could climb out of the library is not a
+/// mistyped model, it is not a model at all.
+#[must_use]
+pub fn model_dir(data_dir: &Path, id: &str) -> Option<PathBuf> {
+    if id.is_empty() || id.contains(['/', '\\']) || id.contains("..") {
+        return None;
+    }
+    Some(library_dir(data_dir).join(id))
+}
+
 /// Files an appliance keeps for each model it holds.
-const KEPT: [&str; 3] = [BUNDLE_MODEL, BUNDLE_ANALYSIS, BUNDLE_MANIFEST];
+const KEPT: [&str; 4] = [
+    BUNDLE_MODEL,
+    BUNDLE_ANALYSIS,
+    BUNDLE_MANIFEST,
+    BUNDLE_EVALUATION,
+];
 
 /// Files a staged bundle into the library and returns its handle.
 ///
@@ -280,10 +352,7 @@ pub fn store(bundle: &StagedBundle, data_dir: &Path, now_us: u64) -> Result<Stri
 ///
 /// [`ModelError::Unknown`] if no such model is held, or a copy failure.
 pub fn activate(data_dir: &Path, id: &str) -> Result<(), ModelError> {
-    let dir = library_dir(data_dir).join(id);
-    if !dir.is_dir() {
-        return Err(ModelError::Unknown(id.to_owned()));
-    }
+    let dir = held(data_dir, id)?;
     std::fs::copy(dir.join(BUNDLE_MODEL), data_dir.join(crate::ACTIVE_MODEL))
         .map_err(|err| ModelError::Staging(err.to_string()))?;
     std::fs::copy(
@@ -319,10 +388,7 @@ pub fn active_analysis(data_dir: &Path) -> Result<AnalysisWindow, ModelError> {
 /// [`ModelError::Unknown`] if no model is held under that handle, or a write
 /// failure.
 pub fn rename(data_dir: &Path, id: &str, name: &str) -> Result<(), ModelError> {
-    let dir = library_dir(data_dir).join(id);
-    if !dir.is_dir() {
-        return Err(ModelError::Unknown(id.to_owned()));
-    }
+    let dir = held(data_dir, id)?;
     let path = dir.join(BUNDLE_MANIFEST);
     let mut manifest: Manifest = std::fs::read(&path)
         .ok()
@@ -345,11 +411,36 @@ pub fn rename(data_dir: &Path, id: &str, name: &str) -> Result<(), ModelError> {
 ///
 /// [`ModelError::Unknown`] if no such model is held.
 pub fn remove(data_dir: &Path, id: &str) -> Result<(), ModelError> {
-    let dir = library_dir(data_dir).join(id);
-    if !dir.is_dir() {
-        return Err(ModelError::Unknown(id.to_owned()));
-    }
+    let dir = held(data_dir, id)?;
     std::fs::remove_dir_all(&dir).map_err(|err| ModelError::Staging(err.to_string()))
+}
+
+/// The directory of a model this appliance actually holds.
+///
+/// # Errors
+///
+/// [`ModelError::Unknown`] whether the handle names nothing or names something
+/// that is not a model: the caller has no use for the difference, and saying
+/// which would confirm what lies outside the library.
+fn held(data_dir: &Path, id: &str) -> Result<PathBuf, ModelError> {
+    model_dir(data_dir, id)
+        .filter(|dir| dir.is_dir())
+        .ok_or_else(|| ModelError::Unknown(id.to_owned()))
+}
+
+/// Reads the evaluation of a stored model, when it carries one.
+///
+/// Absent rather than fatal: a bundle predating ADR 0024 has none, and it
+/// estimates as well as any other.
+#[must_use]
+pub fn evaluation(data_dir: &Path, id: &str) -> Option<Evaluation> {
+    read_evaluation(&held(data_dir, id).ok()?)
+}
+
+fn read_evaluation(dir: &Path) -> Option<Evaluation> {
+    let bytes = std::fs::read(dir.join(BUNDLE_EVALUATION)).ok()?;
+    let evaluation: Evaluation = serde_json::from_slice(&bytes).ok()?;
+    (evaluation.schema == EVALUATION_SCHEMA).then_some(evaluation)
 }
 
 /// Every model the appliance holds, newest first.
@@ -364,8 +455,23 @@ pub fn library(data_dir: &Path, active: Option<&str>) -> Vec<StoredModel> {
         .filter(|entry| entry.path().is_dir())
         .filter_map(|entry| describe(&entry.path(), active))
         .collect();
-    models.sort_by_key(|model| std::cmp::Reverse(model.imported_at_us));
+    // Ties break on the handle rather than on the directory read order, which
+    // differs between filesystems.
+    models.sort_by(|a, b| {
+        b.imported_at_us
+            .cmp(&a.imported_at_us)
+            .then_with(|| b.id.cmp(&a.id))
+    });
     models
+}
+
+/// One model of the library, by its handle.
+///
+/// Described through the same reader as the listing, so a model can never
+/// read one way in a list and another way on its own.
+#[must_use]
+pub fn describe_stored(data_dir: &Path, id: &str, active: Option<&str>) -> Option<StoredModel> {
+    describe(&held(data_dir, id).ok()?, active)
 }
 
 fn describe(dir: &Path, active: Option<&str>) -> Option<StoredModel> {
@@ -383,6 +489,7 @@ fn describe(dir: &Path, active: Option<&str>) -> Option<StoredModel> {
         active: active == Some(id.as_str()),
         imported_at_us: imported_at(&id).unwrap_or(0),
         window_us: analysis.window_us,
+        has_evaluation: read_evaluation(dir).is_some(),
         receivers,
         manifest,
         id,
@@ -784,5 +891,142 @@ mod tests {
             rename(dir.path(), "no-such-model", "whatever"),
             Err(ModelError::Unknown(_))
         ));
+    }
+
+    fn evaluation_json() -> Vec<u8> {
+        br#"{"schema":1,"accuracy":0.674,"baseline_accuracy":0.312,
+             "confusion":[[612,74,11,3],[88,401,118,22],[14,131,356,96],[6,27,142,330]],
+             "windows":2841,"splits":4,"receivers":["rx-1"],
+             "sessions":[{"session_id":"bench-001","windows":2841,
+                          "support":[700,710,715,716]}]}"#
+            .to_vec()
+    }
+
+    fn stored_with(data: &Path, members: &[(&str, &[u8])]) -> String {
+        let bundle = stage(&archive(members), &data.join("staging")).unwrap();
+        store(&bundle, data, 1_785_600_000_000_000).unwrap()
+    }
+
+    #[test]
+    fn the_scores_a_run_earned_survive_the_import() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let id = stored_with(
+            data,
+            &[
+                (BUNDLE_MODEL, &real_model()),
+                (BUNDLE_ANALYSIS, &site_json()),
+                (BUNDLE_EVALUATION, &evaluation_json()),
+            ],
+        );
+
+        let evaluation = evaluation(data, &id).expect("the bundle carried scores");
+
+        assert!((evaluation.accuracy - 0.674).abs() < 1e-9);
+        // Rows are truth: truly saturated, predicted medium 142 times.
+        assert_eq!(evaluation.confusion[3], vec![6, 27, 142, 330]);
+        assert_eq!(evaluation.sessions[0].session_id, "bench-001");
+        assert!(library(data, None)[0].has_evaluation);
+    }
+
+    #[test]
+    fn a_bundle_trained_before_runs_reported_their_scores_still_imports() {
+        // Refusing it would strand a model that estimates perfectly well.
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let id = stored_with(
+            data,
+            &[
+                (BUNDLE_MODEL, &real_model()),
+                (BUNDLE_ANALYSIS, &site_json()),
+            ],
+        );
+
+        assert!(evaluation(data, &id).is_none());
+        assert!(!library(data, None)[0].has_evaluation);
+    }
+
+    #[test]
+    fn a_payload_from_a_newer_run_is_reported_as_no_evaluation() {
+        // Read field by field, an unknown schema would produce numbers that
+        // look like scores. Absent is the only honest answer.
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let id = stored_with(
+            data,
+            &[
+                (BUNDLE_MODEL, &real_model()),
+                (BUNDLE_ANALYSIS, &site_json()),
+                (
+                    BUNDLE_EVALUATION,
+                    br#"{"schema":99,"accuracy":1.0,"baseline_accuracy":0.0,
+                         "confusion":[],"windows":0,"splits":0}"#,
+                ),
+            ],
+        );
+
+        assert!(evaluation(data, &id).is_none());
+        assert!(!library(data, None)[0].has_evaluation);
+    }
+
+    #[test]
+    fn models_imported_in_the_same_second_still_list_in_one_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        for name in ["alpha", "omega", "middle"] {
+            let path = library_dir(data).join(format!("20260812T101500Z-{name}"));
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(path.join(BUNDLE_ANALYSIS), site_json()).unwrap();
+        }
+
+        let listed: Vec<String> = library(data, None).into_iter().map(|m| m.id).collect();
+
+        assert_eq!(
+            listed,
+            [
+                "20260812T101500Z-omega",
+                "20260812T101500Z-middle",
+                "20260812T101500Z-alpha",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_handle_that_could_climb_out_of_the_library_names_no_model() {
+        // The handle is a directory name. A value that escapes the library is
+        // not a mistyped model, it is not a model at all.
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+
+        assert!(model_dir(data, "../../etc").is_none());
+        assert!(model_dir(data, "a/b").is_none());
+        assert!(model_dir(data, "").is_none());
+        assert!(model_dir(data, "20260812T101500Z-campagne-juin").is_some());
+
+        assert!(matches!(
+            remove(data, "../../etc"),
+            Err(ModelError::Unknown(_))
+        ));
+        assert!(evaluation(data, "../../etc").is_none());
+        assert!(describe_stored(data, "../../etc", None).is_none());
+    }
+
+    #[test]
+    fn one_model_reads_the_same_alone_as_in_the_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let id = stored_with(
+            data,
+            &[
+                (BUNDLE_MODEL, &real_model()),
+                (BUNDLE_ANALYSIS, &site_json()),
+                (BUNDLE_EVALUATION, &evaluation_json()),
+            ],
+        );
+
+        assert_eq!(
+            describe_stored(data, &id, Some(&id)).unwrap(),
+            library(data, Some(&id))[0]
+        );
     }
 }

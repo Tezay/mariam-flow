@@ -13,10 +13,11 @@ function model(id: string, name: string, active = false): StoredModel {
     window_us: 5_000_000,
     receivers: 2,
     active,
+    has_evaluation: true,
   };
 }
 
-const BASE = { onupdated() {}, onchanged() {} };
+const BASE = { onupdated() {}, onchanged() {}, onopen() {} };
 
 describe('ModelsSection', () => {
   it('heads the list with the model in service', () => {

@@ -41,6 +41,13 @@ from flow_ml.features import session_dataset
 from flow_ml.session import DensityClass, Session
 from flow_ml.windows import DEFAULT_HOP_US, DEFAULT_WINDOW_US
 
+EVALUATION_SCHEMA = 1
+"""Version of the `evaluation.json` payload.
+
+The appliance reading it may be older than the run that wrote it, and reports
+a version it does not know as no evaluation rather than guessing at fields.
+"""
+
 
 def make_classifier() -> Pipeline:
     """Standardization followed by multinomial logistic regression.
@@ -86,6 +93,16 @@ def build_dataset(
 
 
 @dataclass(frozen=True)
+class SessionBreakdown:
+    """What one recorded capture contributed to a run."""
+
+    session_id: str
+    windows: int
+    support: tuple[int, ...]
+    """Windows per class, in 0..3 order."""
+
+
+@dataclass(frozen=True)
 class EvaluationReport:
     """Pooled result of a session-grouped cross-validation."""
 
@@ -94,7 +111,14 @@ class EvaluationReport:
     confusion: npt.NDArray[np.int64]
     """Rows: true class, columns: predicted class, in 0..3 order."""
     n_windows: int
-    n_sessions: int
+    splits: int
+    receivers: tuple[str, ...]
+    sessions: tuple[SessionBreakdown, ...]
+
+    @property
+    def n_sessions(self) -> int:
+        """Sessions that produced at least one usable window."""
+        return len(self.sessions)
 
     def format(self) -> str:
         """Human-readable summary with the confusion matrix."""
@@ -111,6 +135,31 @@ class EvaluationReport:
             row = "".join(str(int(v)).rjust(width) for v in self.confusion[i])
             lines.append(name.rjust(width) + row)
         return "\n".join(lines)
+
+    def as_dict(self) -> dict[str, object]:
+        """The `evaluation.json` payload, field for field as it ships.
+
+        Carries the confusion matrix in the orientation this module computes
+        it — rows are truth — because a matrix read the other way round
+        inverts every conclusion drawn from it.
+        """
+        return {
+            "schema": EVALUATION_SCHEMA,
+            "accuracy": self.accuracy,
+            "baseline_accuracy": self.baseline_accuracy,
+            "confusion": [[int(v) for v in row] for row in self.confusion],
+            "windows": self.n_windows,
+            "splits": self.splits,
+            "receivers": list(self.receivers),
+            "sessions": [
+                {
+                    "session_id": session.session_id,
+                    "windows": session.windows,
+                    "support": list(session.support),
+                }
+                for session in self.sessions
+            ],
+        }
 
 
 def evaluate_grouped(
@@ -160,5 +209,41 @@ def evaluate_grouped(
         baseline_accuracy=float(np.mean(truth == baseline)),
         confusion=matrix,
         n_windows=int(truth.shape[0]),
-        n_sessions=n_groups,
+        splits=n_splits,
+        receivers=_receivers(sessions, groups),
+        sessions=_breakdown(sessions, y, groups),
     )
+
+
+def _breakdown(
+    sessions: Sequence[Session],
+    y: npt.NDArray[np.int64],
+    groups: npt.NDArray[np.int64],
+) -> tuple[SessionBreakdown, ...]:
+    """Per-session window counts, in the order the sessions were read.
+
+    ``groups`` holds the index a row came from in `sessions`, so a capture
+    that yielded nothing is absent here rather than present with zeroes —
+    it took no part in the evaluation.
+    """
+    classes = len(DensityClass)
+    return tuple(
+        SessionBreakdown(
+            session_id=sessions[index].meta.session_id,
+            windows=int(np.count_nonzero(groups == index)),
+            support=tuple(
+                int(count) for count in np.bincount(y[groups == index], minlength=classes)
+            ),
+        )
+        for index in sorted(set(groups.tolist()))
+    )
+
+
+def _receivers(sessions: Sequence[Session], groups: npt.NDArray[np.int64]) -> tuple[str, ...]:
+    """Receivers the run was trained against.
+
+    Taken from the first contributing session: the feature matrix is one
+    row per window with one block per receiver, so sessions declaring
+    different receivers could not have been stacked in the first place.
+    """
+    return sessions[int(groups[0])].rx_node_ids

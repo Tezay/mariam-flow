@@ -14,7 +14,31 @@ export type StoredModel = {
   window_us: number;
   receivers: number;
   active: boolean;
+  has_evaluation: boolean;
 };
+
+/** What one recorded capture contributed to a training run. */
+export type TrainingSession = {
+  session_id: string;
+  windows: number;
+  /** Windows per class, in `empty, low, medium, saturated` order. */
+  support: number[];
+};
+
+/** How a model scored against captures it was never shown. */
+export type Evaluation = {
+  accuracy: number;
+  baseline_accuracy: number;
+  /** Rows are truth, columns are prediction, in `empty..saturated` order. */
+  confusion: number[][];
+  windows: number;
+  splits: number;
+  receivers: string[];
+  sessions: TrainingSession[];
+};
+
+/** A model and what its training run said about it. */
+export type ModelDetail = StoredModel & { evaluation?: Evaluation };
 
 /**
  * Takes a trained model bundle into service.
@@ -46,6 +70,16 @@ export async function fetchModels(): Promise<StoredModel[]> {
     return response.ok ? ((await response.json()) as StoredModel[]) : [];
   } catch {
     return [];
+  }
+}
+
+/** Reads one model with the scores its training run earned. */
+export async function fetchModel(id: string): Promise<ModelDetail | null> {
+  try {
+    const response = await fetch(`/api/models/${encodeURIComponent(id)}`);
+    return response.ok ? ((await response.json()) as ModelDetail) : null;
+  } catch {
+    return null;
   }
 }
 

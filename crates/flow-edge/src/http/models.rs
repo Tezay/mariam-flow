@@ -97,6 +97,32 @@ pub(super) async fn models(State(state): State<EdgeState>) -> Json<Vec<model::St
     Json(model::library(&data_dir, active.as_deref()))
 }
 
+/// One model with the scores its training run earned.
+pub(super) async fn model_detail(
+    State(state): State<EdgeState>,
+    axum::extract::Path(model_id): axum::extract::Path<String>,
+) -> Response {
+    let (data_dir, active) = (state.data_dir(), state.config_snapshot().active_model);
+    let Some(model) = model::describe_stored(&data_dir, &model_id, active.as_deref()) else {
+        return error_response(StatusCode::NOT_FOUND, "no such model");
+    };
+    Json(ModelDetail {
+        evaluation: model::evaluation(&data_dir, &model_id),
+        model,
+    })
+    .into_response()
+}
+
+/// A model and what its training run said about it.
+#[derive(serde::Serialize)]
+struct ModelDetail {
+    #[serde(flatten)]
+    model: model::StoredModel,
+    /// Absent for a bundle trained before runs reported their scores.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    evaluation: Option<model::Evaluation>,
+}
+
 /// Puts one of the stored models back into service.
 pub(super) async fn use_model(
     State(state): State<EdgeState>,

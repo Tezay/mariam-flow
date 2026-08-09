@@ -46,7 +46,9 @@ use self::calibration::{
 use self::install::{set_installation, set_network_survey, set_queue, set_site, set_uplink};
 use self::journal::{events, events_csv};
 use self::live::{estimates, live, public_estimate};
-use self::models::{MAX_BUNDLE_BYTES, forget_model, import_model, models, rename_model, use_model};
+use self::models::{
+    MAX_BUNDLE_BYTES, forget_model, import_model, model_detail, models, rename_model, use_model,
+};
 use self::nodes::{adopt_hardware, describe_node, discovery, set_nodes};
 use self::schedule::{service_window, set_service_window};
 
@@ -76,7 +78,8 @@ pub fn router(state: EdgeState) -> Router {
         .route("/api/models", get(models))
         .route(
             "/api/models/{model_id}",
-            axum::routing::delete(forget_model)
+            get(model_detail)
+                .delete(forget_model)
                 .post(use_model)
                 .patch(rename_model),
         )

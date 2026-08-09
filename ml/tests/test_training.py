@@ -79,6 +79,38 @@ def test_classifier_separates_synthetic_classes_across_sessions() -> None:
     assert "saturated" in text
 
 
+def test_the_report_names_the_sessions_it_covered() -> None:
+    report = evaluate_grouped(make_sessions(3), n_splits=3, hop_us=2 * SECOND)
+
+    assert [entry.session_id for entry in report.sessions] == [
+        "synthetic-000",
+        "synthetic-001",
+        "synthetic-002",
+    ]
+    assert sum(entry.windows for entry in report.sessions) == report.n_windows
+    assert all(sum(entry.support) == entry.windows for entry in report.sessions)
+
+
+def test_the_report_records_the_receivers_it_was_trained_against() -> None:
+    report = evaluate_grouped(make_sessions(3), n_splits=3, hop_us=2 * SECOND)
+
+    assert report.receivers == make_sessions(1)[0].rx_node_ids
+
+
+def test_a_session_with_no_usable_window_is_absent_rather_than_empty() -> None:
+    # It took no part in the evaluation, so listing it with zeroes would
+    # suggest a capture that contributed nothing rather than one that was
+    # never read.
+    sessions = make_sessions(3)
+    unlabelled = Session(meta=sessions[0].meta, frames=sessions[0].frames, labels=())
+    report = evaluate_grouped([*sessions[1:], unlabelled], n_splits=2, hop_us=2 * SECOND)
+
+    assert [entry.session_id for entry in report.sessions] == [
+        "synthetic-001",
+        "synthetic-002",
+    ]
+
+
 def test_evaluate_rejects_more_splits_than_sessions() -> None:
     with pytest.raises(ValueError, match="only 2 sessions"):
         evaluate_grouped(make_sessions(2), n_splits=3, hop_us=2 * SECOND)

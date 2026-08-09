@@ -30,6 +30,7 @@ from flow_ml.session import (
 from flow_ml.synthetic import synthetic_session
 from flow_ml.training import (
     EvaluationReport,
+    SessionBreakdown,
     build_dataset,
     evaluate_grouped,
     make_classifier,
@@ -44,6 +45,7 @@ __all__ = [
     "Label",
     "NodePlacement",
     "Session",
+    "SessionBreakdown",
     "SessionFormatError",
     "SessionMeta",
     "Window",

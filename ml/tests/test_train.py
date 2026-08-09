@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from flow_ml.bundle import ANALYSIS_FILE, MANIFEST_FILE, MODEL_FILE
+from flow_ml.bundle import ANALYSIS_FILE, EVALUATION_FILE, MANIFEST_FILE, MODEL_FILE
 from flow_ml.session import load_sessions
 from flow_ml.train import main
 from tests.helpers import frame_obj, label_obj, meta_obj, write_session
@@ -71,10 +71,38 @@ def test_the_command_writes_a_bundle_the_appliance_accepts(tmp_path: Path) -> No
         analysis = json.load(opened.extractfile(ANALYSIS_FILE))  # type: ignore[arg-type]
         manifest = json.load(opened.extractfile(MANIFEST_FILE))  # type: ignore[arg-type]
 
-    assert names == sorted([MODEL_FILE, ANALYSIS_FILE, MANIFEST_FILE])
+    assert names == sorted([MODEL_FILE, ANALYSIS_FILE, MANIFEST_FILE, EVALUATION_FILE])
     assert set(analysis) == {"window_us", "hop_us"}
     assert manifest["name"] == "essai"
     assert manifest["sessions"] == 4
+
+
+def test_the_bundle_carries_the_scores_the_run_printed(tmp_path: Path) -> None:
+    # The evaluation the command prints and the one it ships are the same
+    # object: a second computation could disagree with the first.
+    main(["--demo", "4", "--out", str(tmp_path), "--name", "essai", "--splits", "2"])
+
+    with tarfile.open(tmp_path / "essai.tar.gz") as opened:
+        evaluation = json.load(opened.extractfile(EVALUATION_FILE))  # type: ignore[arg-type]
+
+    assert evaluation["splits"] == 2
+    assert 0.0 <= evaluation["accuracy"] <= 1.0
+    assert sum(sum(row) for row in evaluation["confusion"]) == evaluation["windows"]
+    assert [entry["session_id"] for entry in evaluation["sessions"]] == [
+        f"demo-{index}" for index in range(4)
+    ]
+
+
+def test_the_manifest_counts_the_captures_that_actually_trained_it(tmp_path: Path) -> None:
+    # The manifest's count and the evaluation's list must not disagree: a
+    # capture with no usable window took no part and belongs in neither.
+    main(["--demo", "3", "--out", str(tmp_path), "--name", "essai", "--splits", "3"])
+
+    with tarfile.open(tmp_path / "essai.tar.gz") as opened:
+        manifest = json.load(opened.extractfile(MANIFEST_FILE))  # type: ignore[arg-type]
+        evaluation = json.load(opened.extractfile(EVALUATION_FILE))  # type: ignore[arg-type]
+
+    assert manifest["sessions"] == len(evaluation["sessions"])
 
 
 def test_the_window_trained_under_is_the_one_recorded(tmp_path: Path) -> None:
