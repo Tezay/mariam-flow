@@ -81,10 +81,23 @@ uv run python -m flow_ml.report --demo 6 --out /tmp/report   # synthetic
 
 ## The deployable bundle
 
-A training run produces a directory holding `model.onnx`, `analysis.json` and
-an optional `model.json` manifest naming the run. `analysis.json` carries the
-analysis window and hop the run was trained under; these must never be chosen
-independently of it.
+A training run produces a directory holding `model.onnx`, `analysis.json`,
+`evaluation.json` and an optional `model.json` manifest naming the run.
+`analysis.json` carries the analysis window and hop the run was trained under;
+these must never be chosen independently of it.
+
+`evaluation.json` carries what the run measured — accuracy, the majority-class
+baseline, the confusion matrix, and the captures it was trained on (ADR 0024).
+The appliance cannot recompute any of it, holding neither those captures nor a
+training runtime, so it ships with the weights or it is lost. The matrix is
+oriented **rows are truth, columns are prediction**, in `empty, low, medium,
+saturated` order; the orientation is part of the format because reading it the
+other way round inverts every conclusion.
+
+The member is additive and declares its schema: a bundle produced before it
+existed still imports and reports no evaluation, and a payload announcing a
+version the appliance does not know is reported the same way rather than read
+field by field.
 
 What a site turns a density into a waiting time with is deliberately absent
 from the bundle: nothing in a training run counts heads, so the people count a

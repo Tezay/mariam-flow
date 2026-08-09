@@ -1,5 +1,6 @@
 <script lang="ts">
   import BadgeCheck from '@lucide/svelte/icons/badge-check';
+  import ChartNoAxesColumn from '@lucide/svelte/icons/chart-no-axes-column';
   import CircleAlert from '@lucide/svelte/icons/circle-alert';
   import Cpu from '@lucide/svelte/icons/cpu';
   import Pencil from '@lucide/svelte/icons/pencil';
@@ -27,10 +28,12 @@
     models,
     onupdated,
     onchanged,
+    onopen,
   }: {
     models: StoredModel[];
     onupdated: (status: Status) => void;
     onchanged: () => void;
+    onopen: (model: StoredModel) => void;
   } = $props();
 
   let bundle = $state<File | null>(null);
@@ -133,6 +136,12 @@
           {t('model.window', { value: formatWindow(active.window_us) })} ·
           {t('model.receivers', { count: active.receivers })}
         </p>
+        <div class="mt-3">
+          <Button variant="outline" size="sm" onclick={() => onopen(active)}>
+            <ChartNoAxesColumn size={14} aria-hidden="true" />
+            {t('model.inspect')}
+          </Button>
+        </div>
       </div>
     {:else}
       <div class="flex items-start gap-2 bg-ink-100 p-5">
@@ -162,6 +171,15 @@
               </span>
             </span>
             <span class="flex shrink-0 items-center gap-1">
+              <Button
+                variant="quiet"
+                size="icon"
+                label={t('model.inspect')}
+                title={t('model.inspect')}
+                onclick={() => onopen(model)}
+              >
+                <ChartNoAxesColumn size={14} aria-hidden="true" />
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
