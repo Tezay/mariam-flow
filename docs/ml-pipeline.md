@@ -124,3 +124,9 @@ board it runs on has neither the memory nor the time for a training run.
 Sessions are the unit of the cross-validation split, so the run needs at least
 as many sessions as folds; fewer is refused by name rather than by a
 traceback.
+
+A campaign that never marked one of the four levels is refused the same way.
+The classifier fits the classes it is shown, so an unobserved one is missing
+from the exported graph's output — and the four classes are the frozen output
+space (ADR 0002). The evaluation is still printed before the refusal: the empty
+row of the confusion matrix is what explains it.

@@ -119,6 +119,24 @@ def test_the_window_trained_under_is_the_one_recorded(tmp_path: Path) -> None:
     assert analysis == {"window_us": 7_000_000, "hop_us": 2_000_000}
 
 
+def test_a_campaign_that_never_observed_a_class_is_refused_by_name(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # `_session` marks empty and medium only, which is what makes it the
+    # fixture for this case.
+    root = tmp_path / "captures"
+    root.mkdir()
+    for index in range(3):
+        _session(root, f"s-{index}")
+
+    with pytest.raises(SystemExit):
+        main(["--sessions", str(root), "--out", str(tmp_path), "--name", "trou", "--splits", "3"])
+
+    named = capsys.readouterr().err.split("labelled ", 1)[1].split(":", 1)[0]
+    assert named == "low, saturated", "the refusal names exactly what is missing"
+    assert not (tmp_path / "trou.tar.gz").exists(), "a refused run leaves nothing behind"
+
+
 def test_fewer_sessions_than_folds_is_refused_by_name(tmp_path: Path) -> None:
     # Sessions are the split unit, so two of them cannot be cut into three
     # folds — and the message has to say what to do rather than raise.

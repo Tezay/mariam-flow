@@ -102,7 +102,8 @@ impl DensityModel {
     ///
     /// [`InferError::Load`] if the file cannot be read or planned;
     /// [`InferError::BadInputShape`] if the model input is not a concrete
-    /// `[1, n]` float tensor.
+    /// `[1, n]` float tensor; [`InferError::BadOutput`] if it does not answer
+    /// one probability per density class.
     pub fn load(path: &Path) -> Result<Self, InferError> {
         let plan: Plan = tract_onnx::onnx()
             .model_for_path(path)
@@ -119,6 +120,18 @@ impl DensityModel {
             [1, n] => *n,
             _ => return Err(InferError::BadInputShape),
         };
+
+        // Checked here rather than at the first prediction: by then a caller
+        // has accepted the model and put it in service.
+        let output = plan
+            .model()
+            .output_fact(0)
+            .map_err(|err| InferError::Load(err.to_string()))?;
+        match output.shape.as_concrete() {
+            Some([1, n]) if *n == DensityClass::ALL.len() => {}
+            _ => return Err(InferError::BadOutput),
+        }
+
         Ok(Self { plan, n_features })
     }
 

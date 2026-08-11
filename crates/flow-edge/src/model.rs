@@ -578,6 +578,15 @@ mod tests {
         .unwrap()
     }
 
+    /// A model from a campaign that never marked one of the four levels.
+    fn incomplete_model() -> Vec<u8> {
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../flow-infer/tests/fixtures/model-incomplete.onnx"
+        ))
+        .unwrap()
+    }
+
     #[test]
     fn a_bundle_yields_its_model_and_the_tuning_it_was_trained_under() {
         let dir = tempfile::tempdir().unwrap();
@@ -967,6 +976,25 @@ mod tests {
 
         assert!(evaluation(data, &id).is_none());
         assert!(!library(data, None)[0].has_evaluation);
+    }
+
+    #[test]
+    fn a_model_that_cannot_answer_every_class_is_refused_at_import() {
+        // Its input width matches one receiver, so nothing but the output
+        // check stands between this bundle and the library.
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = archive(&[
+            (BUNDLE_MODEL, &incomplete_model()),
+            (BUNDLE_ANALYSIS, &site_json()),
+        ]);
+        let staged = stage(&bytes, &dir.path().join("staging")).unwrap();
+
+        let outcome = check(&staged, vec!["rx-1".into()]);
+
+        let Err(ModelError::Unusable(message)) = outcome else {
+            panic!("a model one class short was accepted");
+        };
+        assert!(message.contains("output"), "{message}");
     }
 
     #[test]

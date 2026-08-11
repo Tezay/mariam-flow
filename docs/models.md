@@ -20,6 +20,12 @@ than by a check of its own — most often a model trained for a different number
 of receivers. Only then are the files moved into the library, so a refused
 import leaves nothing behind.
 
+Loading a model checks both ends of it: the input width against the receivers
+this appliance has, and the output against the four classes. A run that never
+observed one of them exports a graph one column short, which the input check
+alone would accept and the first estimate would then fail on — after the model
+had been put in service.
+
 ## Reading how a model scored
 
 A model reports what its training run measured, which is the only evidence the
