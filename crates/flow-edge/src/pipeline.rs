@@ -28,7 +28,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use flow_core::CsiFrame;
-use flow_infer::{DensityModel, LiveConfig, LivePipeline};
+use flow_infer::{DensityModel, LiveConfig, LiveError, LivePipeline};
 use flow_ingest::{FrameSource, MacAddr, SenderKey, SourceConfig, SourceError};
 use serde::Serialize;
 
@@ -399,6 +399,17 @@ fn is_quiet(err: &SourceError) -> bool {
     )
 }
 
+/// Whether a failed estimate blames the frame rather than the model.
+///
+/// A frame fault passes with the frame; anything else is the model failing to
+/// run at all, which no later frame will fix.
+fn is_frame_fault(err: &LiveError) -> bool {
+    matches!(
+        err,
+        LiveError::Frame(_) | LiveError::OutOfOrder { .. } | LiveError::Feature(_)
+    )
+}
+
 /// The blocking loop: read, infer, publish, fold, record.
 ///
 /// Estimation is one stage of the iteration, skipped when there is nothing to
@@ -488,6 +499,7 @@ fn run(
             state.record_frame(frame);
         }
 
+        let mut inference_failed = false;
         if let (Some(frame), true, false, Some(pipeline)) =
             (frame, open, recording, estimator.as_mut())
         {
@@ -500,14 +512,22 @@ fn run(
                     state.publish_estimate(estimate);
                 }
                 Ok(None) => {}
+                Err(err) if is_frame_fault(&err) => {}
                 Err(err) => {
                     state.record(
-                        Event::new(EventKind::Stopped)
+                        Event::new(EventKind::ModelRejected)
                             .with_detail(format!("inference error: {err}")),
                     );
-                    break;
+                    inference_failed = true;
                 }
             }
+        }
+        // Detached, never broken out of: estimating is a stage of this loop and
+        // not the loop itself (ADR 0017), and it is the intake still running
+        // that lets a replacement model be imported at all.
+        if inference_failed {
+            estimator = None;
+            state.set_estimating(false);
         }
 
         state.set_stream_health(health(
@@ -577,6 +597,24 @@ mod tests {
             let err = SourceError::Io(std::io::Error::new(kind, "no datagram"));
             assert!(is_quiet(&err), "{kind:?} should be a heartbeat");
         }
+    }
+
+    #[test]
+    fn one_bad_frame_never_takes_the_estimator_off_the_air() {
+        for err in [
+            LiveError::OutOfOrder { last: 20, got: 10 },
+            LiveError::Frame(flow_core::FrameError::Empty),
+            LiveError::Feature(flow_infer::FeatureError::InconsistentSubcarriers),
+        ] {
+            assert!(is_frame_fault(&err), "{err} blames the frame");
+        }
+    }
+
+    #[test]
+    fn a_model_that_cannot_run_is_taken_off_the_air() {
+        let err = LiveError::Infer(flow_infer::InferError::BadOutput);
+
+        assert!(!is_frame_fault(&err));
     }
 
     #[test]

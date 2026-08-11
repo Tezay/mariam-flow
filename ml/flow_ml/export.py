@@ -36,13 +36,14 @@ from onnx import TensorProto, helper, numpy_helper
 from sklearn.pipeline import Pipeline
 
 from flow_ml.features import NODE_FEATURES, node_features
-from flow_ml.session import Frame, Session
+from flow_ml.session import DensityClass, Frame, Session
 from flow_ml.synthetic import synthetic_session
 from flow_ml.training import build_dataset, make_classifier
 from flow_ml.windows import sliding_windows
 
 PARITY_TOLERANCE = 1e-5
 MODEL_FILE = "model.onnx"
+INCOMPLETE_MODEL_FILE = "model-incomplete.onnx"
 PARITY_FILE = "parity.json"
 
 FEATURES_FILE = "features.json"
@@ -206,6 +207,22 @@ def write_feature_fixture(out_dir: Path, *, cases: int = 8) -> None:
     (out_dir / FEATURES_FILE).write_text(json.dumps(payload, indent=1), encoding="utf-8")
 
 
+def write_incomplete_fixture(out_dir: Path) -> None:
+    """Writes a model one class short, for the guard that must refuse it.
+
+    Generated here rather than hand-forged in Rust: the fixture has to be a
+    graph a real run would produce, not one shaped to pass the check.
+    """
+    x, y, _ = build_dataset(fixture_sessions(), hop_us=2_000_000)
+    observed = y != int(DensityClass.LOW)
+    pipeline = make_classifier()
+    pipeline.fit(x[observed], y[observed])
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    proto = export_pipeline(pipeline)
+    (out_dir / INCOMPLETE_MODEL_FILE).write_bytes(proto.SerializeToString())
+
+
 def main() -> None:
     """Entry point: ``python -m flow_ml.export <output_dir>`` — writes all
     Rust-side parity fixtures (model, probabilities, features)."""
@@ -214,6 +231,7 @@ def main() -> None:
     out_dir = Path(sys.argv[1])
     write_parity_fixture(out_dir)
     write_feature_fixture(out_dir)
+    write_incomplete_fixture(out_dir)
 
 
 if __name__ == "__main__":

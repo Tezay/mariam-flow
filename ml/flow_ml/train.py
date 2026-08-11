@@ -19,9 +19,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+import numpy as np
+import numpy.typing as npt
+
 from flow_ml.bundle import AnalysisWindow, Manifest, archive_bundle, write_bundle
 from flow_ml.export import export_pipeline
-from flow_ml.session import Session, load_sessions
+from flow_ml.session import DensityClass, Session, load_sessions
 from flow_ml.synthetic import synthetic_session
 from flow_ml.training import build_dataset, evaluate_grouped, make_classifier
 from flow_ml.windows import DEFAULT_HOP_US, DEFAULT_WINDOW_US
@@ -41,6 +44,7 @@ def train(
     print(report.format())
 
     x, y, _ = build_dataset(sessions, window_us=window_us, hop_us=hop_us)
+    refuse_missing_classes(y)
     classifier = make_classifier()
     classifier.fit(x, y)
 
@@ -59,6 +63,24 @@ def train(
         report,
     )
     return archive_bundle(directory, out / f"{name}.tar.gz")
+
+
+def refuse_missing_classes(y: npt.NDArray[np.int64]) -> None:
+    """Refuses a campaign that never observed one of the four classes.
+
+    The classifier fits the classes it is shown, so one absent from the labels
+    is absent from the exported graph's output — which the appliance refuses
+    (ADR 0002).
+    """
+    seen = set(y.tolist())
+    missing = [density for density in DensityClass if int(density) not in seen]
+    if missing:
+        names = ", ".join(density.name.lower() for density in missing)
+        raise ValueError(
+            f"no window is labelled {names}: the four classes are the model's fixed "
+            f"output, so a campaign that never observed one cannot produce a usable "
+            f"model — record that level, or widen the windows over the marks you have"
+        )
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -99,14 +121,19 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
 
     print(f"{len(sessions)} session(s): {', '.join(s.meta.session_id for s in sessions)}\n")
-    archive = train(
-        sessions,
-        name=args.name,
-        out=args.out,
-        window_us=args.window_us,
-        hop_us=args.hop_us,
-        splits=args.splits,
-    )
+    # A dataset the run cannot use is the operator's problem to fix, not a
+    # traceback: every refusal below names what is missing and what to do.
+    try:
+        archive = train(
+            sessions,
+            name=args.name,
+            out=args.out,
+            window_us=args.window_us,
+            hop_us=args.hop_us,
+            splits=args.splits,
+        )
+    except ValueError as refusal:
+        parser.error(str(refusal))
     print(f"\nbundle: {archive}")
     print("import it from the dashboard, Calibration → Models")
 

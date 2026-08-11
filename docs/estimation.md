@@ -60,6 +60,13 @@ absence of an estimator is not an error — readiness already says which step is
 outstanding. A model that exists but cannot be loaded is reported, being a
 fault rather than a step left to do.
 
+The separation holds while the loop runs, not only when it starts. A failed
+estimate is classified: a malformed or late frame says nothing about the model
+and is skipped like any other unusable window, while a model that cannot run at
+all is detached and journalled. Either way the stream keeps being read, so
+pairing, capture and sensor health survive a bad model — and importing a
+replacement rebuilds the intake on its own.
+
 The intake is rebuilt whenever the configuration changes, since the sender
 mapping and the site tuning are what the installation writes. It also ticks on
 a read timeout, so stream health and the senders it has heard are refreshed

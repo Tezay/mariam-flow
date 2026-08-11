@@ -60,3 +60,13 @@ fn wrong_feature_count_is_rejected() {
     let error = model.predict(&[0.0, 1.0]).unwrap_err();
     assert!(error.to_string().contains("expects"));
 }
+
+#[test]
+fn a_model_that_never_saw_every_class_is_refused_on_load() {
+    let error = DensityModel::load(&fixtures_dir().join("model-incomplete.onnx")).unwrap_err();
+
+    assert!(
+        error.to_string().contains("output"),
+        "the refusal must name the output, got {error}"
+    );
+}
