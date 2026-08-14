@@ -52,6 +52,7 @@ mod journal;
 mod lifecycle;
 mod model;
 mod pipeline;
+mod portrait;
 mod schedule;
 mod secret;
 mod session;

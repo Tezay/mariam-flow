@@ -5,6 +5,7 @@
   import CaptureSession from '$components/calibration/CaptureSession.svelte';
   import ModelDetail from '$components/calibration/ModelDetail.svelte';
   import ModelsSection from '$components/calibration/ModelsSection.svelte';
+  import RecordingDetail from '$components/calibration/RecordingDetail.svelte';
   import RecordingsSection from '$components/calibration/RecordingsSection.svelte';
 
   let {
@@ -20,12 +21,14 @@
   } = $props();
 
   let sessions = $state<RecordedSession[]>([]);
-  /* Which model is being read, held here rather than in the list: the detail
-     replaces the whole surface, and the list is what it returns to. */
+  /* What is being read, held here rather than in either list: a detail
+     replaces the whole surface, and the lists are what it returns to. */
   let inspecting = $state<string | null>(null);
+  let reading = $state<string | null>(null);
 
   const recording = $derived(status.runtime.mode === 'calibrating');
   const opened = $derived(models.find((model) => model.id === inspecting) ?? null);
+  const read = $derived(sessions.find((session) => session.session_id === reading) ?? null);
 
   $effect(() => {
     void recording;
@@ -45,6 +48,8 @@
     {onupdated}
     onchanged={onlibrarychanged}
   />
+{:else if read}
+  <RecordingDetail session={read} onback={() => (reading = null)} />
 {:else}
   <CaptureSession {status} {onupdated} onrecorded={() => void reloadSessions()} />
 
@@ -58,7 +63,11 @@
         onchanged={onlibrarychanged}
         onopen={(model) => (inspecting = model.id)}
       />
-      <RecordingsSection {sessions} onchanged={() => void reloadSessions()} />
+      <RecordingsSection
+        {sessions}
+        onchanged={() => void reloadSessions()}
+        onopen={(session) => (reading = session.session_id)}
+      />
     </div>
   {/if}
 {/if}

@@ -23,7 +23,7 @@
 
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use flow_core::{CsiFrame, FrameError, Label, SessionMeta, TimestampUs};
@@ -39,7 +39,7 @@ pub const LABELS_FILE: &str = "labels.ndjson";
 /// (or crashed before finalization).
 pub const RECORDING_SUFFIX: &str = ".recording";
 
-/// Failure while creating or writing a session.
+/// Failure while creating, writing or reading a session.
 #[derive(Debug, Error)]
 pub enum SessionError {
     /// The session id is empty or contains characters unsafe for a
@@ -211,6 +211,108 @@ impl SessionWriter {
             labels: self.label_count,
         })
     }
+}
+
+/// Reader for one recorded session, in the format [`SessionWriter`] produces.
+///
+/// Frames are handed out one at a time rather than collected: a capture runs
+/// to tens of megabytes and the appliance this runs on has 512 MB.
+#[derive(Debug)]
+pub struct SessionReader {
+    dir: PathBuf,
+    meta: SessionMeta,
+}
+
+impl SessionReader {
+    /// Opens a session directory and reads its metadata.
+    ///
+    /// Accepts a sealed session or one still marked `.recording`, since a
+    /// capture that never finished is exactly the one worth looking at.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::Io`] if the directory or `meta.json` cannot be read,
+    /// [`SessionError::Json`] if the metadata does not parse.
+    pub fn open(dir: &Path) -> Result<Self, SessionError> {
+        let meta: SessionMeta = serde_json::from_slice(&fs::read(dir.join(META_FILE))?)?;
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            meta,
+        })
+    }
+
+    /// What the capture recorded about itself.
+    #[must_use]
+    pub fn meta(&self) -> &SessionMeta {
+        &self.meta
+    }
+
+    /// Ids of the receiving nodes, in the order the metadata declares them.
+    #[must_use]
+    pub fn rx_node_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .meta
+            .nodes
+            .iter()
+            .filter(|node| node.role == flow_core::NodeRole::Rx)
+            .map(|node| node.node_id.clone())
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// Every ground-truth label, in timestamp order.
+    ///
+    /// Read whole: a label per press is a handful of rows, unlike the frames.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::Io`] or [`SessionError::Json`] on a malformed file.
+    pub fn labels(&self) -> Result<Vec<Label>, SessionError> {
+        let file = File::open(self.dir.join(LABELS_FILE))?;
+        BufReader::new(file)
+            .lines()
+            .map(|line| Ok(serde_json::from_str(&line?)?))
+            .collect()
+    }
+
+    /// The CSI frames, in the order they were received.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::Io`] if the frame log cannot be opened.
+    pub fn frames(&self) -> Result<Frames, SessionError> {
+        let file = File::open(self.dir.join(CSI_FILE))?;
+        Ok(Frames {
+            lines: BufReader::new(file).lines(),
+        })
+    }
+}
+
+/// Frames of one session, yielded one at a time.
+#[derive(Debug)]
+pub struct Frames {
+    lines: std::io::Lines<BufReader<File>>,
+}
+
+impl Iterator for Frames {
+    type Item = Result<CsiFrame, SessionError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let line = match self.lines.next()? {
+            Ok(line) => line,
+            Err(err) => return Some(Err(err.into())),
+        };
+        Some(read_frame(&line))
+    }
+}
+
+fn read_frame(line: &str) -> Result<CsiFrame, SessionError> {
+    let frame: CsiFrame = serde_json::from_str(line)?;
+    // Deserialization does not enforce the type's invariants, and disk is a
+    // trust boundary like any other.
+    frame.validate()?;
+    Ok(frame)
 }
 
 fn check_order(last: &mut Option<TimestampUs>, ts_us: TimestampUs) -> Result<(), SessionError> {
@@ -404,5 +506,98 @@ mod tests {
         assert_eq!(summary.frames, 0);
         assert_eq!(summary.labels, 0);
         assert!(summary.path.join(CSI_FILE).exists());
+    }
+
+    /// A sealed session on disk, ready to be read back.
+    fn recorded(root: &Path, id: &str, frames: &[CsiFrame], labels: &[Label]) -> PathBuf {
+        let mut writer = SessionWriter::create(root, &meta(id)).unwrap();
+        for frame in frames {
+            writer.write_frame(frame).unwrap();
+        }
+        for label in labels {
+            writer.write_label(label).unwrap();
+        }
+        writer.finalize().unwrap().path
+    }
+
+    #[test]
+    fn what_the_writer_sealed_is_what_the_reader_hands_back() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = recorded(root.path(), "s-100", &[frame(10), frame(20)], &[label(15)]);
+
+        let reader = SessionReader::open(&dir).unwrap();
+
+        assert_eq!(reader.meta().session_id, "s-100");
+        assert_eq!(reader.rx_node_ids(), ["rx-1"]);
+        assert_eq!(reader.labels().unwrap(), vec![label(15)]);
+        let frames: Vec<CsiFrame> = reader.frames().unwrap().map(Result::unwrap).collect();
+        assert_eq!(frames, vec![frame(10), frame(20)]);
+    }
+
+    #[test]
+    fn a_capture_that_never_finished_can_still_be_read() {
+        // The one most worth looking at: something went wrong during it.
+        let root = tempfile::tempdir().unwrap();
+        let mut writer = SessionWriter::create(root.path(), &meta("s-101")).unwrap();
+        writer.write_frame(&frame(10)).unwrap();
+        drop(writer);
+
+        let reader = SessionReader::open(&root.path().join("s-101.recording")).unwrap();
+
+        assert_eq!(reader.meta().session_id, "s-101");
+        assert_eq!(reader.frames().unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_frame_whose_invariants_broke_on_disk_is_reported_not_returned() {
+        // Deserialization alone would hand back a frame declaring two
+        // subcarriers and carrying one, which every consumer would then index
+        // out of bounds.
+        let root = tempfile::tempdir().unwrap();
+        let dir = recorded(root.path(), "s-102", &[frame(10)], &[]);
+        let corrupt =
+            r#"{"ts_us":20,"node_id":"rx-1","rssi":-52,"mcs":7,"len":2,"amp":[1.0],"phase":[0.0]}"#;
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(dir.join(CSI_FILE))
+            .unwrap();
+        writeln!(file, "{corrupt}").unwrap();
+        drop(file);
+
+        let reader = SessionReader::open(&dir).unwrap();
+        let outcomes: Vec<_> = reader.frames().unwrap().collect();
+
+        assert!(outcomes[0].is_ok());
+        assert!(matches!(outcomes[1], Err(SessionError::Frame(_))));
+    }
+
+    #[test]
+    fn a_truncated_line_is_reported_where_it_sits() {
+        // A crash mid-write leaves half a line. Everything before it is still
+        // good data, so the reader reports rather than refuses the session.
+        let root = tempfile::tempdir().unwrap();
+        let dir = recorded(root.path(), "s-103", &[frame(10)], &[]);
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(dir.join(CSI_FILE))
+            .unwrap();
+        write!(file, r#"{{"ts_us":20,"node_id":"rx-1","#).unwrap();
+        drop(file);
+
+        let reader = SessionReader::open(&dir).unwrap();
+        let outcomes: Vec<_> = reader.frames().unwrap().collect();
+
+        assert_eq!(outcomes.len(), 2);
+        assert!(outcomes[0].is_ok());
+        assert!(matches!(outcomes[1], Err(SessionError::Json(_))));
+    }
+
+    #[test]
+    fn a_directory_that_is_not_a_session_is_refused_on_open() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            SessionReader::open(&root.path().join("nothing-here")),
+            Err(SessionError::Io(_))
+        ));
     }
 }

@@ -168,6 +168,52 @@ pub(super) async fn session_archive(
         .into_response()
 }
 
+/// What the appliance can say about one capture.
+///
+/// Answers `202` while the description is being computed rather than holding
+/// the request open: parsing a long capture takes a while on the board this
+/// runs on, and a browser that waited would time out with nothing to show.
+pub(super) async fn session_portrait(
+    State(state): State<EdgeState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Response {
+    let Some(dir) = held_session(&state, &session_id) else {
+        return error_response(StatusCode::NOT_FOUND, "no such session");
+    };
+    if let Some(portrait) = crate::portrait::cached(&dir) {
+        return Json(portrait).into_response();
+    }
+    state.describe_session(&session_id, dir);
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "status": "computing" })),
+    )
+        .into_response()
+}
+
+/// The heatmap pixels of a computed portrait.
+///
+/// Raw bytes rather than numbers inside the portrait: this is the largest part
+/// of a description by far, and the browser hands it straight to a canvas.
+pub(super) async fn session_heatmap(
+    State(state): State<EdgeState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Response {
+    let Some(dir) = held_session(&state, &session_id) else {
+        return error_response(StatusCode::NOT_FOUND, "no such session");
+    };
+    let Ok(pixels) = std::fs::read(crate::portrait::heatmap_path(&dir)) else {
+        return error_response(StatusCode::NOT_FOUND, "no description yet");
+    };
+    ([(header::CONTENT_TYPE, "application/octet-stream")], pixels).into_response()
+}
+
+/// The directory of a capture this appliance actually holds.
+fn held_session(state: &EdgeState, session_id: &str) -> Option<std::path::PathBuf> {
+    let root = state.data_dir().join("sessions");
+    session_dir(&root, session_id).filter(|dir| dir.is_dir())
+}
+
 /// Starts recording a labeled capture session.
 ///
 /// The session directory is created here rather than on the intake thread, so
@@ -240,6 +286,12 @@ pub(super) async fn stop_calibration(
             // sealing is what makes the session usable, and the installation
             // waits on exactly that.
             state.mark_site_captured();
+            // Started now rather than when someone asks: the operator who has
+            // just stopped a capture is the one who wants to see it, and the
+            // appliance is idle for exactly as long as they take to look.
+            if let Some(name) = summary.path.file_name() {
+                state.describe_session(&name.to_string_lossy(), summary.path.clone());
+            }
             state.record(
                 Event::new(EventKind::CalibrationStopped)
                     .from_client(peer.ip())

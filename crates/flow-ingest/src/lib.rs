@@ -23,7 +23,7 @@ pub mod udp;
 
 pub use esp_csi::{LineFormat, MacAddr, ParseError, RawCsiFrame, parse_line};
 pub use reader::{CsiReader, StreamStats};
-pub use session::{SessionError, SessionSummary, SessionWriter};
+pub use session::{Frames, SessionError, SessionReader, SessionSummary, SessionWriter};
 pub use source::{FrameSource, SourceConfig, SourceError, UDP_SCHEME};
 pub use timeline::Timeline;
 pub use udp::{SenderKey, SenderObservation, UdpSource, UdpStats, parse_node_mapping};

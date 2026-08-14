@@ -408,6 +408,8 @@ async fn the_session_surface_is_closed_to_anonymous_callers() {
     for (method, path) in [
         ("GET", "/api/sessions"),
         ("GET", "/api/sessions/s-001/archive"),
+        ("GET", "/api/sessions/s-001/portrait"),
+        ("GET", "/api/sessions/s-001/portrait/heatmap"),
         ("DELETE", "/api/sessions/s-001"),
         ("PATCH", "/api/sessions/s-001"),
     ] {
@@ -426,5 +428,97 @@ async fn calibration_is_closed_to_anonymous_callers() {
     ] {
         let (status, _, _) = send(&state, method, path, None, Some("{}".to_owned()), 10).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path} is open");
+    }
+}
+
+/// Records a capture holding one labelled stretch and returns its identifier.
+async fn one_capture(state: &EdgeState, cookie: &str) -> String {
+    post(
+        state,
+        "/api/calibration",
+        cookie,
+        json!({ "environment": "midi" }),
+    )
+    .await;
+    post(
+        state,
+        "/api/calibration/label",
+        cookie,
+        json!({ "class": 1 }),
+    )
+    .await;
+    send(state, "DELETE", "/api/calibration", Some(cookie), None, 10).await;
+
+    let (_, _, listed) = send(state, "GET", "/api/sessions", Some(cookie), None, 10).await;
+    listed[0]["session_id"].as_str().unwrap().to_owned()
+}
+
+/// Polls the portrait until it is computed, or gives up.
+async fn await_portrait(state: &EdgeState, cookie: &str, id: &str) -> serde_json::Value {
+    let path = format!("/api/sessions/{id}/portrait");
+    for _ in 0..100 {
+        let (status, _, body) = send(state, "GET", &path, Some(cookie), None, 10).await;
+        if status == StatusCode::OK {
+            return body;
+        }
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("the portrait was never computed");
+}
+
+#[tokio::test]
+async fn a_capture_is_described_without_holding_the_request_open() {
+    let (state, _dir) = recording_ready();
+    let cookie = session_of(&state).await;
+    let id = one_capture(&state, &cookie).await;
+
+    let portrait = await_portrait(&state, &cookie, &id).await;
+
+    assert_eq!(portrait["session_id"], id);
+    assert_eq!(portrait["labels"].as_array().unwrap().len(), 1);
+    // The geometry training uses, not whatever model happens to be installed:
+    // a capture is described on its own terms.
+    assert_eq!(portrait["window_us"], 5_000_000);
+    assert_eq!(portrait["hop_us"], 1_000_000);
+    assert!(portrait["nodes"].as_array().is_some_and(|n| !n.is_empty()));
+}
+
+#[tokio::test]
+async fn the_heatmap_is_served_as_bytes_once_the_description_exists() {
+    let (state, _dir) = recording_ready();
+    let cookie = session_of(&state).await;
+    let id = one_capture(&state, &cookie).await;
+    await_portrait(&state, &cookie, &id).await;
+
+    let (status, headers, _) = send(
+        &state,
+        "GET",
+        &format!("/api/sessions/{id}/portrait/heatmap"),
+        Some(&cookie),
+        None,
+        10,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "application/octet-stream"
+    );
+}
+
+#[tokio::test]
+async fn describing_a_session_the_appliance_does_not_hold_is_not_found() {
+    let (state, _dir) = writable();
+    let cookie = session_of(&state).await;
+
+    for path in [
+        "/api/sessions/never-recorded/portrait",
+        "/api/sessions/never-recorded/portrait/heatmap",
+        "/api/sessions/..%2F..%2Fetc/portrait",
+    ] {
+        let (status, _, _) = send(&state, "GET", path, Some(&cookie), None, 10).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
     }
 }
