@@ -108,15 +108,46 @@ Both histories page at the same length, through the same control, and the model
 library is held by the shell rather than fetched by each screen that shows it:
 renaming a model on one tab must not leave another naming it the old way.
 
-Opening a model replaces the calibration surface rather than adding a tab: the
-question "is this model any good" is asked about one model at a time, and an
-operator who only ever configures the appliance is never shown that the screen
-exists. The detail reads from the general to the technical — four figures, then
-three sentences saying what the model can and cannot do, then the confusion
-matrix and the captures it was trained on, both behind a disclosure. The matrix
-is a table with its truth in the rows and its headers marked as such, so it can
-be read without sight; intensity carries the share within a row and weight
-carries the diagonal, so it can be read without colour.
+Opening either a recording or a model replaces the surface rather than adding a
+tab: each is asked about one of them at a time, and an operator who only
+configures the appliance is never shown that the screens exist.
+
+### A recording
+
+It reads in the order the questions arise: how long it ran and how many
+receivers streamed, then anything wrong with it stated plainly, then the
+capture itself, then how the marked levels compare. Concerns are listed rather
+than scored — a silent receiver and a hole in the middle are both fatal, and
+send the reader to different places.
+
+The label track, the heatmaps and the feature chart are panels of one component
+owning **a single visible time range and cursor position**: dragging across the
+chart zooms every panel, one button returns to the whole capture, and a
+crosshair marks the same instant throughout. Their alignment is measured rather
+than assumed — uPlot sizes its axis gutter from the tick labels it ends up
+drawing, so that width is read back after layout and the other panels are inset
+by it.
+
+Zooming re-slices the stored columns rather than fetching finer ones, so the
+panel states how much time one column covers. Heatmaps carry the same
+**viridis** ramp and colour bar as the Python session report — perceptually
+uniform, where a single hue runs out of distinguishable steps around six.
+
+The chart tints its background by marked level, so the question the screen
+exists to answer — does the measurement move when the level changes — is read
+in one place. It shows one measurement at a time across all receivers, the
+seven living on scales nothing can share, and summarises it per marked level
+beneath: levels whose spreads run into each other are named as such, two means
+far apart with overlapping spreads being separated by no threshold.
+
+### A model
+
+The detail reads from the general to the technical — four figures, then three
+sentences saying what the model can and cannot do, then the confusion matrix
+and the captures it was trained on, both behind a disclosure. The matrix is a
+table with its truth in the rows and its headers marked as such, so it can be
+read without sight; intensity carries the share within a row and weight carries
+the diagonal, so it can be read without colour.
 
 ## Shared pieces
 

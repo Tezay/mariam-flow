@@ -32,6 +32,19 @@ refusal names that step. Reopening is always allowed.
 current activity, sensor access point, uplink shape, queue description and
 paired nodes.
 
+## Answers that outlast a request
+
+Describing a capture means parsing a file measured in tens of megabytes.
+`GET /api/sessions/{id}/portrait` therefore answers `202` with
+`{"status": "computing"}` and starts the work on a blocking thread, or `200`
+with the description once it is cached; the caller asks again. A capture being
+described is recorded so a reader who polls does not start the work twice.
+
+Its heatmap is served separately, as raw bytes from
+`/api/sessions/{id}/portrait/heatmap`: it is the bulk of a description, the
+browser hands it straight to a canvas, and keeping it out of the JSON leaves
+that document readable with `curl`.
+
 ## Sessions
 
 A successful login exchanges the device secret for an opaque 256-bit token,

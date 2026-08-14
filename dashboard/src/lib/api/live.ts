@@ -7,6 +7,17 @@ export const DENSITY_CLASSES = ['empty', 'low', 'medium', 'saturated'] as const;
 
 export type DensityClass = (typeof DENSITY_CLASSES)[number];
 
+/**
+ * A density as the canonical format encodes it: `0..3`, on disk and on the
+ * wire alike. Only the live view is given the name instead.
+ */
+export type DensityCode = 0 | 1 | 2 | 3;
+
+/** The name a density code stands for. */
+export function densityName(code: DensityCode): DensityClass {
+  return DENSITY_CLASSES[code];
+}
+
 /** One receiver's contribution to the stream. */
 export type NodeHealth = {
   frames: number;

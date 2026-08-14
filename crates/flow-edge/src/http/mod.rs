@@ -40,8 +40,8 @@ mod schedule;
 
 use self::auth::{login, logout, require_session, security_headers};
 use self::calibration::{
-    add_label, delete_session, rename_session, session_archive, sessions, start_calibration,
-    stop_calibration,
+    add_label, delete_session, rename_session, session_archive, session_heatmap, session_portrait,
+    sessions, start_calibration, stop_calibration,
 };
 use self::install::{set_installation, set_network_survey, set_queue, set_site, set_uplink};
 use self::journal::{events, events_csv};
@@ -95,6 +95,11 @@ pub fn router(state: EdgeState) -> Router {
             axum::routing::delete(delete_session).patch(rename_session),
         )
         .route("/api/sessions/{session_id}/archive", get(session_archive))
+        .route("/api/sessions/{session_id}/portrait", get(session_portrait))
+        .route(
+            "/api/sessions/{session_id}/portrait/heatmap",
+            get(session_heatmap),
+        )
         .route("/api/installation", put(set_installation))
         .route(
             "/api/service-window",

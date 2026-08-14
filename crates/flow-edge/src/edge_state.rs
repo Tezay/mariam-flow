@@ -89,6 +89,11 @@ pub struct EdgeState {
     stopping: Arc<tokio::sync::watch::Sender<bool>>,
     /// Why the journal last refused a write, if it is refusing them.
     journal_failure: Arc<Mutex<Option<JournalFailure>>>,
+    /// Captures whose portrait is being computed right now.
+    ///
+    /// Describing one means parsing tens of megabytes, so a reader who polls
+    /// while waiting must not start the work a second time.
+    describing: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 /// The live surface, written by the pipeline thread and read by handlers.
@@ -141,6 +146,7 @@ impl EdgeState {
             journal: Arc::new(Mutex::new(journal)),
             stopping: Arc::new(tokio::sync::watch::Sender::new(false)),
             journal_failure: Arc::new(Mutex::new(None)),
+            describing: Arc::new(Mutex::new(std::collections::HashSet::new())),
             live: Arc::new(Live {
                 estimates: tokio::sync::watch::Sender::new(None),
                 health: Mutex::new(StreamHealth::default()),
@@ -621,6 +627,43 @@ impl EdgeState {
     /// Where sessions, models and the journal live.
     pub(crate) fn data_dir(&self) -> std::path::PathBuf {
         self.lock().data_dir.clone()
+    }
+
+    /// Starts describing a capture, unless that is already under way.
+    ///
+    /// Runs on a blocking thread: it parses a file measured in tens of
+    /// megabytes, which would hold up every other request on the async
+    /// runtime for as long as it took.
+    pub(crate) fn describe_session(&self, session_id: &str, dir: std::path::PathBuf) {
+        if !self.claim_description(session_id) {
+            return;
+        }
+        let (state, id) = (self.clone(), session_id.to_owned());
+        tokio::task::spawn_blocking(move || {
+            let outcome = crate::portrait::compute(&dir, now_us());
+            state.release_description(&id);
+            if let Err(err) = outcome {
+                state.record(
+                    Event::new(EventKind::CalibrationStopped)
+                        .with_detail(format!("could not describe {id}: {err}")),
+                );
+            }
+        });
+    }
+
+    fn claim_description(&self, session_id: &str) -> bool {
+        self.describing_ids().insert(session_id.to_owned())
+    }
+
+    fn release_description(&self, session_id: &str) {
+        self.describing_ids().remove(session_id);
+    }
+
+    fn describing_ids(&self) -> MutexGuard<'_, std::collections::HashSet<String>> {
+        match self.describing.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {

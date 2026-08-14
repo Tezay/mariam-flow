@@ -61,6 +61,21 @@ later. Readiness therefore carries `site_captured`, which the wizard waits on,
 separately from `model_ready`, which is reported and satisfied later from the
 settings.
 
+### Reading a capture back
+
+The appliance describes its own captures, so one can be judged the evening it
+is recorded rather than a week later through a training run (ADR 0025). A
+portrait carries, per receiver, the frames and rate produced, the silences
+longer than a second, an amplitude heatmap over time, and the seven v1
+features — computed with `flow_infer`, the same function live inference uses,
+so the screen shows what a model would be shown.
+
+The features are sampled on the training geometry rather than on the installed
+model's, so a recording never reads differently because a model was activated
+in between. The description is computed in one streaming pass, bounded whatever
+the capture's length, and cached beside the session; sealing a capture starts
+that work.
+
 ### Exporting
 
 Recorded sessions are listed newest first, sorted on the identifier itself, so

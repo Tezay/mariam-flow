@@ -1,5 +1,6 @@
 <script lang="ts">
   import Archive from '@lucide/svelte/icons/archive';
+  import ChartNoAxesColumn from '@lucide/svelte/icons/chart-no-axes-column';
   import Download from '@lucide/svelte/icons/download';
   import Pencil from '@lucide/svelte/icons/pencil';
   import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -23,9 +24,11 @@
   let {
     sessions,
     onchanged,
+    onopen,
   }: {
     sessions: RecordedSession[];
     onchanged: () => void;
+    onopen: (session: RecordedSession) => void;
   } = $props();
 
   let pageIndex = $state(0);
@@ -83,9 +86,19 @@
               </span>
             </span>
             <span class="flex shrink-0 items-center gap-1">
+              <Button variant="outline" size="sm" onclick={() => onopen(session)}>
+                <ChartNoAxesColumn size={13} aria-hidden="true" />{t('recording.inspect')}
+              </Button>
               {#if session.sealed}
-                <Button variant="outline" size="sm" href={archiveUrl(session.session_id)} download>
-                  <Download size={13} aria-hidden="true" />{t('cal.export')}
+                <Button
+                  variant="quiet"
+                  size="icon"
+                  label={t('cal.export')}
+                  title={t('cal.export')}
+                  href={archiveUrl(session.session_id)}
+                  download
+                >
+                  <Download size={14} aria-hidden="true" />
                 </Button>
               {:else}
                 <span class="px-2 text-xs text-density-medium">{t('cal.unfinished')}</span>

@@ -19,10 +19,23 @@ describe('RecordingsSection', () => {
       props: {
         sessions: [SESSION, { ...SESSION, session_id: 'other', sealed: false }],
         onchanged() {},
+        onopen() {},
       },
     });
 
     expect(screen.getAllByRole('link', { name: /download/i })).toHaveLength(1);
     expect(screen.getByText(/never finished/i)).toBeInTheDocument();
+  });
+
+  it('offers to look at a capture that never finished, which is when it matters', () => {
+    render(RecordingsSection, {
+      props: {
+        sessions: [{ ...SESSION, sealed: false }],
+        onchanged() {},
+        onopen() {},
+      },
+    });
+
+    expect(screen.getByRole('button', { name: /look at it/i })).toBeInTheDocument();
   });
 });

@@ -40,3 +40,4 @@ Conventions:
 | [0022](0022-the-appliance-publishes-the-estimate-itself.md) | The appliance publishes the estimate itself | accepted |
 | [0023](0023-the-site-owns-what-a-density-is-worth.md) | The site owns what a density is worth | accepted |
 | [0024](0024-the-training-run-reports-its-own-evaluation.md) | The training run reports its own evaluation | accepted |
+| [0025](0025-session-portraits-computed-on-the-appliance.md) | Session portraits computed on the appliance | accepted |

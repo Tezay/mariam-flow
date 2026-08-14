@@ -240,6 +240,47 @@ export const fr: Messages = {
   'analysis.verdict.good': 'bon',
   'analysis.verdict.fair': 'moyen',
   'analysis.verdict.poor': 'faible',
+  'recording.inspect': 'Regarder',
+  'recording.back': 'Retour à la calibration',
+  'recording.describing': 'Relecture de la capture. Sur une longue, ça prend un moment.',
+  'recording.noPortrait': "Cette capture n'a pas pu être relue.",
+  'recording.duration': 'Durée',
+  'recording.recorded': 'Enregistrée',
+  'recording.receivers': 'Récepteurs',
+  'recording.streaming': 'qui ont émis',
+  'recording.marks': 'Marques',
+  'recording.timeline': 'La capture, seconde par seconde',
+  'recording.timelineLead':
+    "Les niveaux marqués, ce qu'a fait le canal, et les mesures que lit un modèle — sur un seul axe de temps. Glissez sur le graphique pour zoomer ; tous les panneaux suivent.",
+  'portrait.seconds': 'secondes',
+  'portrait.amplitude': 'amplitude',
+  'portrait.hoverHint': 'Survolez le graphique pour lire les valeurs exactes.',
+  'portrait.resetZoom': 'Toute la capture',
+  'portrait.resolution':
+    "Une colonne de la heatmap couvre {seconds} s — zoomer étire ces colonnes, il n'en révèle pas de plus fines.",
+  'portrait.perLevelLead':
+    'Moyenne et dispersion de la mesure sélectionnée sous chaque niveau marqué. Deux niveaux dont les dispersions se recouvrent ne sont séparés par aucun seuil sur cette mesure.',
+  'portrait.perLevel': 'Comment les niveaux se comparent sur cette mesure',
+  'portrait.statsCaption':
+    'Moyenne et dispersion de la mesure sélectionnée sous chaque niveau marqué, pour {node}.',
+  'portrait.level': 'Niveau',
+  'portrait.mean': 'Moyenne ± dispersion',
+  'portrait.windows': 'Fenêtres',
+  'portrait.spread': 'Dispersion',
+  'portrait.overlapping':
+    'Les dispersions de {levels} se recouvrent : cette mesure seule ne les distingue pas.',
+  'portrait.separated': 'Chaque niveau marqué se détache sur cette mesure.',
+  'recording.heatmapAlt': 'Amplitude du signal de {node} sur la capture, par sous-porteuse.',
+  'recording.nothingHeard': "Rien n'a été entendu de {node}.",
+  'concern.silent':
+    "{node} n'a jamais émis. Vérifiez son alimentation et qu'il a rejoint le réseau.",
+  'concern.gaps': '{node} est devenu silencieux {value} fois pendant la capture.',
+  'concern.truncated':
+    "La capture ne s'est jamais terminée ; tout ce qui précède la coupure est affiché.",
+  'concern.unlabelled': "Rien n'a été marqué : aucun modèle ne peut être entraîné là-dessus.",
+  'concern.inconsistent':
+    '{value} trame(s) de {node} contredisaient son propre nombre de sous-porteuses.',
+  'concern.short': "Seulement {value} s — trop court pour remplir une fenêtre d'analyse.",
   'prepare.title': 'Préparer le prochain modèle',
   'prepare.lead': 'Enregistrez la file, exportez, entraînez ailleurs, rapportez le modèle.',
   'live.model': 'modèle {name}',
