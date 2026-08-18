@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
   adjacentErrorShare,
+  comparison,
+  delta,
   formatPoints,
   formatShare,
   presenceAccuracy,
   readings,
+  recall,
+  recordingOverlap,
+  recordingRows,
   rowShare,
   totalWindows,
 } from './analysis';
@@ -23,6 +28,10 @@ function evaluation(confusion: number[][], overrides: Partial<Evaluation> = {}):
     sessions: [],
     ...overrides,
   };
+}
+
+function trainedOn(ids: string[]): Pick<Evaluation, 'sessions'> {
+  return { sessions: ids.map((session_id) => ({ session_id, windows: 100, support: [] })) };
 }
 
 const PERFECT = [
@@ -148,6 +157,134 @@ describe('readings', () => {
     expect(blind.presence.verdict).toBe('poor');
     expect(blind.exact.verdict).toBe('poor');
     expect(blind.lift).toBe(0);
+  });
+});
+
+describe('delta', () => {
+  it('points the arrow at the difference the reader is shown', () => {
+    expect(delta(0.74, 0.68)).toEqual({ value: expect.closeTo(0.06, 10), direction: 'up' });
+    expect(delta(0.61, 0.65).direction).toBe('down');
+  });
+
+  it('calls a difference too small to print level, so no arrow contradicts a +0', () => {
+    const change = delta(0.6812, 0.68);
+
+    expect(formatPoints(change.value)).toBe('+0');
+    expect(change.direction).toBe('level');
+  });
+});
+
+describe('recordingRows', () => {
+  const before = evaluation(PERFECT, trainedOn(['charlie', 'alpha', 'bravo']));
+  const after = evaluation(PERFECT, trainedOn(['bravo', 'charlie', 'delta']));
+
+  it('merges both corpora into one ordered list, holes and all', () => {
+    const rows = recordingRows(before, after);
+
+    // Ordered on the identifier rather than on either run's order, so the two
+    // columns are read across; a recording one of them never saw is a hole.
+    expect(rows.map((row) => row.session_id)).toEqual(['alpha', 'bravo', 'charlie', 'delta']);
+    expect(rows[0]).toEqual({ session_id: 'alpha', reference: 100, candidate: null });
+    expect(rows[3]).toEqual({ session_id: 'delta', reference: null, candidate: 100 });
+  });
+
+  it('counts what both saw apart from what only one of them did', () => {
+    expect(recordingOverlap(recordingRows(before, after))).toEqual({
+      shared: 2,
+      onlyReference: 1,
+      onlyCandidate: 1,
+    });
+  });
+});
+
+describe('recall', () => {
+  it('reads one level down its own row, so a rare level is judged on its own', () => {
+    const confusion = [
+      [90, 10, 0, 0],
+      [0, 100, 0, 0],
+      [0, 0, 100, 0],
+      [0, 0, 2, 2],
+    ];
+
+    // `saturated` was seen four times and found twice: half, not the 1 % of
+    // the whole matrix those two windows represent.
+    expect(recall(confusion, 3)).toBe(0.5);
+    expect(recall(confusion, 0)).toBe(0.9);
+  });
+});
+
+describe('comparison', () => {
+  const CORPUS = trainedOn(['morning', 'noon', 'evening']);
+
+  it('reads every difference as the candidate against the reference', () => {
+    const before = evaluation(
+      [
+        [20, 10, 0, 0],
+        [10, 20, 0, 0],
+        [0, 0, 20, 10],
+        [0, 0, 10, 20],
+      ],
+      { accuracy: 0.5, baseline_accuracy: 0.25, ...CORPUS },
+    );
+    const after = evaluation(PERFECT, { accuracy: 0.9, baseline_accuracy: 0.25, ...CORPUS });
+
+    const result = comparison(before, after);
+
+    expect(result.accuracy.direction).toBe('up');
+    expect(formatPoints(result.accuracy.value)).toBe('+40');
+    // The candidate never confuses an empty zone for a busy one, where the
+    // reference did so on half of two rows.
+    expect(result.presence.direction).toBe('up');
+  });
+
+  it('marks a candidate that gained accuracy on an easier corpus as no better', () => {
+    // Both are 40 points clear of their own baseline; only the baselines
+    // differ, which accuracy alone would report as a gain.
+    const before = evaluation(PERFECT, { accuracy: 0.65, baseline_accuracy: 0.25, ...CORPUS });
+    const after = evaluation(PERFECT, { accuracy: 0.85, baseline_accuracy: 0.45, ...CORPUS });
+
+    const result = comparison(before, after);
+
+    expect(result.accuracy.direction).toBe('up');
+    expect(result.lift.direction).toBe('level');
+  });
+
+  it('refuses to call two runs like for like when they were scored differently', () => {
+    const shared = comparison(evaluation(PERFECT, CORPUS), evaluation(PERFECT, CORPUS));
+    const widened = comparison(
+      evaluation(PERFECT, CORPUS),
+      evaluation(PERFECT, trainedOn(['morning', 'noon', 'evening', 'late'])),
+    );
+
+    expect(shared.likeForLike).toBe(true);
+    expect(widened.likeForLike).toBe(false);
+  });
+
+  it('reports a level the candidate lost, even when it gained overall', () => {
+    // Saturated fell from every window found to half of them, while the three
+    // commoner levels held: the headline accuracy barely moves.
+    const before = evaluation(PERFECT, { accuracy: 0.9, ...CORPUS });
+    const after = evaluation(
+      [
+        [10, 0, 0, 0],
+        [0, 10, 0, 0],
+        [0, 0, 10, 0],
+        [0, 0, 5, 5],
+      ],
+      { accuracy: 0.92, ...CORPUS },
+    );
+
+    const result = comparison(before, after);
+
+    expect(result.accuracy.direction).toBe('up');
+    expect(result.perClass[3].direction).toBe('down');
+    expect(formatPoints(result.perClass[3].value)).toBe('−50');
+  });
+
+  it('treats two runs that list no recording at all as unproven, not identical', () => {
+    // An empty intersection is not evidence of a shared corpus, and reading it
+    // as one would silence the caveat exactly when it is least deserved.
+    expect(comparison(evaluation(PERFECT), evaluation(PERFECT)).likeForLike).toBe(false);
   });
 });
 

@@ -17,7 +17,7 @@ function model(id: string, name: string, active = false): StoredModel {
   };
 }
 
-const BASE = { onupdated() {}, onchanged() {}, onopen() {} };
+const BASE = { onupdated() {}, onchanged() {}, onopen() {}, oncompare() {} };
 
 describe('ModelsSection', () => {
   it('heads the list with the model in service', () => {

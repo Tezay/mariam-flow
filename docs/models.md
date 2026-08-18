@@ -50,6 +50,13 @@ The captures a model was trained on are named, and resolved against the
 recordings the appliance still holds: a capture exported and removed is
 reported as gone rather than silently omitted.
 
+Two models are read against each other the same way, every difference stated on
+the candidate, and level by level as well as in aggregate — a rare level lost
+is invisible in an accuracy that improved. Whether a difference means anything
+depends on what each was measured against, so two runs held out on different
+recordings are named as such: they answer different questions, and an arrow on
+its own would imply a ranking neither earned.
+
 A bundle that arrived before training runs reported their scores says so, and
 estimates normally.
 
