@@ -3,7 +3,19 @@
   import { DENSITY_CLASSES } from '$lib/api/live';
   import { t } from '$lib/i18n/i18n.svelte';
 
-  let { confusion }: { confusion: number[][] } = $props();
+  let {
+    confusion,
+    captionShown = true,
+  }: {
+    confusion: number[][];
+    /**
+     * Whether the orientation note is drawn or only spoken.
+     *
+     * Matrices read side by side share one orientation; it stays in the
+     * accessibility tree either way.
+     */
+    captionShown?: boolean;
+  } = $props();
 
   const rows = $derived(
     DENSITY_CLASSES.map((truth, row) => ({
@@ -19,13 +31,16 @@
 </script>
 
 <figure class="m-0 overflow-x-auto">
-  <table class="w-full min-w-88 border-collapse text-sm">
-    <caption class="caption-bottom pt-3 text-left text-xs text-ink-500">
+  <!-- Fixed layout, or the column under the longest class name is the widest. -->
+  <table class="w-full min-w-88 table-fixed border-collapse text-sm">
+    <caption
+      class="caption-bottom pt-3 text-left text-xs text-ink-500 {captionShown ? '' : 'sr-only'}"
+    >
       {t('analysis.matrix.caption')}
     </caption>
     <thead>
       <tr>
-        <td class="p-1"></td>
+        <td class="w-20 p-1"></td>
         {#each DENSITY_CLASSES as density (density)}
           <th
             scope="col"
@@ -47,17 +62,21 @@
           </th>
           {#each row.cells as cell (cell.predicted)}
             <td class="p-0.5">
-              <!-- Intensity carries the share, weight carries the diagonal:
-                   colour alone would leave the reading to whoever can see it. -->
+              <!-- The share leads, since counts from runs of different sizes
+                   cannot be compared; the count stays, since a share alone
+                   hides how few windows it rests on. Intensity repeats the
+                   share and weight the diagonal, so neither needs colour. -->
               <span
-                class="flex h-11 items-center justify-center rounded-sm tabular-nums
+                class="flex h-12 flex-col items-center justify-center rounded-sm leading-tight
+                       tabular-nums
                        {cell.diagonal ? 'font-semibold' : 'font-normal'}
                        {cell.share > 0.55 ? 'text-white' : 'text-ink-900'}"
                 style:background-color="color-mix(in srgb, var(--color-mariam-600) {Math.round(
                   cell.share * 100,
                 )}%, var(--color-ink-50))"
               >
-                {cell.count}
+                <span>{Math.round(cell.share * 100)}<span class="text-[0.6875rem]">%</span></span>
+                <span class="text-[0.6875rem] font-normal opacity-70">{cell.count}</span>
               </span>
             </td>
           {/each}

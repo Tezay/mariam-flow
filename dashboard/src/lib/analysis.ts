@@ -6,6 +6,7 @@
  * the other way round, every result below is inverted.
  */
 
+import { DENSITY_CLASSES } from './api/live';
 import { type Evaluation } from './api/models';
 
 export type Verdict = 'good' | 'fair' | 'poor';
@@ -95,6 +96,16 @@ export function rowShare(confusion: number[][], truth: number, predicted: number
   return total === 0 ? 0 : row[predicted] / total;
 }
 
+/** Share of one level's windows the model found. */
+export function recall(confusion: number[][], level: number): number {
+  return rowShare(confusion, level, level);
+}
+
+/** Windows a level actually held. */
+export function levelWindows(confusion: number[][], level: number): number {
+  return (confusion[level] ?? []).reduce((sum, cell) => sum + cell, 0);
+}
+
 /** The three readings, each against its own band. */
 export function readings(evaluation: Evaluation): Readings {
   return {
@@ -121,4 +132,100 @@ export function formatShare(value: number): string {
 export function formatPoints(value: number): string {
   const points = Math.round(value * 100);
   return `${points >= 0 ? '+' : '−'}${Math.abs(points)}`;
+}
+
+/* Every difference below is the candidate minus the reference. */
+
+export type Direction = 'up' | 'down' | 'level';
+
+export type Delta = {
+  value: number;
+  direction: Direction;
+};
+
+/** Rounded before its direction is read, so no arrow contradicts a printed `+0`. */
+export function delta(candidate: number, reference: number): Delta {
+  const value = candidate - reference;
+  const points = Math.round(value * 100);
+  return { value, direction: points === 0 ? 'level' : points > 0 ? 'up' : 'down' };
+}
+
+/** One recording, and what it weighed in each run that used it. */
+export type RecordingRow = {
+  session_id: string;
+  reference: number | null;
+  candidate: number | null;
+};
+
+/**
+ * The two runs' recordings merged into one list, ordered by identifier.
+ *
+ * A recording only one of them held is kept, `null` against the other: that
+ * gap is what makes a difference between their scores worth doubting.
+ */
+export function recordingRows(reference: Evaluation, candidate: Evaluation): RecordingRow[] {
+  const held = new Map(reference.sessions.map((session) => [session.session_id, session.windows]));
+  const other = new Map(candidate.sessions.map((session) => [session.session_id, session.windows]));
+  return [...new Set([...held.keys(), ...other.keys()])].sort().map((session_id) => ({
+    session_id,
+    reference: held.get(session_id) ?? null,
+    candidate: other.get(session_id) ?? null,
+  }));
+}
+
+export type Overlap = {
+  shared: number;
+  onlyReference: number;
+  onlyCandidate: number;
+};
+
+export function recordingOverlap(rows: RecordingRow[]): Overlap {
+  const counted = { shared: 0, onlyReference: 0, onlyCandidate: 0 };
+  for (const row of rows) {
+    if (row.reference !== null && row.candidate !== null) {
+      counted.shared += 1;
+    } else if (row.reference !== null) {
+      counted.onlyReference += 1;
+    } else {
+      counted.onlyCandidate += 1;
+    }
+  }
+  return counted;
+}
+
+export type Comparison = {
+  accuracy: Delta;
+  lift: Delta;
+  presence: Delta;
+  ordering: Delta;
+  exact: Delta;
+  /** One per density class, in `empty..saturated` order. */
+  perClass: Delta[];
+  recordings: Overlap;
+  /**
+   * Whether both runs were scored on the same recordings.
+   *
+   * Two models measured on different captures answer different questions, so a
+   * difference between their scores indicates rather than ranks.
+   */
+  likeForLike: boolean;
+};
+
+export function comparison(reference: Evaluation, candidate: Evaluation): Comparison {
+  const before = readings(reference);
+  const after = readings(candidate);
+  const recordings = recordingOverlap(recordingRows(reference, candidate));
+  return {
+    accuracy: delta(candidate.accuracy, reference.accuracy),
+    lift: delta(after.lift, before.lift),
+    presence: delta(after.presence.value, before.presence.value),
+    ordering: delta(after.ordering.value, before.ordering.value),
+    exact: delta(after.exact.value, before.exact.value),
+    perClass: DENSITY_CLASSES.map((_, level) =>
+      delta(recall(candidate.confusion, level), recall(reference.confusion, level)),
+    ),
+    recordings,
+    likeForLike:
+      recordings.shared > 0 && recordings.onlyReference === 0 && recordings.onlyCandidate === 0,
+  };
 }

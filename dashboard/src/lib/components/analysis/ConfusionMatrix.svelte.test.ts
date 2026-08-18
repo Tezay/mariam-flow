@@ -26,10 +26,14 @@ describe('ConfusionMatrix', () => {
 
     const saturated = screen.getByRole('rowheader', { name: /saturated/i }).closest('tr');
     const cells = within(saturated as HTMLElement).getAllByRole('cell');
+    const texts = cells.map((cell) => cell.textContent?.replace(/\s+/g, '') ?? '');
 
     // Truly saturated, answered medium 142 times: the third column of the
     // last row. Read the other way round this would be 96.
-    expect(cells.map((cell) => cell.textContent?.trim())).toEqual(['6', '27', '142', '330']);
+    expect(texts.map((text) => text.replace(/^\d+%/, ''))).toEqual(['6', '27', '142', '330']);
+    // The share leads the count, since counts from runs of different sizes
+    // cannot be compared and shares can. 142 of that row's 505 windows.
+    expect(texts[2]).toMatch(/^28%/);
   });
 
   it('renders every count, including the classes a model never answered', () => {

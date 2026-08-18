@@ -149,6 +149,22 @@ table with its truth in the rows and its headers marked as such, so it can be
 read without sight; intensity carries the share within a row and weight carries
 the diagonal, so it can be read without colour.
 
+Comparing it with another is a screen of its own, offered from a model that is
+not in service and again the moment an import puts a new one in — the two
+points at which the question is actually asked. A measure is named once and its
+two values are read against it, which is what makes the screen a comparison
+rather than two reports, and each difference is stated once, on the candidate.
+Where three columns fit that is a table; where they do not it is a stack naming
+both models against every figure, since a phone would otherwise cut the
+figures rather than the labels.
+
+Levels are reported one by one as well as in aggregate, each with the windows
+it rests on: a model that improved overall may have lost the rarest level,
+which is the costliest to miss and the thinnest evidence. The recordings both
+runs were scored on are listed side by side, a dash marking one a model never
+saw — that is what a difference between two corpora looks like, where a
+sentence counting them is not.
+
 ## Shared pieces
 
 The shared pieces — the button, the surface, the section header, the pager, the

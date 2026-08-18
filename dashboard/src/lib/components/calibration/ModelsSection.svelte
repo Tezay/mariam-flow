@@ -4,6 +4,7 @@
   import CircleAlert from '@lucide/svelte/icons/circle-alert';
   import Cpu from '@lucide/svelte/icons/cpu';
   import Pencil from '@lucide/svelte/icons/pencil';
+  import Scale from '@lucide/svelte/icons/scale';
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import Upload from '@lucide/svelte/icons/upload';
 
@@ -29,11 +30,13 @@
     onupdated,
     onchanged,
     onopen,
+    oncompare,
   }: {
     models: StoredModel[];
     onupdated: (status: Status) => void;
     onchanged: () => void;
     onopen: (model: StoredModel) => void;
+    oncompare: (reference: string, candidate: string) => void;
   } = $props();
 
   let bundle = $state<File | null>(null);
@@ -42,6 +45,9 @@
   let forgetting = $state<StoredModel | null>(null);
   let renaming = $state<StoredModel | null>(null);
   let pageIndex = $state(0);
+  /* Held as an identifier rather than the model: the import replaces the
+     library, and the copy captured before it would still claim to be active. */
+  let replaced = $state<string | null>(null);
 
   const active = $derived(models.find((model) => model.active) ?? null);
   const others = $derived(models.filter((model) => !model.active));
@@ -55,12 +61,14 @@
     if (!bundle) {
       return;
     }
+    const superseded = active;
     busy = true;
     const outcome = await importModel(bundle);
     busy = false;
     if (outcome.kind === 'ok') {
       failure = null;
       bundle = null;
+      replaced = superseded?.has_evaluation ? superseded.id : null;
       onupdated(outcome.status);
       onchanged();
       return;
@@ -228,6 +236,20 @@
 
       {#if failure}
         <p role="status" class="mt-3 text-sm text-danger">{failure}</p>
+      {/if}
+
+      <!-- An import puts the new model straight into service, over one that
+           was working. -->
+      {#if replaced && active?.has_evaluation}
+        {@const previous = replaced}
+        {@const current = active}
+        <p role="status" class="mt-3 flex flex-wrap items-center gap-3 text-sm text-ink-900">
+          {t('model.imported')}
+          <Button variant="outline" size="sm" onclick={() => oncompare(previous, current.id)}>
+            <Scale size={14} aria-hidden="true" />
+            {t('compare.openReplaced')}
+          </Button>
+        </p>
       {/if}
 
       <div class="mt-3">

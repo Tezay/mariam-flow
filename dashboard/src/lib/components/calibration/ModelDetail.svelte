@@ -2,6 +2,7 @@
   import ArrowLeft from '@lucide/svelte/icons/arrow-left';
   import BadgeCheck from '@lucide/svelte/icons/badge-check';
   import CircleAlert from '@lucide/svelte/icons/circle-alert';
+  import Scale from '@lucide/svelte/icons/scale';
 
   import { formatPoints, formatShare, readings } from '$lib/analysis';
   import { type RecordedSession } from '$lib/api/calibration';
@@ -18,15 +19,19 @@
   let {
     model,
     recordings,
+    inService,
     onback,
     onupdated,
     onchanged,
+    oncompare,
   }: {
     model: StoredModel;
     recordings: RecordedSession[];
+    inService: StoredModel | null;
     onback: () => void;
     onupdated: (status: Status) => void;
     onchanged: () => void;
+    oncompare: (reference: string, candidate: string) => void;
   } = $props();
 
   let detail = $state<ModelDetail | null>(null);
@@ -41,6 +46,12 @@
 
   const evaluation = $derived(detail?.evaluation ?? null);
   const scores = $derived(evaluation ? readings(evaluation) : null);
+
+  /* Offered only once both sides can answer: a comparison against a bundle
+     that carries no scores has nothing to draw. */
+  const against = $derived(
+    !model.active && evaluation && inService?.has_evaluation ? inService : null,
+  );
 
   /* A capture has its own lifetime: it is often exported and removed long
      before the model trained on it comes back. */
@@ -90,7 +101,15 @@
         <BadgeCheck size={14} aria-hidden="true" />{t('model.inService')}
       </p>
     {:else}
-      <Button disabled={busy} onclick={() => void put()}>{t('model.use')}</Button>
+      <div class="flex shrink-0 flex-wrap items-center gap-2">
+        {#if against}
+          <Button variant="outline" onclick={() => oncompare(against.id, model.id)}>
+            <Scale size={14} aria-hidden="true" />
+            {t('compare.open')}
+          </Button>
+        {/if}
+        <Button disabled={busy} onclick={() => void put()}>{t('model.use')}</Button>
+      </div>
     {/if}
   </header>
 
