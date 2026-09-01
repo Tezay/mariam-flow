@@ -18,7 +18,7 @@ license = "PolyForm-Noncommercial-1.0.0"
 publish = false
 
 [workspace.dependencies]
-argon2 = "0.5"
+argon2 = "0.6"
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 flow-core = { path = "crates/flow-core" }
