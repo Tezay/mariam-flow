@@ -260,9 +260,11 @@ entering the binary at all.
 
 The project takes only permissively licensed dependencies. Most are
 dual-licensed under MIT and Apache-2.0. Where a crate carries something else
-— a BSD or Zlib variant, or the Unicode license covering character tables —
-the terms remain permissive and impose no condition on the work as a whole.
-No dependency places a copyleft obligation on the appliance binary.
+— a BSD or Zlib variant, the Unicode license covering character tables, or
+the Mozilla Public License 2.0, whose obligations are per-file and attach
+only to modifications of that crate's own source — the terms remain
+permissive and impose no condition on the work as a whole. No dependency
+places a copyleft obligation on the appliance binary.
 
 SQLite itself, vendored through `rusqlite`'s bundled build, is in the public
 domain and imposes no condition.
