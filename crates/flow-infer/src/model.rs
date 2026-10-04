@@ -10,7 +10,7 @@ use std::path::Path;
 
 use flow_core::DensityClass;
 use thiserror::Error;
-use tract_onnx::prelude::*;
+use tract::prelude::*;
 
 /// Failure while loading or running the density model.
 #[derive(Debug, Error)]
@@ -78,11 +78,9 @@ impl Prediction {
     }
 }
 
-type Plan = TypedRunnableModel<TypedModel>;
-
 /// A loaded, optimized, runnable density classifier.
 pub struct DensityModel {
-    plan: Plan,
+    runnable: Runnable,
     n_features: usize,
 }
 
@@ -105,34 +103,34 @@ impl DensityModel {
     /// `[1, n]` float tensor; [`InferError::BadOutput`] if it does not answer
     /// one probability per density class.
     pub fn load(path: &Path) -> Result<Self, InferError> {
-        let plan: Plan = tract_onnx::onnx()
-            .model_for_path(path)
-            .and_then(|model| model.into_optimized())
+        let runnable = tract::onnx()
+            .and_then(|onnx| onnx.load(path))
+            .and_then(|model| model.into_model())
             .and_then(|model| model.into_runnable())
             .map_err(|err| InferError::Load(err.to_string()))?;
 
-        let fact = plan
-            .model()
+        let input = runnable
             .input_fact(0)
             .map_err(|err| InferError::Load(err.to_string()))?;
-        let dims = fact.shape.as_concrete().ok_or(InferError::BadInputShape)?;
-        let n_features = match dims {
-            [1, n] => *n,
+        let n_features = match concrete_shape(&input).as_deref() {
+            Some(&[1, n]) => n,
             _ => return Err(InferError::BadInputShape),
         };
 
         // Checked here rather than at the first prediction: by then a caller
         // has accepted the model and put it in service.
-        let output = plan
-            .model()
+        let output = runnable
             .output_fact(0)
             .map_err(|err| InferError::Load(err.to_string()))?;
-        match output.shape.as_concrete() {
-            Some([1, n]) if *n == DensityClass::ALL.len() => {}
+        match concrete_shape(&output).as_deref() {
+            Some(&[1, n]) if n == DensityClass::ALL.len() => {}
             _ => return Err(InferError::BadOutput),
         }
 
-        Ok(Self { plan, n_features })
+        Ok(Self {
+            runnable,
+            n_features,
+        })
     }
 
     /// Number of features the model expects per window.
@@ -155,19 +153,28 @@ impl DensityModel {
                 got: features.len(),
             });
         }
-        let input = tract_ndarray::Array2::from_shape_vec((1, self.n_features), features.to_vec())
+        let input = Tensor::from_slice(&[1, self.n_features], features)
             .map_err(|err| InferError::Run(err.to_string()))?;
         let outputs = self
-            .plan
-            .run(tvec!(Tensor::from(input).into()))
+            .runnable
+            .run([input])
             .map_err(|err| InferError::Run(err.to_string()))?;
-        let view = outputs[0]
-            .to_array_view::<f32>()
-            .map_err(|err| InferError::Run(err.to_string()))?;
-        let flat: Vec<f32> = view.iter().copied().collect();
-        let probabilities: [f32; 4] = flat.try_into().map_err(|_| InferError::BadOutput)?;
+        let probabilities: [f32; 4] = outputs
+            .first()
+            .ok_or(InferError::BadOutput)?
+            .as_slice::<f32>()
+            .map_err(|err| InferError::Run(err.to_string()))?
+            .try_into()
+            .map_err(|_| InferError::BadOutput)?;
         Ok(Prediction { probabilities })
     }
+}
+
+fn concrete_shape(fact: &Fact) -> Option<Vec<usize>> {
+    fact.dims()
+        .ok()?
+        .map(|dim| usize::try_from(dim.to_int64().ok()?).ok())
+        .collect()
 }
 
 #[cfg(test)]

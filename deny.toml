@@ -1,15 +1,5 @@
 [advisories]
 yanked = "deny"
-ignore = [
-    # `time` stack exhaustion when parsing. Reaches the tree only through
-    # `[build-dependencies]` of `tract-linalg` and is never linked into the
-    # appliance; the input it parses is that crate's own templates. Lifts when
-    # tract's `liquid` moves past time 0.3.47.
-    "RUSTSEC-2026-0009",
-    # `paste` is unmaintained rather than vulnerable, and is a proc-macro: it
-    # runs during compilation and ships nothing. No safe upgrade exists.
-    "RUSTSEC-2024-0436",
-]
 
 [licenses]
 # An allow-list rather than a deny-list: a copyleft dependency would contradict

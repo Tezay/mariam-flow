@@ -316,13 +316,13 @@ fn read_frame(line: &str) -> Result<CsiFrame, SessionError> {
 }
 
 fn check_order(last: &mut Option<TimestampUs>, ts_us: TimestampUs) -> Result<(), SessionError> {
-    if let Some(prev) = *last {
-        if ts_us < prev {
-            return Err(SessionError::OutOfOrder {
-                last: prev,
-                got: ts_us,
-            });
-        }
+    if let Some(prev) = *last
+        && ts_us < prev
+    {
+        return Err(SessionError::OutOfOrder {
+            last: prev,
+            got: ts_us,
+        });
     }
     *last = Some(ts_us);
     Ok(())

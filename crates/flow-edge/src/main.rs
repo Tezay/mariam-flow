@@ -260,7 +260,7 @@ async fn housekeeping(state: EdgeState) {
         }
         state.flush_journal();
         ticks += 1;
-        if ticks % PRUNE_EVERY_TICKS == 0 {
+        if ticks.is_multiple_of(PRUNE_EVERY_TICKS) {
             state.prune_journal();
         }
     }
