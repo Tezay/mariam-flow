@@ -15,10 +15,8 @@ radio roles, selected in `menuconfig`:
   Optionally echoes lines on the serial console — the zero-network,
   day-one capture path (`csi-capture --input -`).
 
-> **Status: written, not yet compiled or flashed.** The code follows the
-> esp-csi examples and ESP-IDF 5.x APIs but must be validated on real
-> hardware; `fft_gain`/`agc_gain` field locations in `wifi_pkt_rx_ctrl_t`
-> are the most likely IDF-version-sensitive spots.
+> **Status**: the serial path is validated on ESP32-C6 with ESP-IDF 5.5. The
+> UDP path builds but has not yet been run on hardware.
 
 ## Design notes
 
@@ -27,13 +25,19 @@ radio roles, selected in `menuconfig`:
   the RX nodes join — typically an AP hosted by the edge device, which
   also gives the nodes stable addresses (the edge identifies RX nodes by
   source IP, ADR 0007).
+- **Reception**: the transmitter belongs to no network, and a station takes
+  frames only from its own access point once associated, and none before.
+  The receiver therefore enables promiscuous mode in both capture modes, as
+  the esp-csi `csi_recv` example does.
 - The CSI callback runs in the Wi-Fi task: it only formats and enqueues;
   a dedicated task does the UDP sends. A full queue drops lines (counted)
   — losing a frame is acceptable and measured end-to-end via the
   sequence numbers; blocking the Wi-Fi task is not.
 - Power save is disabled (`WIFI_PS_NONE`): it decimates the capture rate.
 - Raw CSI I/Q values are emitted as-is (no gain compensation), matching
-  what the edge stores and the models consume.
+  what the edge stores and the models consume. The C6 receive descriptor
+  exposes no `fft_gain` or `agc_gain` on ESP-IDF 5.5, so those two columns
+  are emitted as zero to keep the layout the edge parser detects.
 
 ## Build and flash
 
