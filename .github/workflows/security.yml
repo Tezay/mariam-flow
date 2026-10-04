@@ -1,0 +1,168 @@
+# Apart from CI on purpose: an advisory published overnight must not turn an
+# unrelated pull request red.
+name: Security
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # paths-filter lists a pull request's files through the API.
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.decide.outputs.rust }}
+      dashboard: ${{ steps.decide.outputs.dashboard }}
+      python: ${{ steps.decide.outputs.python }}
+    steps:
+      - name: Filter paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            rust:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/*/Cargo.toml'
+              - 'deny.toml'
+              - '.github/workflows/security.yml'
+            dashboard:
+              - 'dashboard/package.json'
+              - 'dashboard/pnpm-lock.yaml'
+              - '.github/workflows/security.yml'
+            python:
+              - 'ml/pyproject.toml'
+              - 'ml/uv.lock'
+              - '.github/workflows/security.yml'
+
+      - name: Decide
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          RUST: ${{ steps.filter.outputs.rust }}
+          DASHBOARD: ${{ steps.filter.outputs.dashboard }}
+          PYTHON: ${{ steps.filter.outputs.python }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            mode=filtered
+          else
+            mode=full RUST=true DASHBOARD=true PYTHON=true
+          fi
+          for value in "$RUST" "$DASHBOARD" "$PYTHON"; do
+            if [ "$value" != true ] && [ "$value" != false ]; then
+              echo "::error::A path filter gave no decision in $mode mode."
+              exit 1
+            fi
+          done
+          {
+            echo "rust=$RUST"
+            echo "dashboard=$DASHBOARD"
+            echo "python=$PYTHON"
+          } >> "$GITHUB_OUTPUT"
+
+          row() {
+            if [ "$2" = true ]; then echo "| $1 | runs | $3 |"; else echo "| $1 | skipped | $3 |"; fi
+          }
+          {
+            echo "### Change detection: \`$mode\`"
+            echo
+            if [ "$mode" = filtered ]; then
+              echo "An audit runs only when its manifest or lockfile changes: a skipped audit was not run, not passed. The weekly run audits everything."
+            else
+              echo "Scheduled or manual run: every lockfile is audited."
+            fi
+            echo
+            echo "| Audit | Decision | Triggered by |"
+            echo "|---|---|---|"
+            row "Rust (cargo-deny)" "$RUST" "\`Cargo.toml\`, \`Cargo.lock\`, \`crates/*/Cargo.toml\`, \`deny.toml\`"
+            row "Dashboard (pnpm audit)" "$DASHBOARD" "\`dashboard/package.json\`, \`dashboard/pnpm-lock.yaml\`"
+            row "Python (uv audit)" "$PYTHON" "\`ml/pyproject.toml\`, \`ml/uv.lock\`"
+            echo
+            echo "A change to this workflow runs every row."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Licences, bans and sources are checked here too: like advisories, their
+  # verdict can only change with the files that trigger this job.
+  rust:
+    name: Rust dependencies (cargo-deny)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # --all-features is the action's default, spelled out so the check can
+      # be reproduced locally: it is what brings in the `dashboard` feature.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
+  dashboard:
+    name: Dashboard dependencies (pnpm audit)
+    needs: changes
+    if: needs.changes.outputs.dashboard == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          package_json_file: dashboard/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: dashboard/.nvmrc
+
+      - name: Audit
+        working-directory: dashboard
+        # Moderate and above: low-severity findings here are build-time only,
+        # and would train everyone to ignore this job.
+        run: pnpm audit --audit-level moderate
+
+  python:
+    name: Python dependencies (uv audit)
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+
+      # No install step: --frozen audits uv.lock directly. Still a preview
+      # command — if uv changes it, pip-audit is the stable fallback.
+      - name: Audit
+        working-directory: ml
+        run: uv audit --frozen --preview-features audit
+
+  result:
+    name: Security result
+    needs: [changes, rust, dashboard, python]
+    # always(), not !cancelled(): a required check that is skipped counts as passed.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail on a failed or cancelled job
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "::error::An audit failed or was cancelled; see the jobs above."
+          exit 1

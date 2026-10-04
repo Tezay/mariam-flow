@@ -93,5 +93,9 @@ the ADRs say why it is that way.
 - **Dashboard** — Node ≥ 22 with pnpm. CI enforces Prettier, ESLint,
   `svelte-check`, Vitest, the production build, and that the result still
   embeds into the daemon.
-- **Dependencies** — `cargo-deny` gates advisories, licences, bans and sources;
-  `pnpm audit` gates the dashboard at moderate severity and above.
+- **Dependencies** — a `Security` workflow, separate from CI, runs
+  `cargo-deny` (advisories, licences, bans and sources), `pnpm audit` on the
+  dashboard at moderate severity and above, and `uv audit` on the training
+  environment. On a pull request each audit runs only when its manifest or
+  lockfile changes; a weekly scheduled run audits all three, so a newly
+  published advisory surfaces without blocking unrelated changes.
