@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import uPlot from 'uplot';
   import 'uplot/dist/uPlot.min.css';
 
@@ -121,7 +122,10 @@
       container,
     );
     chart = built;
-    built.setScale('x', { min: viewport.from, max: viewport.to });
+    /* Untracked: the effect below applies later viewports. Tracked here, each
+       would rebuild the chart, whose first setScale publishes one more. */
+    const frame = untrack(() => ({ min: viewport.from, max: viewport.to }));
+    built.setScale('x', frame);
     framed = true;
     ongutters(
       built.bbox.left / devicePixelRatio,
