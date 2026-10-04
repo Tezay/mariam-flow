@@ -205,7 +205,7 @@ fn int<T: FromStr>(cols: &[&str], idx: usize, column: &'static str) -> Result<T,
 }
 
 fn check_data(declared: usize, data: &[i16]) -> Result<(), ParseError> {
-    if data.len() % 2 != 0 {
+    if !data.len().is_multiple_of(2) {
         return Err(ParseError::OddIqCount { count: data.len() });
     }
     if declared != data.len() {

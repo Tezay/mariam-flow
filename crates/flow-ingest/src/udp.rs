@@ -240,12 +240,11 @@ impl UdpSource {
         }
         observation.sampled += 1;
         let text = String::from_utf8_lossy(&self.buf[..len]);
-        if let Ok(raw) = parse_line(&text) {
-            if !observation.tx_macs.contains(&raw.mac)
-                && observation.tx_macs.len() < MAX_OBSERVED_MACS
-            {
-                observation.tx_macs.push(raw.mac);
-            }
+        if let Ok(raw) = parse_line(&text)
+            && !observation.tx_macs.contains(&raw.mac)
+            && observation.tx_macs.len() < MAX_OBSERVED_MACS
+        {
+            observation.tx_macs.push(raw.mac);
         }
     }
 
@@ -297,11 +296,11 @@ impl UdpSource {
                     continue;
                 }
             };
-            if let Some(wanted) = self.tx_mac {
-                if raw.mac != wanted {
-                    self.stats.filtered += 1;
-                    continue;
-                }
+            if let Some(wanted) = self.tx_mac
+                && raw.mac != wanted
+            {
+                self.stats.filtered += 1;
+                continue;
             }
             if let Some(previous) = self.last_seq.insert(node_id.clone(), raw.seq) {
                 if raw.seq > previous {

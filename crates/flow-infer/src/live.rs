@@ -148,13 +148,13 @@ impl LivePipeline {
     /// failures; see [`LiveError`].
     pub fn push(&mut self, frame: CsiFrame) -> Result<Option<WaitEstimate>, LiveError> {
         frame.validate()?;
-        if let Some(newest) = self.newest_us {
-            if frame.ts_us < newest {
-                return Err(LiveError::OutOfOrder {
-                    last: newest,
-                    got: frame.ts_us,
-                });
-            }
+        if let Some(newest) = self.newest_us
+            && frame.ts_us < newest
+        {
+            return Err(LiveError::OutOfOrder {
+                last: newest,
+                got: frame.ts_us,
+            });
         }
         let now = frame.ts_us;
         self.newest_us = Some(now);

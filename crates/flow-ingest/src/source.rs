@@ -153,11 +153,11 @@ impl FrameSource {
                     Ok(raw) => raw,
                     Err(err) => return Some(Err(err.into())),
                 };
-                if let Some(wanted) = *tx_mac {
-                    if raw.mac != wanted {
-                        *filtered += 1;
-                        continue;
-                    }
+                if let Some(wanted) = *tx_mac
+                    && raw.mac != wanted
+                {
+                    *filtered += 1;
+                    continue;
                 }
                 let ts_us = timeline.assign(raw.local_timestamp);
                 return Some(raw.to_frame(node_id.as_str(), ts_us).map_err(Into::into));

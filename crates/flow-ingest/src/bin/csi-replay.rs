@@ -88,11 +88,11 @@ fn run(args: &Args) -> Result<(), Box<dyn Error>> {
 
     for result in reader.by_ref() {
         let raw = result?;
-        if let Some(wanted) = tx_mac {
-            if raw.mac != wanted {
-                filtered_out += 1;
-                continue;
-            }
+        if let Some(wanted) = tx_mac
+            && raw.mac != wanted
+        {
+            filtered_out += 1;
+            continue;
         }
         let ts_us = timeline.assign(raw.local_timestamp);
         let frame = raw.to_frame(args.node_id.as_str(), ts_us)?;

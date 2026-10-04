@@ -43,10 +43,10 @@ impl Timeline {
     /// compared to detect wrap-around. The returned sequence is
     /// monotonically non-decreasing.
     pub fn assign(&mut self, local_us: u32) -> TimestampUs {
-        if let Some(prev) = self.prev_local {
-            if local_us < prev {
-                self.wraps += 1;
-            }
+        if let Some(prev) = self.prev_local
+            && local_us < prev
+        {
+            self.wraps += 1;
         }
         self.prev_local = Some(local_us);
         let extended = (self.wraps << 32) + u64::from(local_us);

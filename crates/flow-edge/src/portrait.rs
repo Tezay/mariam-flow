@@ -313,10 +313,10 @@ impl NodeRun {
         self.frames += 1;
         self.first_us.get_or_insert(frame.ts_us);
         self.last_us = Some(frame.ts_us);
-        if let Some(prev) = self.prev_us {
-            if frame.ts_us.saturating_sub(prev) > GAP_US {
-                self.gaps.push([prev, frame.ts_us]);
-            }
+        if let Some(prev) = self.prev_us
+            && frame.ts_us.saturating_sub(prev) > GAP_US
+        {
+            self.gaps.push([prev, frame.ts_us]);
         }
         self.prev_us = Some(frame.ts_us);
 
