@@ -8,9 +8,6 @@
  *
  * Based on the `csi_send` / `csi_recv` get-started examples of
  * espressif/esp-csi (Apache License 2.0); original notices preserved.
- *
- * STATUS: written against ESP-IDF 5.x APIs and the esp-csi examples,
- * NOT yet compiled or flashed — to be validated on the first hardware.
  */
 
 #include <string.h>
@@ -242,6 +239,23 @@ static void udp_sender_task(void *arg)
 }
 #endif /* CONFIG_CSI_NODE_RX_MODE_JOIN */
 
+/*
+ * Promiscuous mode is not optional once associated: the transmitter belongs
+ * to no network, and a station takes frames only from its own access point.
+ */
+static void listen_to_transmitter(uint8_t channel)
+{
+    ESP_ERROR_CHECK(esp_now_init());
+    esp_now_peer_info_t peer = {
+        .channel = channel,
+        .ifidx = WIFI_IF_STA,
+        .encrypt = false,
+        .peer_addr = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+    };
+    ESP_ERROR_CHECK(esp_now_add_peer(&peer));
+    ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
+}
+
 /* Enables CSI acquisition and registers the callback. Shared by both RX
  * modes; the same acquisition switches as the esp-csi C6 example. */
 static void start_csi(void)
@@ -265,8 +279,7 @@ static void start_csi(void)
 
 /*
  * Bring-up mode: park on a fixed channel and listen, with no scan and no
- * association (mirrors the esp-csi csi_recv example). Promiscuous mode
- * delivers the TX's ESP-NOW broadcasts to the CSI engine; lines go to the
+ * association (mirrors the esp-csi csi_recv example). Lines go to the
  * serial console. Needs no network at all.
  */
 static void run_rx(void)
@@ -279,16 +292,7 @@ static void run_rx(void)
     ESP_ERROR_CHECK(
         esp_wifi_set_channel(CONFIG_CSI_NODE_RX_CHANNEL, WIFI_SECOND_CHAN_NONE));
 
-    ESP_ERROR_CHECK(esp_now_init());
-    esp_now_peer_info_t peer = {
-        .channel = CONFIG_CSI_NODE_RX_CHANNEL,
-        .ifidx = WIFI_IF_STA,
-        .encrypt = false,
-        .peer_addr = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
-    };
-    ESP_ERROR_CHECK(esp_now_add_peer(&peer));
-    ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
-
+    listen_to_transmitter(CONFIG_CSI_NODE_RX_CHANNEL);
     start_csi();
     ESP_LOGI(TAG,
              "rx: fixed channel %d, serial output — the TX must use the same channel",
@@ -334,6 +338,7 @@ static void run_rx(void)
     s_line_queue = xQueueCreate(CSI_QUEUE_DEPTH, sizeof(csi_line_t));
     xTaskCreate(udp_sender_task, "csi_udp", 4096, NULL, 5, NULL);
 
+    listen_to_transmitter(channel);
     start_csi();
     ESP_LOGI(TAG, "rx: CSI streaming started");
 }
