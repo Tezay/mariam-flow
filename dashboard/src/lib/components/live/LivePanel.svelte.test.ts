@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/svelte';
+import { cleanup, render, screen } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import LivePanel from './LivePanel.svelte';
@@ -61,7 +62,10 @@ describe('LivePanel', () => {
       vi.fn(() => Promise.resolve(new Response('[]', { status: 200 }))),
     );
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
 
   it('shows the waiting time while it is current', async () => {
     show(reported(0));
@@ -85,6 +89,20 @@ describe('LivePanel', () => {
     show(reported(SILENT_AFTER_US + 1));
 
     expect(await screen.findByRole('status')).toHaveTextContent(/no estimate is coming out/i);
+  });
+
+  it('remembers the period chosen for the history', async () => {
+    show(reported(0));
+    await userEvent.click(await screen.findByRole('button', { name: '3h' }));
+    cleanup();
+
+    show(reported(0));
+
+    expect(await screen.findByRole('button', { name: '3h' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith('/api/estimates?minutes=180');
   });
 
   it('says that a recording suspends the estimate', async () => {

@@ -10,6 +10,7 @@
     subscribeLive,
   } from '$lib/api/live';
   import { type SensingNode } from '$lib/api/status';
+  import { MINUTE_US, RANGES, type Range, isRange } from '$lib/history';
   import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';
   import { DENSITY_SWATCH, activity, formatClock } from '$lib/live';
   import { quietReceivers, receiverState } from '$lib/sensors';
@@ -18,29 +19,48 @@
 
   let { paired, modelName = null }: { paired: SensingNode[]; modelName?: string | null } = $props();
 
-  /** How far back the short history reaches. */
-  const HISTORY_MINUTES = 60;
+  const RANGE_KEY = 'mariam-flow.history';
+
+  function storedRange(): Range {
+    try {
+      const stored = Number(localStorage.getItem(RANGE_KEY));
+      return isRange(stored) ? stored : RANGES[0];
+    } catch {
+      return RANGES[0];
+    }
+  }
 
   let snapshot = $state<LiveSnapshot | null>(null);
   let history = $state<MinuteSummary[]>([]);
+  let range = $state(storedRange());
 
   $effect(() => subscribeLive((next) => (snapshot = next)));
 
-  // The history changes once a minute; polling it at that cadence costs
-  // nothing and keeps the live stream carrying only the live state.
+  function choose(next: Range) {
+    range = next;
+    try {
+      localStorage.setItem(RANGE_KEY, String(next));
+    } catch {
+      // Storage disabled: the choice simply does not outlive the session.
+    }
+  }
+
+  /* Read again as each minute ends, by the appliance clock: a minute is stored
+     when the first estimate of the next one arrives, a second or so in. A
+     timer of the browser's own would drift across that moment and show the
+     last minute up to a minute late. */
+  const minute = $derived(snapshot ? Math.floor((snapshot.now_us - 2_000_000) / MINUTE_US) : null);
+
   $effect(() => {
+    void minute;
     let cancelled = false;
-    const load = async () => {
-      const rows = await fetchHistory(HISTORY_MINUTES);
+    void fetchHistory(range).then((rows) => {
       if (!cancelled && rows) {
         history = rows;
       }
-    };
-    void load();
-    const timer = setInterval(() => void load(), 60_000);
+    });
     return () => {
       cancelled = true;
-      clearInterval(timer);
     };
   });
 
@@ -139,7 +159,13 @@
     {/if}
   </section>
 
-  <HistoryFigure minutes={history} />
+  <HistoryFigure
+    minutes={history}
+    {range}
+    nowUs={snapshot?.now_us ?? null}
+    current={doing?.kind === 'estimating' ? doing.estimate : null}
+    onrange={choose}
+  />
 
   <section class="rounded-md bg-white p-4 ring-1 ring-ink-100">
     <h3 class="text-xs font-medium uppercase tracking-wide text-ink-500">{t('live.stream')}</h3>
