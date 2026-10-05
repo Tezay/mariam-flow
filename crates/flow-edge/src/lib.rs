@@ -32,9 +32,8 @@
 //!   login, and the doubling delay that makes guessing the secret
 //!   uneconomic without ever locking the installer out.
 //!
-//! Planned: the embedded dashboard, node pairing, network configuration through NetworkManager,
-//! calibration control, model import and the outbound push of aggregated
-//! estimates. See `docs/architecture.md`.
+//! Not here yet: configuring the system network through NetworkManager. See
+//! `docs/architecture.md`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
