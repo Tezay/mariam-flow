@@ -89,6 +89,67 @@ async fn what_the_classes_mean_travels_with_the_session() {
 }
 
 #[tokio::test]
+async fn a_position_given_as_a_capture_starts_is_kept_for_the_installation() {
+    // A position that lasted one capture would leave the next ones recording
+    // none.
+    let (state, dir) = recording_ready();
+    let cookie = session_of(&state).await;
+    let generation = state.config_generation();
+
+    let (status, body) = post(
+        &state,
+        "/api/calibration",
+        &cookie,
+        json!({ "positions": { "rx-1": "  above the entrance  " } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let placed = |body: &serde_json::Value, node_id: &str| {
+        body["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["node_id"] == node_id)
+            .unwrap()
+            .get("position")
+            .cloned()
+    };
+    assert_eq!(placed(&body, "rx-1"), Some(json!("above the entrance")));
+    assert!(journal_details(&state).contains("node rx-1 placed"));
+    assert_eq!(
+        state.config_generation(),
+        generation,
+        "retiring the intake here would open a hole in the capture"
+    );
+    send(
+        &state,
+        "DELETE",
+        "/api/calibration",
+        Some(&cookie),
+        None,
+        10,
+    )
+    .await;
+
+    let rx = stored(&state)
+        .nodes
+        .into_iter()
+        .find(|node| node.node_id == "rx-1")
+        .unwrap();
+    assert_eq!(rx.position.as_deref(), Some("above the entrance"));
+
+    let session = std::fs::read_dir(dir.path().join("sessions"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(session.join("meta.json")).unwrap()).unwrap();
+    assert_eq!(placed(&meta, "rx-1"), Some(json!("above the entrance")));
+}
+
+#[tokio::test]
 async fn a_second_capture_is_refused_while_one_is_running() {
     // The stream has one consumer at a time; the refusal is what keeps a
     // running capture from being cut short by a stray request.

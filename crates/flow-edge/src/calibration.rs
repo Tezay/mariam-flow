@@ -5,10 +5,12 @@
 //! cannot know is requested from the operator: where each node physically
 //! sits, and what the density classes mean at this site.
 
+use std::collections::BTreeMap;
+
 use flow_core::{NodePlacement, SessionMeta};
 use serde::{Deserialize, Serialize};
 
-use crate::config::ApplianceConfig;
+use crate::config::{ApplianceConfig, PairedNode};
 use crate::error::StoreError;
 
 /// What the operator supplies when starting a session.
@@ -20,10 +22,29 @@ pub struct SessionRequest {
     /// Free-text description of the physical environment.
     #[serde(default)]
     pub environment: String,
-    /// Where each node sits, keyed by node id. Nodes left out record an
-    /// empty position rather than blocking the session.
+    /// Where nodes sit, keyed by node id, when the operator says so as the
+    /// recording starts. Kept as the installation's own description; a node
+    /// left out keeps the one it has.
     #[serde(default)]
-    pub positions: std::collections::BTreeMap<String, String>,
+    pub positions: BTreeMap<String, String>,
+}
+
+impl SessionRequest {
+    /// The positions this request changes, keyed by node id.
+    ///
+    /// A blank answer is a statement, as it is on the sensors screen: the
+    /// form shows what is stored and sends only what the operator edited.
+    #[must_use]
+    pub fn placements(&self, nodes: &[PairedNode]) -> BTreeMap<String, Option<String>> {
+        nodes
+            .iter()
+            .filter_map(|node| {
+                let stated = self.positions.get(&node.node_id)?.trim();
+                let stated = (!stated.is_empty()).then(|| stated.to_owned());
+                (node.position != stated).then(|| (node.node_id.clone(), stated))
+            })
+            .collect()
+    }
 }
 
 /// Builds a session identifier from the appliance clock.
@@ -86,16 +107,7 @@ pub fn session_meta(
             .map(|node| NodePlacement {
                 node_id: node.node_id.clone(),
                 role: node.role,
-                // The installation's own answer stands unless this capture
-                // overrides it: a sensor is described once, where it is
-                // fitted, not again by whoever happens to start a recording.
-                position: request
-                    .positions
-                    .get(&node.node_id)
-                    .filter(|position| !position.trim().is_empty())
-                    .or(node.position.as_ref())
-                    .cloned()
-                    .unwrap_or_default(),
+                position: node.position.clone().unwrap_or_default(),
             })
             .collect(),
         // The nodes are pre-flashed per kit and the appliance has no way to
@@ -286,23 +298,15 @@ mod tests {
     fn metadata_takes_its_nodes_from_the_pairing() {
         // A session naming nodes the appliance is not listening to would
         // record frames it cannot attribute.
-        let request = SessionRequest {
-            positions: [("rx-1".to_owned(), "left of the entrance".to_owned())]
-                .into_iter()
-                .collect(),
-            ..SessionRequest::default()
-        };
-
-        let meta = session_meta(&installed(), &request, "session-1".into());
+        let meta = session_meta(&installed(), &SessionRequest::default(), "session-1".into());
 
         assert_eq!(meta.nodes.len(), 2);
-        assert_eq!(meta.nodes[1].position, "left of the entrance");
         assert_eq!(meta.wifi_channel, 6);
         assert_eq!(meta.site, "RU EFREI");
     }
 
     #[test]
-    fn a_node_left_out_of_the_request_records_an_empty_position() {
+    fn a_node_nobody_described_records_an_empty_position() {
         // Blocking the session over a missing description would cost a
         // capture; an empty position is recoverable, a lost session is not.
         let meta = session_meta(&installed(), &SessionRequest::default(), "session-1".into());
@@ -331,40 +335,66 @@ mod tests {
         assert_eq!(rx.position, "above the entrance");
     }
 
-    #[test]
-    fn a_capture_may_still_say_where_a_sensor_was_moved_to() {
-        let mut config = installed();
-        config.nodes[1].position = Some("above the entrance".into());
-        let request = SessionRequest {
-            positions: [("rx-1".to_owned(), "beside the tills".to_owned())]
-                .into_iter()
+    fn stating(positions: &[(&str, &str)]) -> SessionRequest {
+        SessionRequest {
+            positions: positions
+                .iter()
+                .map(|(node_id, position)| ((*node_id).to_owned(), (*position).to_owned()))
                 .collect(),
             ..SessionRequest::default()
-        };
-
-        let meta = session_meta(&config, &request, "session-1".into());
-
-        let rx = meta.nodes.iter().find(|n| n.node_id == "rx-1").unwrap();
-        assert_eq!(rx.position, "beside the tills");
+        }
     }
 
     #[test]
-    fn a_blank_answer_does_not_erase_what_the_installation_knows() {
-        // An untouched field in the recording form is not a statement that
-        // the sensor has no position.
+    fn a_request_places_the_nodes_it_describes() {
         let mut config = installed();
         config.nodes[1].position = Some("above the entrance".into());
-        let request = SessionRequest {
-            positions: [("rx-1".to_owned(), "   ".to_owned())]
-                .into_iter()
-                .collect(),
-            ..SessionRequest::default()
-        };
 
-        let meta = session_meta(&config, &request, "session-1".into());
+        let placed = stating(&[("tx-1", "  by the door "), ("rx-1", "beside the tills")])
+            .placements(&config.nodes);
 
-        let rx = meta.nodes.iter().find(|n| n.node_id == "rx-1").unwrap();
-        assert_eq!(rx.position, "above the entrance");
+        assert_eq!(placed["tx-1"].as_deref(), Some("by the door"));
+        assert_eq!(placed["rx-1"].as_deref(), Some("beside the tills"));
+    }
+
+    #[test]
+    fn a_blank_answer_says_the_position_is_unknown_again() {
+        let mut config = installed();
+        config.nodes[1].position = Some("above the entrance".into());
+
+        let placed = stating(&[("tx-1", ""), ("rx-1", "   ")]).placements(&config.nodes);
+
+        assert_eq!(placed.len(), 1, "tx-1 had none to lose");
+        assert_eq!(placed["rx-1"], None);
+    }
+
+    #[test]
+    fn a_node_the_request_leaves_out_keeps_its_position() {
+        let mut config = installed();
+        config.nodes[1].position = Some("above the entrance".into());
+
+        assert!(stating(&[]).placements(&config.nodes).is_empty());
+    }
+
+    #[test]
+    fn a_position_restated_unchanged_is_not_a_change() {
+        // An edit sends every field, changed or not; the ones left as they
+        // were must not rewrite the configuration.
+        let mut config = installed();
+        config.nodes[1].position = Some("above the entrance".into());
+
+        let placed = stating(&[("rx-1", "above the entrance")]).placements(&config.nodes);
+
+        assert!(placed.is_empty());
+    }
+
+    #[test]
+    fn a_node_the_appliance_does_not_have_is_not_placed() {
+        assert!(
+            stating(&[("rx-9", "nowhere")])
+                .placements(&installed().nodes)
+                .is_empty()
+        );
     }
 
     #[test]

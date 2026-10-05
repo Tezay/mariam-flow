@@ -187,9 +187,6 @@ export const fr: Messages = {
     'Alimentez le remplaçant. Il apparaît dès que les récepteurs l’ont mesuré.',
   'sensors.adopt': 'Adopter',
 
-  'models.title': 'Modèles',
-  'models.lead':
-    'Ce avec quoi le boîtier estime. Un seul est en service ; les autres sont conservés.',
   'model.rename': 'Renommer',
   'cal.rename': 'Renommer',
   'net.answerFirst':
@@ -199,8 +196,8 @@ export const fr: Messages = {
   'model.inService': 'En service',
   'model.noneTitle': 'Aucun modèle',
   'model.noneLead': "Le boîtier enregistre mais n'estime pas. Importez-en un pour démarrer.",
-  'model.trained': 'entraîné {when}',
-  'model.importedOn': 'importé {when}',
+  'model.trained': 'entraîné le {when}',
+  'model.importedOn': 'importé le {when}',
   'model.window': 'fenêtre {value} s',
   'model.receivers': '{count} récepteur(s)',
   'model.use': 'Utiliser',
@@ -208,7 +205,11 @@ export const fr: Messages = {
   'model.confirmForget': 'Supprimer ce modèle ?',
   'model.confirmForgetLead':
     "Il ne pourra pas être récupéré. L'enregistrement qui a servi à l'entraîner est conservé.",
-  'model.library': 'Modèles détenus',
+  'model.library': 'Modèles conservés',
+  'model.libraryLead': 'Les modèles précédents. Chacun peut être remis en service.',
+  'model.libraryEmpty': "Aucun autre modèle n'est conservé.",
+  'model.fromOneRecording': "issu d'un enregistrement",
+  'model.fromRecordings': 'issu de {count} enregistrements',
   'model.anonymous': 'Paquet sans nom',
   'model.inspect': 'Ses résultats',
   'model.back': 'Retour à la calibration',
@@ -327,7 +328,10 @@ export const fr: Messages = {
   'live.model': 'modèle {name}',
 
   'model.choose': 'Choisir un paquet',
-  'model.import': 'Importer et activer',
+  'model.importOpen': 'Importer un modèle',
+  'model.importLead':
+    "Un paquet de modèle entraîné à partir des enregistrements de ce site. Il est mis en service aussitôt ; celui qu'il remplace est conservé.",
+  'model.import': 'Importer et mettre en service',
   'model.importing': 'Vérification…',
 
   'cal.wizardLead':
@@ -358,6 +362,20 @@ export const fr: Messages = {
   'cal.environment': "Ce qu'on enregistre",
   'cal.environmentHint': 'Par exemple : hall principal, service du midi, jour de pluie.',
   'cal.positions': 'Où sont les capteurs',
+  'cal.positionsEdit': 'Modifier',
+  'cal.positionsCancel': 'Garder les emplacements enregistrés',
+  'cal.positionsMoved':
+    'Ne changez un emplacement que si le capteur a été déplacé. Des enregistrements pris avec des capteurs placés différemment ne doivent pas servir au même entraînement.',
+  'cal.positionsKept':
+    "Conservé pour l'installation : les enregistrements suivants les reprennent. Un champ vide n'inscrit aucun emplacement.",
+  'cal.new': 'Nouvel enregistrement',
+  'cal.during': "Pendant l'enregistrement",
+  'cal.duringEstimate':
+    "L'estimation du temps d'attente est suspendue ; elle reprend à l'arrêt de l'enregistrement.",
+  'cal.duringMarks':
+    "L'écran passe en marquage : indiquez le niveau observé, et corrigez-le dès qu'il change. Rien n'est conservé avant la première marque.",
+  'cal.duringSeal': "Une fois arrêté, l'enregistrement est scellé et ne peut pas reprendre.",
+  'cal.quiet': "Sans réponse : {nodes}. Ce qui ne répond pas n'est pas enregistré.",
   'cal.start': "Démarrer l'enregistrement",
   'cal.starting': 'Démarrage…',
   'cal.notReady': "Appairez les capteurs avant d'enregistrer.",

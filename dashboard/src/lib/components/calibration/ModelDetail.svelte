@@ -8,7 +8,7 @@
   import { type RecordedSession } from '$lib/api/calibration';
   import { type ModelDetail, type StoredModel, fetchModel, useModel } from '$lib/api/models';
   import { type Status } from '$lib/api/status';
-  import { formatDay, formatWindow, modelName } from '$lib/calibration';
+  import { formatDay, formatTrained, formatWindow, modelName } from '$lib/calibration';
   import { formattingLocale, t } from '$lib/i18n/i18n.svelte';
   import ConfusionMatrix from '$components/analysis/ConfusionMatrix.svelte';
   import VerdictStrip from '$components/analysis/VerdictStrip.svelte';
@@ -86,7 +86,9 @@
       </h2>
       <p class="mt-1 text-sm text-ink-500">
         {#if model.manifest?.trained_at}
-          {t('model.trained', { when: model.manifest.trained_at })} ·
+          {t('model.trained', {
+            when: formatTrained(model.manifest.trained_at, formattingLocale()),
+          })} ·
         {/if}
         {t('model.importedOn', { when: formatDay(model.imported_at_us, formattingLocale()) })} ·
         {t('model.receivers', { count: model.receivers })} ·

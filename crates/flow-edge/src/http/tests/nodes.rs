@@ -68,6 +68,7 @@ async fn discovery_offers_what_the_intake_has_seen() {
 async fn a_node_is_told_where_it_sits_and_can_be_told_it_is_unknown_again() {
     let (state, _dir) = recording_ready();
     let cookie = session_of(&state).await;
+    let generation = state.config_generation();
 
     let (status, _, body) = send(
         &state,
@@ -79,6 +80,11 @@ async fn a_node_is_told_where_it_sits_and_can_be_told_it_is_unknown_again() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        state.config_generation(),
+        generation,
+        "where a node stands is nothing the intake is built from"
+    );
     let placed = body["nodes"]
         .as_array()
         .unwrap()

@@ -3,6 +3,7 @@
 //! The single place a change is validated before it is stored, which is what
 //! keeps a rejected write from ever reaching the disk.
 
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -48,8 +49,8 @@ struct Inner {
     data_dir: std::path::PathBuf,
     /// Whether a calibration session has ever been sealed here.
     site_captured: bool,
-    /// Bumped on every accepted write, so the intake can notice that the
-    /// configuration it was built from is no longer the current one.
+    /// Bumped by every write the intake is built from, so it can notice that
+    /// its configuration is no longer the current one.
     config_generation: u64,
     /// Where the configuration is persisted, so a write can be durable.
     config_path: std::path::PathBuf,
@@ -58,6 +59,21 @@ struct Inner {
     runtime: Runtime,
     sessions: SessionStore,
     throttle: Throttle,
+}
+
+impl Inner {
+    fn persist(&mut self, change: impl FnOnce(&mut ApplianceConfig)) -> Result<(), WriteRejection> {
+        let mut candidate = self.config.clone();
+        change(&mut candidate);
+        candidate
+            .validate()
+            .map_err(|err| WriteRejection::Invalid(err.to_string()))?;
+        candidate
+            .save(&self.config_path)
+            .map_err(|_| WriteRejection::Storage)?;
+        self.config = candidate;
+        Ok(())
+    }
 }
 
 /// Why a login was refused.
@@ -438,17 +454,31 @@ impl EdgeState {
         change: impl FnOnce(&mut ApplianceConfig),
     ) -> Result<(), WriteRejection> {
         let mut inner = self.lock();
-        let mut candidate = inner.config.clone();
-        change(&mut candidate);
-        candidate
-            .validate()
-            .map_err(|err| WriteRejection::Invalid(err.to_string()))?;
-        candidate
-            .save(&inner.config_path)
-            .map_err(|_| WriteRejection::Storage)?;
-        inner.config = candidate;
+        inner.persist(change)?;
         inner.config_generation += 1;
         Ok(())
+    }
+
+    /// Records where nodes sit, keyed by node id, leaving the intake running.
+    ///
+    /// Not a new generation: the intake is built from who sends, never from
+    /// where they stand, and a position given as a capture starts would
+    /// otherwise rebuild it inside that capture.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::write_config`].
+    pub fn place_nodes(
+        &self,
+        positions: &BTreeMap<String, Option<String>>,
+    ) -> Result<(), WriteRejection> {
+        self.lock().persist(|config| {
+            for node in &mut config.nodes {
+                if let Some(position) = positions.get(&node.node_id) {
+                    node.position.clone_from(position);
+                }
+            }
+        })
     }
 
     /// How many times the configuration has been replaced.

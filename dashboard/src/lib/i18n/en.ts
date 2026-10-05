@@ -188,8 +188,6 @@ export const en = {
     'Power the replacement on. It appears once the receivers have sensed it.',
   'sensors.adopt': 'Adopt',
 
-  'models.title': 'Models',
-  'models.lead': 'What the appliance estimates with. One is in service; the others are kept.',
   'model.rename': 'Rename',
   'cal.rename': 'Rename',
   'net.answerFirst':
@@ -199,15 +197,19 @@ export const en = {
   'model.inService': 'In service',
   'model.noneTitle': 'No model yet',
   'model.noneLead': 'The appliance records but does not estimate. Import one to start.',
-  'model.trained': 'trained {when}',
-  'model.importedOn': 'imported {when}',
+  'model.trained': 'trained on {when}',
+  'model.importedOn': 'imported on {when}',
   'model.window': '{value} s window',
   'model.receivers': '{count} receiver(s)',
   'model.use': 'Use',
   'model.forget': 'Remove',
   'model.confirmForget': 'Remove this model?',
   'model.confirmForgetLead': 'It cannot be recovered. The recording it was trained on is kept.',
-  'model.library': 'Models held',
+  'model.library': 'Kept models',
+  'model.libraryLead': 'Earlier models. Any of them can be put back into service.',
+  'model.libraryEmpty': 'No other model is kept.',
+  'model.fromOneRecording': 'from one recording',
+  'model.fromRecordings': 'from {count} recordings',
   'model.anonymous': 'Unnamed bundle',
   'model.inspect': 'How it scored',
   'model.back': 'Back to calibration',
@@ -321,7 +323,10 @@ export const en = {
   'live.model': 'model {name}',
 
   'model.choose': 'Choose a bundle',
-  'model.import': 'Import and activate',
+  'model.importOpen': 'Import a model',
+  'model.importLead':
+    'A model bundle trained from the recordings of this site. It goes into service at once; the one it replaces is kept.',
+  'model.import': 'Import and put in service',
   'model.importing': 'Checking…',
 
   'cal.wizardLead':
@@ -351,6 +356,20 @@ export const en = {
   'cal.environment': 'What is being recorded',
   'cal.environmentHint': 'For example: main hall, lunch service, rainy day.',
   'cal.positions': 'Where the sensors are',
+  'cal.positionsEdit': 'Edit',
+  'cal.positionsCancel': 'Keep the stored positions',
+  'cal.positionsMoved':
+    'Change a position only if the sensor was moved. Recordings made with the sensors in different places should not be trained together.',
+  'cal.positionsKept':
+    'Kept for the installation: later recordings carry them too. An empty field records no position.',
+  'cal.new': 'New recording',
+  'cal.during': 'While recording',
+  'cal.duringEstimate':
+    'The waiting-time estimate is suspended; it resumes when the recording stops.',
+  'cal.duringMarks':
+    'The screen switches to marking: press the level you see, and correct it as it changes. Nothing before the first mark is kept.',
+  'cal.duringSeal': 'Once stopped, the recording is sealed and cannot be resumed.',
+  'cal.quiet': 'Not answering: {nodes}. What does not answer is not recorded.',
   'cal.start': 'Start recording',
   'cal.starting': 'Starting…',
   'cal.notReady': 'Pair the sensors before recording.',

@@ -52,11 +52,14 @@ screwed to a wall does not move between recordings, so the question was either
 retyped or — in practice — left blank, and the recorded sessions carried
 nothing.
 
-The position is therefore a property of the paired node, described once from
-the sensors screen and copied into every session recorded afterwards. A capture
-may still override it, for the case the stored answer is wrong that day, and a
-blank override does not erase what the installation knows: an untouched field
-is not a statement that the sensor has no position.
+The position is therefore a property of the paired node, described from the
+sensors screen and copied into every session recorded afterwards. One given as
+a recording starts is the same statement made from another screen, so it is
+kept as the installation's own rather than applied to that capture alone: a
+position that lasted one recording would leave the next ones blank again. The
+recording form shows the stored positions and sends only those the operator
+chose to edit, so a node the request leaves out keeps its position, and a blank
+answer means there what it means on the sensors screen: unknown again.
 
 ## Consequences
 

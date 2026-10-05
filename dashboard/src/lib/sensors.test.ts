@@ -4,6 +4,8 @@ import { type NodeHealth } from './api/live';
 import { type Candidate, type Discovery } from './api/nodes';
 import { type SensingNode } from './api/status';
 import {
+  allPlaced,
+  answering,
   knownPositions,
   receiverState,
   replacements,
@@ -131,6 +133,41 @@ describe('knownPositions', () => {
       'rx-1': 'above the entrance',
       'rx-2': '',
     });
+  });
+});
+
+describe('answering', () => {
+  const heard = (nodes: Record<string, NodeHealth>) => ({
+    running: true,
+    estimating: false,
+    frames: 0,
+    estimates: 0,
+    last_frame_us: NOW,
+    edge_stamped: true,
+    nodes,
+  });
+
+  it('flags a receiver that fell silent, and one that never streamed', () => {
+    const stream = heard({ 'rx-1': health(NOW - SILENT_AFTER_US - 1) });
+
+    expect(answering(NODES, stream, NOW)).toEqual({ 'tx-1': false, 'rx-1': false, 'rx-2': false });
+  });
+
+  it('holds the transmitter heard while one receiver still streams', () => {
+    const stream = heard({ 'rx-1': health(NOW) });
+
+    expect(answering(NODES, stream, NOW)).toEqual({ 'tx-1': true, 'rx-1': true, 'rx-2': false });
+  });
+
+  it('answers for nobody before the appliance has said anything', () => {
+    expect(Object.values(answering(NODES, undefined))).toEqual([false, false, false]);
+  });
+});
+
+describe('allPlaced', () => {
+  it('holds only once no node is left undescribed', () => {
+    expect(allPlaced(NODES)).toBe(false);
+    expect(allPlaced(NODES.map((node) => ({ ...node, position: 'by the door' })))).toBe(true);
   });
 });
 
