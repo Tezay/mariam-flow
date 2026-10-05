@@ -8,6 +8,7 @@
     watchConnection,
   } from '$lib/connection.svelte';
   import { t } from '$lib/i18n/i18n.svelte';
+  import ClockNotice from '$components/ClockNotice.svelte';
   import ConnectionNotice from '$components/ConnectionNotice.svelte';
   import LoginScreen from '$components/LoginScreen.svelte';
   import TabShell from '$components/TabShell.svelte';
@@ -87,6 +88,8 @@
   <div class="app-shell flex flex-col {installing ? 'min-h-dvh' : 'h-dvh'}">
     {#if lost}
       <ConnectionNotice since={lastHeardAt()} />
+    {:else}
+      <ClockNotice />
     {/if}
     <!-- Inert as well as dimmed: an action sent to an appliance that is gone
          only fails later. -->

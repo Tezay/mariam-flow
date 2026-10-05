@@ -5,7 +5,7 @@
   import { type Status, type SystemReport, fetchSystem } from '$lib/api/status';
   import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';
   import { type Activity, activity, formatClock } from '$lib/live';
-  import { asMegabytes, formatUptime } from '$lib/system';
+  import { asGigabytes, asMegabytes, formatUptime, loadPercent, usedPercent } from '$lib/system';
 
   let { status }: { status: Status } = $props();
 
@@ -47,12 +47,39 @@
   const memory = $derived.by(() => {
     const total = report?.memory_total_kb;
     const available = report?.memory_available_kb;
-    return total && available
+    return total && available !== undefined
       ? t('system.memoryValue', {
-          available: asMegabytes(available),
+          used: asMegabytes(total - available),
           total: asMegabytes(total),
+          percent: usedPercent(total, available),
         })
       : null;
+  });
+
+  const storage = $derived.by(() => {
+    const total = report?.storage_total_kb;
+    const available = report?.storage_available_kb;
+    return total && available !== undefined
+      ? t('system.storageValue', {
+          used: asGigabytes(total - available),
+          total: asGigabytes(total),
+          percent: usedPercent(total, available),
+        })
+      : null;
+  });
+
+  const load = $derived.by(() => {
+    const value = report?.load_1m;
+    if (value === undefined) {
+      return null;
+    }
+    return report?.cpus
+      ? t('system.loadValue', {
+          load: value.toFixed(2),
+          cpus: report.cpus,
+          percent: loadPercent(value, report.cpus),
+        })
+      : value.toFixed(2);
   });
 
   /* Every machine fact is optional: the same binary is developed on a laptop
@@ -67,12 +94,9 @@
       value: report?.uptime_s === undefined ? null : formatUptime(report.uptime_s),
       mono: true,
     },
-    {
-      label: t('system.load'),
-      value: report?.load_1m === undefined ? null : report.load_1m.toFixed(2),
-      mono: true,
-    },
+    { label: t('system.load'), value: load, mono: true },
     { label: t('system.memory'), value: memory, mono: true },
+    { label: t('system.storage'), value: storage, mono: true },
     {
       label: t('system.temperature'),
       value: report?.temperature_c === undefined ? null : `${report.temperature_c.toFixed(1)} °C`,
@@ -87,6 +111,10 @@
   <div class="flex flex-wrap items-baseline justify-between gap-3 pb-2">
     <dt class="text-sm text-ink-500">{t('status.activity')}</dt>
     <dd class="text-sm text-ink-900">{doing}</dd>
+  </div>
+  <div class="flex flex-wrap items-baseline justify-between gap-3 py-2">
+    <dt class="text-sm text-ink-500">{t('system.version')}</dt>
+    <dd class="font-mono text-sm text-ink-900">{status.version}</dd>
   </div>
   <div class="flex flex-wrap items-baseline justify-between gap-3 py-2">
     <dt class="text-sm text-ink-500">{t('status.model')}</dt>

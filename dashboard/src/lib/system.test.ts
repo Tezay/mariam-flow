@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { asMegabytes, formatUptime } from './system';
+import {
+  CLOCK_TOLERANCE_MS,
+  asGigabytes,
+  asMegabytes,
+  clocksDisagree,
+  formatUptime,
+  loadPercent,
+  usedPercent,
+} from './system';
 
 describe('formatUptime', () => {
   it('counts seconds only in the first minute', () => {
@@ -33,5 +41,37 @@ describe('asMegabytes', () => {
   it('converts from the kibibytes the kernel reports', () => {
     expect(asMegabytes(444_444)).toBe(434);
     expect(asMegabytes(0)).toBe(0);
+  });
+});
+
+describe('shares of use', () => {
+  it('counts what is used, not what is left', () => {
+    expect(usedPercent(416_000, 312_000)).toBe(25);
+    expect(usedPercent(1000, 1000)).toBe(0);
+  });
+
+  it('reads a load against the cores it is spread over', () => {
+    expect(loadPercent(0.2, 4)).toBe(5);
+    expect(loadPercent(4, 4)).toBe(100);
+  });
+
+  it('writes storage in gigabytes to one decimal', () => {
+    expect(asGigabytes(30_500_000)).toBe('29.1');
+  });
+});
+
+describe('clocksDisagree', () => {
+  const DEVICE = Date.UTC(2026, 9, 6, 12);
+
+  it('tolerates the drift of two clocks that were both set', () => {
+    expect(clocksDisagree(DEVICE * 1000, DEVICE)).toBe(false);
+    expect(clocksDisagree((DEVICE + CLOCK_TOLERANCE_MS) * 1000, DEVICE)).toBe(false);
+  });
+
+  it('says so when the appliance resumed from where a power cut left it', () => {
+    const weeks = 21 * 24 * 3_600_000;
+
+    expect(clocksDisagree((DEVICE - weeks) * 1000, DEVICE)).toBe(true);
+    expect(clocksDisagree((DEVICE + CLOCK_TOLERANCE_MS + 1) * 1000, DEVICE)).toBe(true);
   });
 });

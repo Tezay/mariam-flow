@@ -69,6 +69,9 @@ A tab coming back from the background is given the same five seconds before
 anything is said. A browser stops delivering the stream to a hidden tab, which
 is its choice and not the appliance's.
 
+The same place says when the appliance clock is more than two minutes from the
+device's: the appliance has no battery-backed clock, and dates what it records.
+
 ## Live
 
 The waiting time is shown only while it is current. The appliance keeps its

@@ -20,6 +20,7 @@ function survey(
 }
 
 const STATUS: Status = {
+  version: '0.1.0',
   kit_id: 'KIT-0042',
   site_name: 'RU EFREI',
   phase: { phase: 'onboarding', stage: 'network' },

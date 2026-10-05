@@ -614,6 +614,7 @@ impl EdgeState {
             Readiness::evaluate(&inner.config, inner.model_installed, inner.site_captured);
         let config = &inner.config;
         StatusResponse {
+            version: crate::VERSION,
             kit_id: config.identity.kit_id.clone(),
             site_name: config.identity.site_name.clone(),
             phase: Phase::of(readiness, config.onboarding_completed),
