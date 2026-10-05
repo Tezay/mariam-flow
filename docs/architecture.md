@@ -1,8 +1,8 @@
 # Architecture
 
-Mariam Flow estimates, in real time, the waiting time of a queue — typically at
-a university restaurant — using Wi-Fi sensing. Human bodies disturb the
-multipath propagation of Wi-Fi radio waves; Channel State Information (CSI)
+Mariam Flow estimates, in real time, the waiting time of a queue, typically at
+a university restaurant, using Wi-Fi sensing. Human bodies disturb the
+multipath propagation of Wi-Fi radio waves. Channel State Information (CSI)
 captures the amplitude and phase of the channel per OFDM subcarrier and
 therefore encodes those disturbances. The system classifies the monitored zone
 into four density classes and converts density into a waiting time with
@@ -26,16 +26,16 @@ interaction required from the people in the queue.
                        │ flow-edge     public estimate +      │
                        │               appliance dashboard    │
                        └──────────────────────────────────────┘
-                                   │ HTTPS — aggregated estimates only:
+                                   │ HTTP, aggregated estimates only:
                                    │ {wait, class, confidence, timestamp}
                                    ▼
-                             Backend / display layer
+                                Display
 ```
 
 ## Invariants
 
-- **Raw CSI never leaves the site.** Only aggregated estimates — waiting time,
-  density class, confidence, timestamp — are published.
+- **Raw CSI never leaves the site.** Only aggregated estimates (waiting time,
+  density class, confidence, timestamp) are published.
 - **Nothing is collected about the people in the queue.** No camera, no
   identifier, no per-person record anywhere in the system.
 - **No credential crosses the HTTP surface.** The uplink is reported by mode
@@ -51,13 +51,13 @@ interaction required from the people in the queue.
 | `crates/flow-ingest` | Frame parsing, stream reading with loss statistics, session storage, UDP intake, `csi-replay` | Implemented |
 | `crates/flow-infer` | Window features, ONNX inference (`tract`), Little's Law, smoothing, live pipeline, `csi-infer` | Implemented |
 | `crates/flow-capture` | Labelled capture on the bench: recording plus the phone labelling page (`csi-capture`) | Implemented |
-| `crates/flow-edge` | The appliance daemon | Implemented; the real network backend arrives with the hardware |
+| `crates/flow-edge` | The appliance daemon | Implemented and run on a Raspberry Pi Zero 2 W. The system network is still configured by hand |
 | `dashboard/` | Svelte single-page dashboard, embedded in the daemon | Implemented |
-| `ml/` | Python package (`flow_ml`): features, training, ONNX export, bundles, reports | Implemented; awaiting real captures |
-| `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi` | Serial capture validated; UDP path pending |
+| `ml/` | Python package (`flow_ml`): features, training, ONNX export, bundles, reports | Implemented, awaiting real captures |
+| `firmware/csi-node` | C / ESP-IDF firmware for ESP32-C6 nodes, based on `espressif/esp-csi` | Validated on ESP32-C6, over serial and over UDP to the appliance |
 
-The edge components are plain Rust binaries with no board-specific dependency;
-any Linux or macOS machine can play the edge role during development. The
+The edge components are plain Rust binaries with no board-specific dependency.
+Any Linux or macOS machine can play the edge role during development. The
 production cross-compilation target is `aarch64-unknown-linux-gnu`.
 
 ## The chain, document by document
@@ -78,24 +78,24 @@ production cross-compilation target is `aarch64-unknown-linux-gnu`.
 | Running the whole thing on a development machine | [running-locally.md](running-locally.md) |
 
 Structural decisions and their rationale are recorded as ADRs under
-[adr/](adr/README.md). This set of documents describes the implemented state;
-the ADRs say why it is that way.
+[adr/](adr/README.md). This set of documents describes the implemented state.
+The ADRs say why it is that way.
 
 ## Toolchain and quality gates
 
-- **Rust** — stable toolchain pinned by `rust-toolchain.toml`, edition 2024. CI
+- **Rust.** Stable toolchain pinned by `rust-toolchain.toml`, edition 2024. CI
   enforces `cargo fmt --check`, `cargo clippy --workspace --all-targets
   -D warnings`, `cargo test --workspace`, and a cross-compilation check for
-  `aarch64-unknown-linux-gnu`. Errors are typed with `thiserror`;
+  `aarch64-unknown-linux-gnu`. Errors are typed with `thiserror`, and
   `unwrap()`/`expect()` are confined to tests.
-- **Python** — `uv`-managed environment, Python ≥ 3.12. CI enforces
+- **Python.** `uv`-managed environment, Python ≥ 3.12. CI enforces
   `ruff check`, `ruff format --check`, `pyright` in strict mode, and `pytest`.
-- **Dashboard** — Node ≥ 22 with pnpm. CI enforces Prettier, ESLint,
+- **Dashboard.** Node ≥ 22 with pnpm. CI enforces Prettier, ESLint,
   `svelte-check`, Vitest, the production build, and that the result still
   embeds into the daemon.
-- **Dependencies** — a `Security` workflow, separate from CI, runs
+- **Dependencies.** A `Security` workflow, separate from CI, runs
   `cargo-deny` (advisories, licences, bans and sources), `pnpm audit` on the
   dashboard at moderate severity and above, and `uv audit` on the training
   environment. On a pull request each audit runs only when its manifest or
-  lockfile changes; a weekly scheduled run audits all three, so a newly
+  lockfile changes. A weekly scheduled run audits all three, so a newly
   published advisory surfaces without blocking unrelated changes.
