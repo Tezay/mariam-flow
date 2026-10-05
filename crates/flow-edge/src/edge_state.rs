@@ -714,6 +714,7 @@ impl EdgeState {
             estimate: self.latest_estimate().map(EstimateView::from),
             stream: self.stream_health(),
             service: self.service_state(),
+            recording: self.is_recording(),
             now_us: now_us(),
             journal_id: self.newest_event_id(),
         }

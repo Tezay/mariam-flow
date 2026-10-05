@@ -34,5 +34,6 @@ export const SNAPSHOT: LiveSnapshot = {
     nodes: {},
   },
   service: { open: true },
+  recording: false,
   now_us: 1_785_600_000_000_000,
 };

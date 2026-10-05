@@ -103,6 +103,31 @@ async fn the_public_route_never_carries_a_measurement() {
 }
 
 #[tokio::test]
+async fn the_live_state_says_when_a_capture_holds_the_stream() {
+    // Nothing else reaches a browser that did not start the capture itself.
+    let (state, _dir) = recording_ready();
+    let cookie = session_of(&state).await;
+    let recording = |state: &EdgeState| {
+        serde_json::to_value(state.live_snapshot()).unwrap()["recording"].clone()
+    };
+    assert_eq!(recording(&state), json!(false));
+
+    post(&state, "/api/calibration", &cookie, json!({})).await;
+    assert_eq!(recording(&state), json!(true));
+
+    send(
+        &state,
+        "DELETE",
+        "/api/calibration",
+        Some(&cookie),
+        None,
+        10,
+    )
+    .await;
+    assert_eq!(recording(&state), json!(false));
+}
+
+#[tokio::test]
 async fn the_live_stream_ends_when_the_daemon_is_asked_to_stop() {
     // Without this the stream never completes, so a graceful shutdown
     // waits for as long as one dashboard is open — until a supervisor

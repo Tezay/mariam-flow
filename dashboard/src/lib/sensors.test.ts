@@ -7,6 +7,7 @@ import {
   allPlaced,
   answering,
   knownPositions,
+  quietReceivers,
   receiverState,
   replacements,
   transmitterHeard,
@@ -157,6 +158,13 @@ describe('answering', () => {
     const stream = heard({ 'rx-1': health(NOW) });
 
     expect(answering(NODES, stream, NOW)).toEqual({ 'tx-1': true, 'rx-1': true, 'rx-2': false });
+  });
+
+  it('names the receivers that are missing, never the transmitter', () => {
+    const stream = heard({ 'rx-1': health(NOW) });
+
+    expect(quietReceivers(NODES, stream, NOW)).toEqual(['rx-2']);
+    expect(quietReceivers(NODES, heard({}), NOW)).toEqual(['rx-1', 'rx-2']);
   });
 
   it('answers for nobody before the appliance has said anything', () => {

@@ -54,6 +54,8 @@ export type LiveSnapshot = {
   estimate?: Estimate;
   stream: StreamHealth;
   service: ServiceState;
+  /** Whether a capture holds the stream, which suspends estimating. */
+  recording: boolean;
   now_us: number;
   /**
    * Newest journal row.

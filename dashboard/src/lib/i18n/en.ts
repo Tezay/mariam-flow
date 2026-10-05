@@ -49,9 +49,10 @@ export const en = {
   'uplink.wifi': 'Wi-Fi',
   'uplink.ethernet': 'Wired',
 
-  'runtime.idle': 'Idle',
-  'runtime.calibrating': 'Calibrating',
-  'runtime.live': 'Estimating',
+  'activity.idle': 'Not estimating',
+  'activity.starting': 'Starting to estimate',
+  'activity.estimating': 'Estimating',
+  'activity.interrupted': 'Estimation interrupted',
   'nodes.none': 'No node paired yet.',
 
   'header.language': 'Switch to French',
@@ -65,6 +66,9 @@ export const en = {
     'Below the site confidence threshold — this estimate is not published to anyone.',
   'live.warmingUp': 'Filling the first analysis window…',
   'live.notEstimating': 'Not estimating. Check the model and the site calibration.',
+  'live.quiet': 'Not answering: {nodes}.',
+  'live.interruptedLead': 'The sensors are answering, but no estimate is coming out.',
+  'live.lastEstimate': 'Last estimate: {value} min at {when}.',
   'live.history': 'Last hour',
   'live.historyEmpty': 'No history yet.',
   'live.showTable': 'Table',

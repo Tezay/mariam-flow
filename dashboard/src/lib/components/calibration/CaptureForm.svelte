@@ -9,7 +9,7 @@
   import { type Status } from '$lib/api/status';
   import { defaultEnvironment } from '$lib/calibration';
   import { formattingLocale, t } from '$lib/i18n/i18n.svelte';
-  import { allPlaced, answering, knownPositions } from '$lib/sensors';
+  import { allPlaced, answering, knownPositions, quietReceivers } from '$lib/sensors';
   import Button from '$components/ui/Button.svelte';
 
   let {
@@ -39,10 +39,10 @@
   let failure = $state<string | null>(null);
 
   const answers = $derived(answering(status.nodes, snapshot?.stream, snapshot?.now_us));
-  const receivers = $derived(status.nodes.filter((node) => node.role === 'rx'));
-  const quiet = $derived(receivers.filter((node) => !answers[node.node_id]));
+  const quiet = $derived(quietReceivers(status.nodes, snapshot?.stream, snapshot?.now_us));
   const receiving = $derived(
-    (snapshot?.stream.running ?? false) && quiet.length < receivers.length,
+    (snapshot?.stream.running ?? false) &&
+      quiet.length < status.nodes.filter((node) => node.role === 'rx').length,
   );
 
   async function start() {
@@ -164,7 +164,7 @@
     <p class="mt-3 text-sm text-density-medium">{t('cal.noStream')}</p>
   {:else if snapshot !== null && quiet.length > 0}
     <p class="mt-3 text-sm text-density-medium">
-      {t('cal.quiet', { nodes: quiet.map((node) => node.node_id).join(', ') })}
+      {t('cal.quiet', { nodes: quiet.join(', ') })}
     </p>
   {/if}
 

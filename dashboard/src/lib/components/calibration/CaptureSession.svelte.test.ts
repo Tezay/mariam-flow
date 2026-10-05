@@ -48,6 +48,7 @@ function snapshot(running: boolean): LiveSnapshot {
       nodes: { 'rx-1': { frames: 1000, frames_per_second: 40, last_frame_us: NOW } },
     },
     service: { open: true },
+    recording: false,
     now_us: NOW,
   };
 }

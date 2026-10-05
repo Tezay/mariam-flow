@@ -21,7 +21,7 @@ function status(): Status {
     site_name: 'RU',
     phase: { phase: 'operational' },
     readiness: {} as Status['readiness'],
-    runtime: { mode: 'live' } as Status['runtime'],
+    runtime: { mode: 'idle' },
     model_installed: true,
     service: { open: true },
     sensor_ap: { ssid: 'mariam-flow-0042', channel: 6 },
@@ -46,6 +46,7 @@ function snapshot(): LiveSnapshot {
       },
     },
     service: { open: true },
+    recording: false,
     now_us: NOW,
   };
 }

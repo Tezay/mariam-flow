@@ -1,9 +1,10 @@
 <script lang="ts">
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
+  import { type LiveSnapshot, subscribeLive } from '$lib/api/live';
   import { type Status, type SystemReport, fetchSystem } from '$lib/api/status';
   import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';
-  import { formatClock } from '$lib/live';
+  import { type Activity, activity, formatClock } from '$lib/live';
   import { asMegabytes, formatUptime } from '$lib/system';
 
   let { status }: { status: Status } = $props();
@@ -11,7 +12,19 @@
   /** Refreshed while the section is open: uptime and heat are the point. */
   const REFRESH_MS = 10_000;
 
+  const DOING = {
+    recording: 'cal.recording',
+    closed: 'live.closed',
+    idle: 'activity.idle',
+    starting: 'activity.starting',
+    estimating: 'activity.estimating',
+    interrupted: 'activity.interrupted',
+  } as const satisfies Record<Activity['kind'], string>;
+
   let report = $state<SystemReport | null>(null);
+  let snapshot = $state<LiveSnapshot | null>(null);
+
+  $effect(() => subscribeLive((next) => (snapshot = next)));
 
   $effect(() => {
     let cancelled = false;
@@ -29,13 +42,7 @@
     };
   });
 
-  const runtimeLabel = $derived(
-    status.runtime.mode === 'calibrating'
-      ? t('runtime.calibrating')
-      : status.runtime.mode === 'live'
-        ? t('runtime.live')
-        : t('runtime.idle'),
-  );
+  const doing = $derived(snapshot ? t(DOING[activity(snapshot).kind]) : '—');
 
   const memory = $derived.by(() => {
     const total = report?.memory_total_kb;
@@ -79,7 +86,7 @@
 <dl class="divide-y divide-ink-100">
   <div class="flex flex-wrap items-baseline justify-between gap-3 pb-2">
     <dt class="text-sm text-ink-500">{t('status.activity')}</dt>
-    <dd class="text-sm text-ink-900">{runtimeLabel}</dd>
+    <dd class="text-sm text-ink-900">{doing}</dd>
   </div>
   <div class="flex flex-wrap items-baseline justify-between gap-3 py-2">
     <dt class="text-sm text-ink-500">{t('status.model')}</dt>

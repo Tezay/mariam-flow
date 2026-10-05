@@ -46,10 +46,11 @@ finished setup does not fall back into the wizard because a node is unplugged.
 
 ## Stream arbitration
 
-Calibration and live inference both consume the single UDP stream from the
-receivers, so at most one may hold it. Every start requires an idle stream, and
-switching between the two requires stopping first. A refused request leaves the
-running activity untouched.
+The receivers send one UDP stream, and a capture holds it to itself: a second
+one is refused, leaving the running capture untouched. Estimating holds
+nothing — it is a stage of the intake that gives way while a capture runs
+(ADR 0017) — so what the appliance is doing is read from what it reports each
+second rather than kept as a mode.
 
 ## Reaching the site network
 

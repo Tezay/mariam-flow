@@ -100,6 +100,18 @@ export function answering(
   );
 }
 
+/** The paired receivers a recording or an estimate is missing. */
+export function quietReceivers(
+  nodes: SensingNode[],
+  stream: StreamHealth | undefined,
+  nowUs?: number,
+): string[] {
+  const answers = answering(nodes, stream, nowUs);
+  return nodes
+    .filter((node) => node.role === 'rx' && !answers[node.node_id])
+    .map((node) => node.node_id);
+}
+
 /**
  * Senders that could be the replacement for a failed node.
  *

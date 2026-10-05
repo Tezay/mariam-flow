@@ -172,7 +172,10 @@ impl Phase {
     }
 }
 
-/// Exclusive use of the CSI stream.
+/// Who holds the CSI stream to itself.
+///
+/// Estimating is not among them: it is a stage of the intake that gives way
+/// while a capture runs, never a claim on the stream (ADR 0017).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "kebab-case")]
 pub enum RuntimeMode {
@@ -187,33 +190,12 @@ pub enum RuntimeMode {
         /// shows how long it has been running.
         started_us: u64,
     },
-    /// The live pipeline is producing wait-time estimates.
-    Live,
-}
-
-impl RuntimeMode {
-    /// Short label used in diagnostics and error messages.
-    #[must_use]
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Idle => "idle",
-            Self::Calibrating { .. } => "calibration",
-            Self::Live => "live",
-        }
-    }
-
-    /// Whether the stream is currently claimed.
-    #[must_use]
-    pub fn is_busy(&self) -> bool {
-        !matches!(self, Self::Idle)
-    }
 }
 
 /// Guard over the single CSI stream.
 ///
-/// Only one activity may hold the stream. Switching is deliberate: stop,
-/// then start. That is what keeps a stray "start live" request from
-/// silently killing a calibration session an installer is halfway through.
+/// Only one capture may hold the stream: a second request is refused rather
+/// than allowed to cut short the one an installer is halfway through.
 #[derive(Debug, Clone, Default)]
 pub struct Runtime {
     mode: RuntimeMode,
@@ -236,13 +218,15 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// [`TransitionError::StreamBusy`] if anything already holds it.
+    /// [`TransitionError::StreamBusy`] if a capture already holds it.
     pub fn start_calibration(
         &mut self,
         session_id: impl Into<String>,
         started_us: u64,
     ) -> Result<(), TransitionError> {
-        self.ensure_idle()?;
+        if self.mode != RuntimeMode::Idle {
+            return Err(TransitionError::StreamBusy);
+        }
         self.mode = RuntimeMode::Calibrating {
             session_id: session_id.into(),
             started_us,
@@ -250,34 +234,9 @@ impl Runtime {
         Ok(())
     }
 
-    /// Claims the stream for live inference.
-    ///
-    /// # Errors
-    ///
-    /// [`TransitionError::StreamBusy`] if anything already holds it, or
-    /// [`TransitionError::NoModel`] when no model is ready — an estimate
-    /// without a model is not a degraded estimate, it is no estimate.
-    pub fn start_live(&mut self, model_ready: bool) -> Result<(), TransitionError> {
-        self.ensure_idle()?;
-        if !model_ready {
-            return Err(TransitionError::NoModel);
-        }
-        self.mode = RuntimeMode::Live;
-        Ok(())
-    }
-
     /// Releases the stream, returning what was holding it.
     pub fn stop(&mut self) -> RuntimeMode {
         std::mem::replace(&mut self.mode, RuntimeMode::Idle)
-    }
-
-    fn ensure_idle(&self) -> Result<(), TransitionError> {
-        if self.mode.is_busy() {
-            return Err(TransitionError::StreamBusy {
-                current: self.mode.label(),
-            });
-        }
-        Ok(())
     }
 }
 
@@ -437,16 +396,8 @@ mod tests {
 
         runtime.start_calibration("s-001", 0).unwrap();
         assert_eq!(
-            runtime.start_live(true),
-            Err(TransitionError::StreamBusy {
-                current: "calibration"
-            })
-        );
-        assert_eq!(
             runtime.start_calibration("s-002", 0),
-            Err(TransitionError::StreamBusy {
-                current: "calibration"
-            })
+            Err(TransitionError::StreamBusy)
         );
         assert_eq!(
             *runtime.mode(),
@@ -459,24 +410,12 @@ mod tests {
     }
 
     #[test]
-    fn switching_requires_stopping_first() {
+    fn a_stopped_capture_frees_the_stream_for_the_next() {
         let mut runtime = Runtime::new();
-        runtime.start_live(true).unwrap();
-        assert_eq!(
-            runtime.start_calibration("s-001", 0),
-            Err(TransitionError::StreamBusy { current: "live" })
-        );
-
-        assert_eq!(runtime.stop(), RuntimeMode::Live);
         runtime.start_calibration("s-001", 0).unwrap();
-        assert_eq!(runtime.mode().label(), "calibration");
-    }
 
-    #[test]
-    fn live_inference_refuses_to_start_without_a_model() {
-        let mut runtime = Runtime::new();
-        assert_eq!(runtime.start_live(false), Err(TransitionError::NoModel));
-        assert_eq!(*runtime.mode(), RuntimeMode::Idle, "nothing was claimed");
+        assert!(matches!(runtime.stop(), RuntimeMode::Calibrating { .. }));
+        runtime.start_calibration("s-002", 0).unwrap();
     }
 
     #[test]
