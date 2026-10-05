@@ -37,6 +37,8 @@ function appliance(...codes: number[]) {
 }
 
 const pass = (ms: number) => vi.advanceTimersByTimeAsync(ms);
+/** What an appliance whose clock agrees with this device's says. */
+const speaking = () => ({ ...SNAPSHOT, now_us: Date.now() * 1000 });
 /** Read as a property: jsdom keeps `inert` there and reflects no attribute. */
 function outOfReach(): boolean {
   let element: HTMLElement | null = screen.getByRole('heading', { level: 1 });
@@ -61,7 +63,7 @@ describe('the page', () => {
     appliance(200);
     render(Page);
     await pass(0);
-    Stream.current.say(SNAPSHOT);
+    Stream.current.say(speaking());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
     await pass(LOST_AFTER_MS + 1_000);
@@ -77,7 +79,7 @@ describe('the page', () => {
     await pass(LOST_AFTER_MS + 1_000);
     expect(screen.getByRole('alert')).toBeInTheDocument();
 
-    Stream.current.say(SNAPSHOT);
+    Stream.current.say(speaking());
     await pass(0);
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -93,6 +95,22 @@ describe('the page', () => {
 
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('says when the appliance clock is not the one this device reads', async () => {
+    appliance(200);
+    render(Page);
+    await pass(0);
+    Stream.current.say(speaking());
+    await pass(0);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    const weeks = 21 * 24 * 3_600_000;
+    Stream.current.say({ ...SNAPSHOT, now_us: (Date.now() - weeks) * 1000 });
+    await pass(0);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/appliance clock reads/i);
+    expect(outOfReach()).toBe(false);
   });
 
   it('keeps asking for an appliance that was not there at first', async () => {

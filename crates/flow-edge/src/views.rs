@@ -13,6 +13,7 @@ use crate::schedule::ServiceState;
 
 #[derive(Serialize)]
 pub(crate) struct StatusResponse {
+    pub(crate) version: &'static str,
     pub(crate) kit_id: String,
     pub(crate) site_name: Option<String>,
     pub(crate) phase: Phase,

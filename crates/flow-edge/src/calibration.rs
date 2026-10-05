@@ -113,7 +113,7 @@ pub fn session_meta(
         // The nodes are pre-flashed per kit and the appliance has no way to
         // ask them; recorded as unknown rather than guessed.
         firmware_version: String::new(),
-        software_version: env!("CARGO_PKG_VERSION").to_owned(),
+        software_version: crate::VERSION.to_owned(),
         // Copied from the site rather than taken from the request: the
         // meaning of a class is a property of the queue, not of one capture.
         class_mapping: config.classes.clone().unwrap_or_default(),
@@ -401,7 +401,7 @@ mod tests {
     fn the_software_version_is_the_one_that_recorded_it() {
         let meta = session_meta(&installed(), &SessionRequest::default(), "session-1".into());
 
-        assert_eq!(meta.software_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(meta.software_version, crate::VERSION);
     }
 }
 

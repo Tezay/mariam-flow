@@ -31,6 +31,7 @@ dashboard/src/
       LoginScreen.svelte
       TabShell.svelte
       ConnectionNotice.svelte
+      ClockNotice.svelte
       ui/                 primitives that know no domain
       wizard/             the installation wizard and its steps
       network/            uplink, survey and handout

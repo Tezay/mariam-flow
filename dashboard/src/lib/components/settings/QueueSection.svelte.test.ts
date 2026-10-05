@@ -16,6 +16,7 @@ const DESCRIBED: WaitTuning = {
 
 function status(wait?: WaitTuning): Status {
   return {
+    version: '0.1.0',
     kit_id: 'KIT-0042',
     site_name: 'RU',
     phase: { phase: 'onboarding', stage: 'queue' },

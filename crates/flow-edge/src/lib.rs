@@ -83,6 +83,10 @@ pub use secret::{DeviceSecret, SECRET_ENTROPY_BITS};
 pub use session::{ABSOLUTE_LIFETIME_US, IDLE_TIMEOUT_US, SessionStore};
 pub use throttle::Throttle;
 
+/// The version of this build: the crate version, with the commit it was built
+/// from when the source tree was a repository.
+pub const VERSION: &str = env!("FLOW_EDGE_VERSION");
+
 /// File name of the active density model inside the data directory.
 pub const ACTIVE_MODEL: &str = "model.onnx";
 

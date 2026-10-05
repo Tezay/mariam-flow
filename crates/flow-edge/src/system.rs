@@ -2,13 +2,15 @@
 //!
 //! Read from `/proc` and `/sys` rather than through a crate: these files are
 //! the interface Linux offers, and the appliance already has to be small.
+//! Free space is the exception, being answered by a system call and no file.
 //! Every field is optional, because the same binary is developed on a laptop
-//! where none of them exist — an absent value is reported as absent rather
-//! than invented.
+//! where most of them do not exist — an absent value is reported as absent
+//! rather than invented.
 //!
 //! Parsing is separated from reading so it can be tested without the files.
 
 use std::fs;
+use std::path::Path;
 
 use serde::Serialize;
 
@@ -30,12 +32,21 @@ pub struct SystemReport {
     /// Load average over the last minute.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub load_1m: Option<f32>,
+    /// Cores the load is spread over, without which it says nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpus: Option<u32>,
     /// Total usable memory, in kibibytes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_total_kb: Option<u64>,
     /// Memory available without swapping, in kibibytes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_available_kb: Option<u64>,
+    /// Size of the filesystem holding the appliance's data, in kibibytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_total_kb: Option<u64>,
+    /// What is left of it to an unprivileged process, in kibibytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_available_kb: Option<u64>,
     /// CPU temperature in degrees Celsius.
     ///
     /// The one figure that explains a Pi quietly slowing down: it throttles
@@ -47,13 +58,19 @@ pub struct SystemReport {
 impl SystemReport {
     /// Reads what this machine will say. Absent files leave absent fields.
     #[must_use]
-    pub fn read() -> Self {
+    pub fn read(data_dir: &Path) -> Self {
+        let storage = rustix::fs::statvfs(data_dir).ok();
         Self {
             model: read("/proc/device-tree/model").map(|text| parse_model(&text)),
             os: read("/etc/os-release").and_then(|text| parse_os_release(&text)),
             kernel: read("/proc/sys/kernel/osrelease").map(|text| text.trim().to_owned()),
             uptime_s: read("/proc/uptime").and_then(|text| parse_uptime(&text)),
             load_1m: read("/proc/loadavg").and_then(|text| parse_load(&text)),
+            cpus: std::thread::available_parallelism()
+                .ok()
+                .and_then(|count| u32::try_from(count.get()).ok()),
+            storage_total_kb: storage.as_ref().map(|fs| fs.f_blocks * fs.f_frsize / 1024),
+            storage_available_kb: storage.as_ref().map(|fs| fs.f_bavail * fs.f_frsize / 1024),
             memory_total_kb: read("/proc/meminfo")
                 .and_then(|text| parse_meminfo(&text, "MemTotal")),
             memory_available_kb: read("/proc/meminfo")
@@ -108,6 +125,28 @@ fn parse_temperature(text: &str) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_filesystem_holding_the_data_says_what_is_left_of_it() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let report = SystemReport::read(dir.path());
+
+        let (total, available) = (
+            report.storage_total_kb.unwrap(),
+            report.storage_available_kb.unwrap(),
+        );
+        assert!(total > 0 && available <= total);
+        assert!(report.cpus.unwrap() >= 1);
+    }
+
+    #[test]
+    fn a_directory_that_is_not_there_reports_no_storage() {
+        let report = SystemReport::read(Path::new("/nonexistent/mariam-flow"));
+
+        assert!(report.storage_total_kb.is_none());
+        assert!(report.storage_available_kb.is_none());
+    }
 
     #[test]
     fn a_board_names_itself_without_its_terminator() {

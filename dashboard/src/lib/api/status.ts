@@ -76,6 +76,8 @@ export type Uplink = {
 export type ServiceState = { open: boolean; changes_at_us?: number };
 
 export type Status = {
+  /** The build answering, with its commit when it was built from a repository. */
+  version: string;
   kit_id: string;
   site_name: string | null;
   phase: Phase;
@@ -103,8 +105,12 @@ export type SystemReport = {
   kernel?: string;
   uptime_s?: number;
   load_1m?: number;
+  cpus?: number;
   memory_total_kb?: number;
   memory_available_kb?: number;
+  /** The filesystem holding the appliance's data. */
+  storage_total_kb?: number;
+  storage_available_kb?: number;
   temperature_c?: number;
 };
 

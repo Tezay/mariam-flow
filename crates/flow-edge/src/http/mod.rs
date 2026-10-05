@@ -168,8 +168,8 @@ pub(super) async fn status(State(state): State<EdgeState>) -> Json<StatusRespons
 ///
 /// Read on each request rather than cached: uptime, load and temperature are
 /// the point, and a stale temperature is worse than none.
-pub(super) async fn system() -> Json<SystemReport> {
-    Json(SystemReport::read())
+pub(super) async fn system(State(state): State<EdgeState>) -> Json<SystemReport> {
+    Json(SystemReport::read(&state.data_dir()))
 }
 
 /// A new name for something the appliance holds.

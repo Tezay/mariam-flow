@@ -30,7 +30,7 @@ const PRUNE_EVERY_TICKS: u64 = 720;
 
 /// Run the Mariam Flow edge appliance.
 #[derive(Debug, Parser)]
-#[command(name = "flow-edge", version)]
+#[command(name = "flow-edge", version = flow_edge::VERSION)]
 struct Args {
     #[command(subcommand)]
     command: Command,
@@ -187,8 +187,7 @@ fn serve(args: &ServeArgs) -> Result<(), Box<dyn Error>> {
         state.record(Event::new(EventKind::CredentialReset));
     }
     state.record(
-        Event::new(EventKind::Started)
-            .with_detail(format!("version {}", env!("CARGO_PKG_VERSION"))),
+        Event::new(EventKind::Started).with_detail(format!("version {}", flow_edge::VERSION)),
     );
     // One write to make "when did this unit last boot" reliable; the rest
     // of the lifecycle traffic rides the periodic flush.

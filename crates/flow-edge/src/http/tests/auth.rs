@@ -43,6 +43,31 @@ async fn the_right_secret_opens_a_session_that_unlocks_the_surface() {
 }
 
 #[tokio::test]
+async fn the_status_names_the_build_that_answers() {
+    let state = state_for(installed(), true);
+    let cookie = session_of(&state).await;
+
+    let (_, _, body) = send(&state, "GET", "/api/status", Some(&cookie), None, 10).await;
+
+    assert_eq!(body["version"], crate::VERSION);
+    assert!(crate::VERSION.starts_with(env!("CARGO_PKG_VERSION")));
+}
+
+#[tokio::test]
+async fn the_machine_reports_the_storage_its_data_sits_on() {
+    let (state, _dir) = writable();
+    let cookie = session_of(&state).await;
+
+    let (status, _, body) = send(&state, "GET", "/api/system", Some(&cookie), None, 10).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body["storage_available_kb"].as_u64().unwrap()
+            <= body["storage_total_kb"].as_u64().unwrap()
+    );
+}
+
+#[tokio::test]
 async fn the_session_cookie_is_defended_against_scripts_and_other_sites() {
     let state = state_for(installed(), true);
     let (_, headers) = login_with(&state, SECRET, 10).await;

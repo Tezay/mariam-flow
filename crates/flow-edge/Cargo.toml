@@ -30,6 +30,7 @@ tar.workspace = true
 tokio-util.workspace = true
 rusqlite.workspace = true
 rust-embed = { workspace = true, optional = true }
+rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

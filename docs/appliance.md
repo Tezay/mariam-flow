@@ -81,11 +81,13 @@ can act on are not collected.
 ## The machine underneath
 
 The appliance reports what the machine says about itself — board model,
-operating system, kernel, uptime, load, memory and CPU temperature — read from
-`/proc` and `/sys` rather than through a crate.
+operating system, kernel, uptime, load and cores, memory, storage and CPU
+temperature — read from `/proc` and `/sys` rather than through a crate, save
+free space, which only a system call answers. It names its own build too: the
+crate version and the commit it was built from, which every capture carries.
 
 Every field is optional and an absent one is reported as absent: the same
-binary is developed on a laptop that reports none of them.
+binary is developed on a laptop that reports few of them.
 
 Temperature is the figure worth watching, a board throttling long before it
 stops.

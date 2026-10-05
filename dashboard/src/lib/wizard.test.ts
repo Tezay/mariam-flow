@@ -25,6 +25,7 @@ function status(readiness: Partial<Readiness>, stage: Stage): Status {
     ...readiness,
   };
   return {
+    version: '0.1.0',
     kit_id: 'KIT-0001',
     site_name: full.site_named ? 'RU EFREI' : null,
     phase: stage === 'complete' ? { phase: 'operational' } : { phase: 'onboarding', stage },

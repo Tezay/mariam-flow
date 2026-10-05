@@ -658,6 +658,7 @@ dependencies = [
  "jiff",
  "rusqlite",
  "rust-embed",
+ "rustix",
  "serde",
  "serde_json",
  "tar",
