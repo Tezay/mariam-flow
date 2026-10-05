@@ -36,8 +36,8 @@ pure Rust, so a deployed unit carries no Python runtime.
 | Area | State |
 |---|---|
 | Sensing chain — parsing, intake, session storage, features, inference | Implemented, Python↔Rust parity enforced in CI |
-| Appliance daemon and its dashboard | Implemented; the real network backend arrives with the hardware |
-| Node firmware | Serial capture validated on ESP32-C6; the UDP path awaits hardware |
+| Appliance daemon and its dashboard | Implemented and run on a Raspberry Pi Zero 2 W; the system network is still configured by hand |
+| Node firmware | Validated on ESP32-C6, over serial and over UDP to the appliance |
 | Trained model | Awaiting captures from a real site |
 
 The appliance runs end to end on a development machine with no sensors
