@@ -111,9 +111,11 @@ export type SystemReport = {
 };
 
 /** Reads the appliance status, or reports that no session is held. */
-export async function fetchStatus(): Promise<Status | 'unauthorized' | 'unreachable'> {
+export async function fetchStatus(
+  signal?: AbortSignal,
+): Promise<Status | 'unauthorized' | 'unreachable'> {
   try {
-    const response = await fetch('/api/status');
+    const response = await fetch('/api/status', { signal });
     if (response.status === 401) {
       return 'unauthorized';
     }

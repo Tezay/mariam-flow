@@ -44,6 +44,31 @@ returns the surface to its own top. Printing neutralises the arrangement — a
 scroll container has no equivalent on paper, and the network request would
 otherwise print clipped to what happened to be on screen.
 
+## When the appliance stops answering
+
+Every screen reads the same live stream, through one connection the dashboard
+holds for as long as anything is listening. Its silence is what the page
+watches for. The stream speaks every second, and a connection whose other end
+has vanished — an appliance unplugged, a laptop that left the sensor network —
+stays open and reports nothing. After five quiet seconds a notice says since
+when, above every screen, the full-frame labelling surface included.
+
+What was last shown stays on screen, dimmed and out of reach: the last rate of
+a receiver is worth reading while it is being plugged back in, and an action
+sent to an appliance that is gone would only fail later. A refresh that fails
+keeps what it had rather than blanking it.
+
+The page then asks the appliance for its status every few seconds, each
+question abandoned before the next is due. An answer replaces the connection —
+a browser retries a dropped stream, but not a refused one, nor one left waiting
+on a socket nobody holds — and the screens carry on. An appliance that answers
+without knowing the session has restarted, sessions being held in memory: the
+page returns to the sign-in.
+
+A tab coming back from the background is given the same five seconds before
+anything is said. A browser stops delivering the stream to a hidden tab, which
+is its choice and not the appliance's.
+
 ## Sensors
 
 The sensors screen is where a failing installation is diagnosed and repaired.

@@ -9,6 +9,9 @@ export const fr: Messages = {
   'app.loading': 'Connexion au boîtier…',
   'app.retry': 'Réessayer',
   'app.unreachable': 'Le boîtier ne répond pas.',
+  'app.retrying': 'Nouvelle tentative en cours…',
+  'app.lost': 'Le boîtier ne répond plus depuis {when}.',
+  'app.lostStale': 'Ce qui est affiché date de ce moment. Nouvelle tentative en cours…',
 
   'locale.switch': 'Switch to English',
 

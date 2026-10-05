@@ -17,7 +17,7 @@
     let cancelled = false;
     const load = async () => {
       const next = await fetchSystem();
-      if (!cancelled) {
+      if (!cancelled && next) {
         report = next;
       }
     };

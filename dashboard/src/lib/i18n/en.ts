@@ -11,6 +11,9 @@ export const en = {
   'app.loading': 'Connecting to the appliance…',
   'app.retry': 'Try again',
   'app.unreachable': 'The appliance is not responding.',
+  'app.retrying': 'Trying again…',
+  'app.lost': 'The appliance stopped responding at {when}.',
+  'app.lostStale': 'What is shown dates from then. Trying again…',
 
   'locale.switch': 'Passer en français',
 

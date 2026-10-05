@@ -24,11 +24,13 @@ dashboard/src/
     api/                  every call to the daemon, and the types it carries
     <domain>.ts           the rules a screen applies, each beside its tests
     paging.ts             list paging, shared by both histories
+    connection.svelte.ts  whether the appliance still answers, for every screen
     i18n/                 the dictionaries; English is the reference
     tests/                setup and helpers for the component suites
     components/
       LoginScreen.svelte
       TabShell.svelte
+      ConnectionNotice.svelte
       ui/                 primitives that know no domain
       wizard/             the installation wizard and its steps
       network/            uplink, survey and handout
