@@ -78,6 +78,10 @@ names the receivers not answering, and keeps the last figure beside its time.
 What the appliance is doing is worked out in one place from the live stream,
 for this screen and the system section alike.
 
+Beneath it the history is drawn on a time axis ending at the present, where a
+minute nothing was estimated in shows as a break in the curve and a hatched
+stretch of the band. It is read again as each minute ends.
+
 ## Sensors
 
 The sensors screen is where a failing installation is diagnosed and repaired.
