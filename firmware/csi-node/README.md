@@ -15,8 +15,8 @@ radio roles, selected in `menuconfig`:
   Optionally echoes lines on the serial console — the zero-network,
   day-one capture path (`csi-capture --input -`).
 
-> **Status**: the serial path is validated on ESP32-C6 with ESP-IDF 5.5. The
-> UDP path builds but has not yet been run on hardware.
+> **Status**: both capture paths are validated on ESP32-C6 with ESP-IDF 5.5,
+> the UDP one with two receivers streaming to an appliance.
 
 ## Design notes
 
