@@ -47,9 +47,10 @@ export const fr: Messages = {
   'uplink.wifi': 'Wi-Fi',
   'uplink.ethernet': 'Filaire',
 
-  'runtime.idle': 'En attente',
-  'runtime.calibrating': 'Calibration',
-  'runtime.live': 'Estimation',
+  'activity.idle': "Pas d'estimation",
+  'activity.starting': "Démarrage de l'estimation",
+  'activity.estimating': 'Estimation en cours',
+  'activity.interrupted': 'Estimation interrompue',
   'nodes.none': 'Aucun capteur appairé pour le moment.',
 
   'header.language': 'Switch to English',
@@ -63,6 +64,9 @@ export const fr: Messages = {
     "Sous le seuil de confiance du site — cette estimation n'est publiée à personne.",
   'live.warmingUp': "Remplissage de la première fenêtre d'analyse…",
   'live.notEstimating': 'Pas d’estimation. Vérifiez le modèle et la calibration du site.',
+  'live.quiet': 'Sans réponse : {nodes}.',
+  'live.interruptedLead': "Les capteurs répondent, mais aucune estimation n'est produite.",
+  'live.lastEstimate': 'Dernière estimation : {value} min à {when}.',
   'live.history': 'Dernière heure',
   'live.historyEmpty': 'Pas encore d’historique.',
   'live.showTable': 'Tableau',

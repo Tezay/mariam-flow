@@ -33,9 +33,9 @@ cat /dev/ttyUSB0 | csi-capture --input - --meta meta.json --node-id rx-1
 ## On the appliance
 
 An installed site records its captures from the dashboard (ADR 0019).
-Recording is another stage of the intake loop, exclusive of estimation by the
-runtime's one-consumer rule, so estimation resumes on its own when a capture
-ends: the estimator is skipped rather than torn down.
+Recording is another stage of the intake loop, and estimation gives way to it:
+the estimator is skipped rather than torn down, so it resumes on its own when
+the capture ends.
 
 The session directory is created by the handler that starts the capture, so a
 full card or a name already taken is answered to the caller rather than failing

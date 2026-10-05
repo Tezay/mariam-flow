@@ -102,6 +102,11 @@ pub(crate) struct LiveSnapshot {
     pub(crate) stream: StreamHealth,
     /// Whether the site is serving, and when that next changes.
     pub(crate) service: ServiceState,
+    /// Whether a capture holds the stream, which suspends estimating.
+    ///
+    /// Not left to the status, which each browser reads once: a capture
+    /// started from another one would never reach it.
+    pub(crate) recording: bool,
     /// Appliance clock, so a browser can judge staleness without trusting
     /// its own — the same reasoning as the labeling page.
     pub(crate) now_us: u64,

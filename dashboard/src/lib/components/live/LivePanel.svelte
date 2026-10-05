@@ -9,13 +9,14 @@
     fetchHistory,
     subscribeLive,
   } from '$lib/api/live';
+  import { type SensingNode } from '$lib/api/status';
   import { formattingLocale, hour12, t } from '$lib/i18n/i18n.svelte';
-  import { DENSITY_SWATCH } from '$lib/live';
-  import { receiverState } from '$lib/sensors';
+  import { DENSITY_SWATCH, activity, formatClock } from '$lib/live';
+  import { quietReceivers, receiverState } from '$lib/sensors';
   import { formatNextChange } from '$lib/schedule';
   import HistoryFigure from '$components/live/HistoryFigure.svelte';
 
-  let { modelName = null }: { modelName?: string | null } = $props();
+  let { paired, modelName = null }: { paired: SensingNode[]; modelName?: string | null } = $props();
 
   /** How far back the short history reaches. */
   const HISTORY_MINUTES = 60;
@@ -43,15 +44,12 @@
     };
   });
 
-  const estimate = $derived(snapshot?.estimate ?? null);
   const stream = $derived(snapshot?.stream ?? null);
+  const doing = $derived(snapshot ? activity(snapshot) : null);
 
   const nodes = $derived(Object.entries(stream?.nodes ?? {}));
 
-  /* Closed is reported, never inferred from a missing estimate: outside
-     service hours there is no estimate *and* nothing wrong, which is not
-     what "not estimating" means anywhere else on this screen. */
-  const closed = $derived(snapshot !== null && !snapshot.service.open);
+  const quiet = $derived(quietReceivers(paired, snapshot?.stream, snapshot?.now_us));
 
   /** When the service next changes, phrased, or nothing if it never does. */
   const nextChange = $derived.by(() => {
@@ -66,14 +64,37 @@
 <div class="space-y-4">
   <!-- The hero: one number, the thing the product exists to say. -->
   <section class="rounded-md bg-white p-5 ring-1 ring-ink-100">
-    {#if closed}
+    {#if doing === null}
+      <p class="text-sm text-ink-500">{t('app.loading')}</p>
+    {:else if doing.kind === 'closed'}
       <p class="text-xs font-medium uppercase tracking-wide text-ink-500">{t('live.wait')}</p>
       <p class="mt-1 text-4xl font-semibold text-ink-900">{t('live.closed')}</p>
       {#if nextChange}
         <p class="mt-2 text-sm text-ink-900">{t('live.opensAt', { when: nextChange })}</p>
       {/if}
       <p class="mt-2 text-sm text-ink-500">{t('live.closedLead')}</p>
-    {:else if estimate}
+    {:else if doing.kind === 'recording'}
+      <p class="text-xs font-medium uppercase tracking-wide text-ink-500">{t('live.wait')}</p>
+      <p class="mt-1 text-2xl font-semibold text-ink-900">{t('cal.recording')}</p>
+      <p class="mt-2 text-sm text-ink-500">{t('cal.duringEstimate')}</p>
+    {:else if doing.kind === 'interrupted'}
+      <p class="text-xs font-medium uppercase tracking-wide text-ink-500">{t('live.wait')}</p>
+      <p class="mt-1 text-2xl font-semibold text-ink-900">{t('activity.interrupted')}</p>
+      <p class="mt-2 text-sm text-danger" role="status">
+        {quiet.length > 0
+          ? t('live.quiet', { nodes: quiet.join(', ') })
+          : t('live.interruptedLead')}
+      </p>
+      {#if doing.last}
+        <p class="mt-2 text-sm text-ink-500">
+          {t('live.lastEstimate', {
+            value: doing.last.wait_minutes.toFixed(1),
+            when: formatClock(doing.last.ts_us, formattingLocale(), hour12()),
+          })}
+        </p>
+      {/if}
+    {:else if doing.kind === 'estimating'}
+      {@const estimate = doing.estimate}
       <p class="text-xs font-medium uppercase tracking-wide text-ink-500">{t('live.wait')}</p>
       <p class="mt-1 flex items-baseline gap-2">
         <span class="text-5xl font-semibold text-ink-900">{estimate.wait_minutes.toFixed(1)}</span>
@@ -113,7 +134,7 @@
       {/if}
     {:else}
       <p class="text-sm text-ink-500">
-        {stream?.running ? t('live.warmingUp') : t('live.notEstimating')}
+        {doing.kind === 'starting' ? t('live.warmingUp') : t('live.notEstimating')}
       </p>
     {/if}
   </section>

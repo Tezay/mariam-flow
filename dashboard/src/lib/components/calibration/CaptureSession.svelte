@@ -5,7 +5,7 @@
   import { subscribeLive, type LiveSnapshot } from '$lib/api/live';
   import { type Status } from '$lib/api/status';
   import { t } from '$lib/i18n/i18n.svelte';
-  import { answering } from '$lib/sensors';
+  import { quietReceivers } from '$lib/sensors';
   import Button from '$components/ui/Button.svelte';
   import Modal from '$components/ui/Modal.svelte';
   import CaptureForm from '$components/calibration/CaptureForm.svelte';
@@ -38,13 +38,9 @@
 
   const recording = $derived(status.runtime.mode === 'calibrating');
   const startedUs = $derived(status.runtime.mode === 'calibrating' ? status.runtime.started_us : 0);
-  const silent = $derived.by(() => {
-    if (!snapshot) {
-      return false;
-    }
-    const answers = answering(status.nodes, snapshot.stream, snapshot.now_us);
-    return status.nodes.some((node) => node.role === 'rx' && !answers[node.node_id]);
-  });
+  const silent = $derived(
+    snapshot !== null && quietReceivers(status.nodes, snapshot.stream, snapshot.now_us).length > 0,
+  );
 
   function started(next: Status) {
     open = false;

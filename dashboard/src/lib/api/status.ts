@@ -5,9 +5,7 @@ export type Stage = 'site' | 'nodes' | 'network' | 'queue' | 'calibration' | 'co
 export type Phase = { phase: 'onboarding'; stage: Stage } | { phase: 'operational' };
 
 export type RuntimeMode =
-  | { mode: 'idle' }
-  | { mode: 'calibrating'; session_id: string; started_us: number }
-  | { mode: 'live' };
+  { mode: 'idle' } | { mode: 'calibrating'; session_id: string; started_us: number };
 
 export type Readiness = {
   site_named: boolean;

@@ -237,19 +237,9 @@ pub enum ScheduleError {
 /// A refused appliance lifecycle or runtime transition.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TransitionError {
-    /// The CSI stream already has an exclusive consumer.
-    ///
-    /// Calibration and live inference both consume the single UDP stream;
-    /// only one may run at a time. Callers that want to switch stop the
-    /// current activity first.
-    #[error("the CSI stream is already in use by {current}")]
-    StreamBusy {
-        /// What currently holds the stream (`calibration` or `live`).
-        current: &'static str,
-    },
-    /// Live inference was requested without an active density model.
-    #[error("no active model: calibrate the site or import a model first")]
-    NoModel,
+    /// A capture already holds the CSI stream.
+    #[error("a capture is already being recorded")]
+    StreamBusy,
     /// Onboarding cannot be closed while a step is still outstanding.
     #[error("installation is not complete: still waiting on {stage}")]
     Incomplete {

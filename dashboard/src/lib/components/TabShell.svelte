@@ -129,7 +129,7 @@
 
     <main class="px-4 pb-6">
       {#if active === 'live'}
-        <LivePanel modelName={activeModel ? modelName(activeModel) : null} />
+        <LivePanel paired={status.nodes} modelName={activeModel ? modelName(activeModel) : null} />
       {:else if active === 'calibration'}
         <CalibrationPanel
           {status}

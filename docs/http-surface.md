@@ -29,8 +29,8 @@ Closing the installation is refused while any step is outstanding, and the
 refusal names that step. Reopening is always allowed.
 
 `GET /api/status` reports the appliance identity, installation progress,
-current activity, sensor access point, uplink shape, queue description and
-paired nodes.
+whether a capture holds the stream, sensor access point, uplink shape, queue
+description and paired nodes.
 
 ## Answers that outlast a request
 

@@ -69,6 +69,15 @@ A tab coming back from the background is given the same five seconds before
 anything is said. A browser stops delivering the stream to a hidden tab, which
 is its choice and not the appliance's.
 
+## Live
+
+The waiting time is shown only while it is current. The appliance keeps its
+last estimate until another replaces it, so past ten seconds — the threshold
+that calls a receiver silent — the screen says the estimation is interrupted,
+names the receivers not answering, and keeps the last figure beside its time.
+What the appliance is doing is worked out in one place from the live stream,
+for this screen and the system section alike.
+
 ## Sensors
 
 The sensors screen is where a failing installation is diagnosed and repaired.
