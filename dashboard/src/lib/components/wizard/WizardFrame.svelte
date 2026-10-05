@@ -31,7 +31,7 @@
 
 <!-- No navigation during installation beyond the stepper: one question at a
      time, full frame. The tabbed shell appears once the installer closes it. -->
-<div class="flex min-h-dvh flex-col bg-ink-50">
+<div class="flex flex-1 flex-col bg-ink-50">
   <header class="border-b border-ink-200 bg-white">
     <div class="mx-auto flex max-w-5xl items-baseline justify-between gap-4 px-4 py-3 sm:px-6">
       <p class="truncate text-sm font-semibold text-mariam-600">{t('app.name')}</p>

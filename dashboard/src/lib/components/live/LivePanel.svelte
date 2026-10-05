@@ -22,18 +22,8 @@
 
   let snapshot = $state<LiveSnapshot | null>(null);
   let history = $state<MinuteSummary[]>([]);
-  let dropped = $state(false);
 
-  $effect(() => {
-    const close = subscribeLive(
-      (next) => {
-        snapshot = next;
-        dropped = false;
-      },
-      () => (dropped = true),
-    );
-    return close;
-  });
+  $effect(() => subscribeLive((next) => (snapshot = next)));
 
   // The history changes once a minute; polling it at that cadence costs
   // nothing and keeps the live stream carrying only the live state.
@@ -41,7 +31,7 @@
     let cancelled = false;
     const load = async () => {
       const rows = await fetchHistory(HISTORY_MINUTES);
-      if (!cancelled) {
+      if (!cancelled && rows) {
         history = rows;
       }
     };
@@ -73,7 +63,7 @@
   });
 </script>
 
-<div class="space-y-4" class:opacity-60={dropped}>
+<div class="space-y-4">
   <!-- The hero: one number, the thing the product exists to say. -->
   <section class="rounded-md bg-white p-5 ring-1 ring-ink-100">
     {#if closed}

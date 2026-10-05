@@ -1,7 +1,14 @@
 <script lang="ts">
   import { logout } from '$lib/api/auth';
   import { type Status, fetchStatus } from '$lib/api/status';
+  import {
+    PROBE_EVERY_MS,
+    connectionLost,
+    lastHeardAt,
+    watchConnection,
+  } from '$lib/connection.svelte';
   import { t } from '$lib/i18n/i18n.svelte';
+  import ConnectionNotice from '$components/ConnectionNotice.svelte';
   import LoginScreen from '$components/LoginScreen.svelte';
   import TabShell from '$components/TabShell.svelte';
   import WizardFrame from '$components/wizard/WizardFrame.svelte';
@@ -34,6 +41,25 @@
   }
 
   void refresh();
+
+  /* Narrowed to the view alone, so that a refreshed status does not restart
+     the watch that delivered it. */
+  const view = $derived(screen.view);
+
+  $effect(() => {
+    if (view === 'ready') {
+      return watchConnection({
+        onanswer: (status) => (screen = { view: 'ready', status }),
+        onunauthorized: () => (screen = { view: 'login' }),
+      });
+    }
+    if (view === 'unreachable') {
+      const timer = setInterval(() => void refresh(), PROBE_EVERY_MS);
+      return () => clearInterval(timer);
+    }
+  });
+
+  const lost = $derived(connectionLost());
 </script>
 
 {#if screen.view === 'loading'}
@@ -42,7 +68,7 @@
   </main>
 {:else if screen.view === 'unreachable'}
   <main class="flex min-h-dvh flex-col items-center justify-center gap-4 bg-ink-50 px-4">
-    <p class="text-sm text-ink-500">{t('app.unreachable')}</p>
+    <p class="text-sm text-ink-500">{t('app.unreachable')} {t('app.retrying')}</p>
     <button
       type="button"
       onclick={() => void refresh()}
@@ -54,15 +80,29 @@
   </main>
 {:else if screen.view === 'login'}
   <LoginScreen onauthenticated={() => void refresh()} />
-{:else if screen.status.phase.phase === 'onboarding'}
-  <WizardFrame
-    status={screen.status}
-    onupdated={(next) => (screen = { view: 'ready', status: next })}
-  />
 {:else}
-  <TabShell
-    status={screen.status}
-    onsignout={() => void signOut()}
-    onupdated={(next) => (screen = { view: 'ready', status: next })}
-  />
+  {@const installing = screen.status.phase.phase === 'onboarding'}
+  <!-- The tabbed shell scrolls inside a frame of the viewport's height; the
+       installer scrolls the document, and only needs to fill it. -->
+  <div class="app-shell flex flex-col {installing ? 'min-h-dvh' : 'h-dvh'}">
+    {#if lost}
+      <ConnectionNotice since={lastHeardAt()} />
+    {/if}
+    <!-- Inert as well as dimmed: an action sent to an appliance that is gone
+         only fails later. -->
+    <div class="flex min-h-0 flex-1 flex-col" class:opacity-60={lost} inert={lost}>
+      {#if installing}
+        <WizardFrame
+          status={screen.status}
+          onupdated={(next) => (screen = { view: 'ready', status: next })}
+        />
+      {:else}
+        <TabShell
+          status={screen.status}
+          onsignout={() => void signOut()}
+          onupdated={(next) => (screen = { view: 'ready', status: next })}
+        />
+      {/if}
+    </div>
+  </div>
 {/if}

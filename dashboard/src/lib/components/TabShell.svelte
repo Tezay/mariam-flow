@@ -59,10 +59,11 @@
 <!-- Tabs sit at the bottom on a phone, where a thumb reaches them, and
      become a side rail once there is room. One layout, two shapes.
 
-     The shell is sized to the viewport and only the content beneath the tabs
-     scrolls, which is what keeps them in place without a fixed position and a
-     padding that would have to agree with their height from somewhere else. -->
-<div class="app-shell flex h-dvh flex-col bg-ink-50 sm:flex-row">
+     The shell fills a frame of the viewport's height and only the content
+     beneath the tabs scrolls, which is what keeps them in place without a
+     fixed position and a padding that would have to agree with their height
+     from somewhere else. -->
+<div class="flex min-h-0 flex-1 flex-col bg-ink-50 sm:flex-row">
   <nav
     aria-label={t('app.name')}
     class="order-2 flex shrink-0 border-t border-ink-200 bg-white
