@@ -64,8 +64,12 @@ A failed node is replaced one at a time, keeping its identifier (ADR 0021): the
 identifier is what capture sessions are written against and what a density model
 was validated for, so a receiver renumbered by a repair would leave the site
 holding a model that no longer fits it. Where a sensor sits is likewise a
-property of the installation rather than of one capture, described once here and
-copied into every recording afterwards.
+property of the installation rather than of one capture, described here and
+copied into every recording afterwards. The recording form shows the same
+answers rather than asking again, and one changed there is kept for the
+installation as well. Changing them is a deliberate step, taken past a reminder
+that recordings made with the sensors in different places are not trained
+together; while a sensor is still undescribed the form asks outright.
 
 ## Journal
 
@@ -89,20 +93,32 @@ rather than lengthening a single page.
 
 ## Calibration
 
-Recording a capture is one component, used by the wizard's fourth step and by
-the calibration screen alike. It owns the live subscription, the rule that says
-a receiver has gone quiet, the description and placements a capture is written
-against, and the full-frame labelling surface — so an installation and a later
-campaign cannot drift into recording different things. Only the words above the
-form differ: the wizard adds a line saying what the operator is about to do,
-because that is where labelling is met for the first time.
+The calibration screen answers one question before any other: which model the
+appliance is estimating with. That model is the first block on the screen and
+the only filled surface on it; where there is none, the same place says so.
 
-Below it, the calibration screen holds the two ends of the training loop side
-by side on a wide screen and stacked on a phone: the models the appliance
-holds, and the recordings the next one will be trained from. Each carries its
-own history, so neither reads as a step of the other. The model in service is
-the head of the list it belongs to rather than a card above it — there is one
-collection, and one of its members is in use.
+Beneath it come the two things an operator can do about it, side by side on a
+wide screen and stacked in that order on a phone. *Prepare the next model* holds
+the loop in the order it is walked — start a recording, the recordings made so
+far, and the import that ends it. The import sits there rather than with the
+models because it is the last step of making one. *Kept models* holds the
+earlier ones, any of which can be put back into service.
+
+Neither action starts on its first press. Each opens a dialog that says what is
+about to happen before the button that does it: a recording suspends the
+estimate for as long as it runs and cannot be resumed once stopped; an import
+puts the new model into service at once. The screen itself carries no form.
+
+Recording a capture is one component, used by the wizard's last step and by the
+calibration screen alike — inline where it is the step, behind its button where
+it is one action among others. It owns the live subscription, the rule that
+says a receiver is not answering, the description and placements a capture is
+written against, and the full-frame labelling surface, so an installation and a
+later campaign cannot drift into recording different things. Before anything is
+recorded the form shows each sensor with where it sits and whether it is
+answering. That is asked of every paired sensor rather than of those the stream
+has heard: a receiver that never streamed is absent from the stream, and is the
+one a recording most needs to be warned about.
 
 Both histories page at the same length, through the same control, and the model
 library is held by the shell rather than fetched by each screen that shows it:

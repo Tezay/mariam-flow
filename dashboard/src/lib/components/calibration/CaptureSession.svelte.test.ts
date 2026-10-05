@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import CaptureSession from './CaptureSession.svelte';
+import { type SessionRequest } from '$lib/api/calibration';
 import { type LiveSnapshot } from '$lib/api/live';
 import { type SensingNode, type Status } from '$lib/api/status';
 
@@ -12,6 +13,11 @@ const NOW = Date.UTC(2026, 7, 2, 12) * 1000;
 const NODES: SensingNode[] = [
   { node_id: 'tx-1', role: 'tx', mac: '1a:00:00:00:00:00' },
   { node_id: 'rx-1', role: 'rx', address: '192.168.4.51' },
+];
+
+const PLACED: SensingNode[] = [
+  { ...NODES[0], position: 'wall A, mid-zone' },
+  { ...NODES[1], position: 'wall B, head of the queue' },
 ];
 
 function status(overrides: Partial<Status> = {}): Status {
@@ -60,7 +66,20 @@ function stubLive(snap: LiveSnapshot) {
   );
 }
 
+function stubStart(answer: Status): SessionRequest[] {
+  const requests: SessionRequest[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((_path: string, init: RequestInit) => {
+      requests.push(JSON.parse(init.body as string) as SessionRequest);
+      return Promise.resolve(new Response(JSON.stringify(answer), { status: 200 }));
+    }),
+  );
+  return requests;
+}
+
 const started = () => screen.getByRole('button', { name: /start recording/i });
+const position = (nodeId: string) => screen.queryByRole('textbox', { name: nodeId });
 
 describe('CaptureSession', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -95,6 +114,111 @@ describe('CaptureSession', () => {
     await vi.waitFor(() => expect(started()).toBeEnabled());
     await userEvent.clear(screen.getByRole('textbox', { name: /what is being recorded/i }));
     expect(started()).toBeDisabled();
+  });
+
+  it('shows where the sensors are instead of asking again', () => {
+    stubLive(snapshot(true));
+    render(CaptureSession, { props: { status: status({ nodes: PLACED }), onupdated() {} } });
+
+    expect(screen.getByText('wall B, head of the queue')).toBeInTheDocument();
+    expect(position('rx-1')).not.toBeInTheDocument();
+  });
+
+  it('asks where the sensors are while one is undescribed', () => {
+    stubLive(snapshot(true));
+    render(CaptureSession, {
+      props: { status: status({ nodes: [PLACED[0], NODES[1]] }), onupdated() {} },
+    });
+
+    expect(position('tx-1')).toHaveValue('wall A, mid-zone');
+    expect(position('rx-1')).toHaveValue('');
+  });
+
+  it('sends no position the operator did not edit', async () => {
+    stubLive(snapshot(true));
+    const requests = stubStart(status({ nodes: PLACED }));
+    render(CaptureSession, { props: { status: status({ nodes: PLACED }), onupdated() {} } });
+
+    await vi.waitFor(() => expect(started()).toBeEnabled());
+    await userEvent.click(started());
+
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].positions).toEqual({});
+  });
+
+  it('warns before a stored position is changed, then sends the edit', async () => {
+    stubLive(snapshot(true));
+    const requests = stubStart(status({ nodes: PLACED }));
+    render(CaptureSession, { props: { status: status({ nodes: PLACED }), onupdated() {} } });
+    await vi.waitFor(() => expect(started()).toBeEnabled());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('note')).toHaveTextContent(/only if the sensor was moved/i);
+    await userEvent.clear(position('rx-1')!);
+    await userEvent.type(position('rx-1')!, 'wall B, tail of the queue');
+    await userEvent.click(started());
+
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].positions).toEqual({
+      'tx-1': 'wall A, mid-zone',
+      'rx-1': 'wall B, tail of the queue',
+    });
+  });
+
+  it('gives up an edit without sending any of it', async () => {
+    stubLive(snapshot(true));
+    const requests = stubStart(status({ nodes: PLACED }));
+    render(CaptureSession, { props: { status: status({ nodes: PLACED }), onupdated() {} } });
+    await vi.waitFor(() => expect(started()).toBeEnabled());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    await userEvent.clear(position('rx-1')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Keep the stored positions' }));
+    expect(screen.getByText('wall B, head of the queue')).toBeInTheDocument();
+    await userEvent.click(started());
+
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].positions).toEqual({});
+  });
+
+  it('names a receiver that is not answering before anything is recorded', async () => {
+    // Its measurements would be missing from the whole recording.
+    const nodes: SensingNode[] = [...PLACED, { node_id: 'rx-2', role: 'rx', position: 'tail' }];
+    stubLive(snapshot(true));
+    render(CaptureSession, { props: { status: status({ nodes }), onupdated() {} } });
+
+    await vi.waitFor(() => expect(screen.getByText(/not answering: rx-2/i)).toBeInTheDocument());
+    expect(started()).toBeEnabled();
+  });
+
+  it('opens the form rather than recording when it is one action among others', async () => {
+    stubLive(snapshot(true));
+    const requests = stubStart(status({ nodes: PLACED }));
+    render(CaptureSession, {
+      props: { status: status({ nodes: PLACED }), launcher: true, onupdated() {} },
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'New recording' }));
+
+    expect(screen.getByRole('dialog')).toHaveTextContent(/estimate is suspended/i);
+    expect(requests).toHaveLength(0);
+  });
+
+  it('closes the form once the recording has started', async () => {
+    stubLive(snapshot(true));
+    stubStart(status({ nodes: PLACED }));
+    const onupdated = vi.fn();
+    render(CaptureSession, {
+      props: { status: status({ nodes: PLACED }), launcher: true, onupdated },
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'New recording' }));
+    await vi.waitFor(() => expect(started()).toBeEnabled());
+    await userEvent.click(started());
+
+    await vi.waitFor(() => expect(onupdated).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('labels full frame instead of the form once the appliance is recording', () => {

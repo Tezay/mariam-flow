@@ -5,6 +5,7 @@ import {
   GRACE_SECONDS,
   defaultEnvironment,
   formatDay,
+  formatTrained,
   formatWindow,
   modelName,
   queueComplete,
@@ -141,6 +142,16 @@ describe('formatDay', () => {
   it('spells the day out rather than abbreviating it', () => {
     const rendered = formatDay(Date.UTC(2026, 7, 12, 10) * 1000, 'fr-FR');
     expect(rendered).toMatch(/\p{L}{4,}/u);
+  });
+});
+
+describe('formatTrained', () => {
+  it('shows the calendar day the bundle declared, whatever zone reads it', () => {
+    expect(formatTrained('2026-10-04', 'en-GB')).toBe('4 October 2026');
+  });
+
+  it('leaves alone what is not a date', () => {
+    expect(formatTrained('last autumn', 'en-GB')).toBe('last autumn');
   });
 });
 

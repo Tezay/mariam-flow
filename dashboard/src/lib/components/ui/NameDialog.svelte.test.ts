@@ -38,6 +38,15 @@ describe('NameDialog', () => {
     expect(onrename).toHaveBeenCalledWith('');
   });
 
+  it('is dismissed from the keyboard', async () => {
+    const oncancel = vi.fn();
+    render(NameDialog, { props: { title: 'Rename', initial: '', onrename() {}, oncancel } });
+
+    await userEvent.keyboard('{Escape}');
+
+    expect(oncancel).toHaveBeenCalledOnce();
+  });
+
   it('trims what it hands back', async () => {
     const onrename = vi.fn();
     render(NameDialog, { props: { title: 'Rename', initial: '', onrename, oncancel() {} } });

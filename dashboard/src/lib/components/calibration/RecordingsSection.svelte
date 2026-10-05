@@ -1,9 +1,10 @@
 <script lang="ts">
-  import Archive from '@lucide/svelte/icons/archive';
+  import type { Snippet } from 'svelte';
   import ChartNoAxesColumn from '@lucide/svelte/icons/chart-no-axes-column';
   import Download from '@lucide/svelte/icons/download';
   import Pencil from '@lucide/svelte/icons/pencil';
   import Trash2 from '@lucide/svelte/icons/trash-2';
+  import Workflow from '@lucide/svelte/icons/workflow';
 
   import {
     type RecordedSession,
@@ -23,10 +24,12 @@
 
   let {
     sessions,
+    actions,
     onchanged,
     onopen,
   }: {
     sessions: RecordedSession[];
+    actions?: Snippet;
     onchanged: () => void;
     onopen: (session: RecordedSession) => void;
   } = $props();
@@ -61,13 +64,15 @@
 </script>
 
 <section>
-  <SectionHeader icon={Archive} title={t('prepare.title')} lead={t('prepare.lead')} />
+  <SectionHeader icon={Workflow} title={t('prepare.title')} lead={t('prepare.lead')} />
+
+  {#if actions}
+    <!-- A grid on a phone, so the two are as wide as each other. -->
+    <div class="mt-4 grid gap-2 sm:flex sm:flex-wrap">{@render actions()}</div>
+  {/if}
 
   <div class="mt-4 overflow-hidden rounded-md bg-white ring-1 ring-ink-200">
-    <h3
-      class="border-t border-ink-100 px-5 py-3 text-xs font-medium tracking-wide text-ink-500
-             uppercase"
-    >
+    <h3 class="px-5 py-3 text-xs font-medium tracking-wide text-ink-500 uppercase">
       {t('cal.history')}
     </h3>
     {#if sessions.length === 0}
@@ -75,7 +80,10 @@
     {:else}
       <ul class="divide-y divide-ink-100 border-t border-ink-100">
         {#each shown as session (session.session_id)}
-          <li class="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+          <li
+            class="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between
+                   sm:gap-3"
+          >
             <span class="min-w-0 flex-1">
               <span class="block text-sm font-medium wrap-break-word text-ink-900">
                 {session.environment || session.session_id}

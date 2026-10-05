@@ -8,7 +8,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
-use super::{Rename, error_response};
+use super::{Rename, error_response, refusal};
 use crate::calibration::{
     RecordedSession, SessionRequest, recorded_sessions, session_id, session_meta, write_archive,
 };
@@ -228,7 +228,7 @@ pub(super) async fn start_calibration(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(request): Json<SessionRequest>,
 ) -> Response {
-    let (config, data_dir) = (state.config_snapshot(), state.data_dir());
+    let (mut config, data_dir) = (state.config_snapshot(), state.data_dir());
     if config.rx_node_ids().is_empty() {
         return error_response(StatusCode::CONFLICT, "no receiver is paired");
     }
@@ -245,6 +245,24 @@ pub(super) async fn start_calibration(
     let id = session_id(now_us(), &config.identity.kit_id);
     if let Err(err) = state.begin_calibration(&id, now_us()) {
         return error_response(StatusCode::CONFLICT, &err.to_string());
+    }
+
+    // Before the session is described, which reads them back like any other
+    // position the installation holds.
+    let placed = request.placements(&config.nodes);
+    if !placed.is_empty() {
+        if let Err(rejection) = state.place_nodes(&placed) {
+            state.end_calibration();
+            return refusal(&rejection);
+        }
+        for node_id in placed.keys() {
+            state.record(
+                Event::new(EventKind::ConfigurationChanged)
+                    .from_client(peer.ip())
+                    .with_detail(format!("node {node_id} placed")),
+            );
+        }
+        config = state.config_snapshot();
     }
 
     let meta = session_meta(&config, &request, id.clone());

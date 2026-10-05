@@ -1,5 +1,6 @@
 //! Which sensors the appliance has, and which hardware answers for each.
 
+use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
 
 use axum::Json;
@@ -58,19 +59,15 @@ pub(super) async fn describe_node(
     // not the same thing as a refused name.
     let position = (!position.is_empty()).then(|| position.to_owned());
 
-    let mut known = false;
-    let outcome = state.write_config(|config| {
-        for node in &mut config.nodes {
-            if node.node_id == node_id {
-                node.position.clone_from(&position);
-                known = true;
-            }
-        }
-    });
+    let known = state
+        .config_snapshot()
+        .nodes
+        .iter()
+        .any(|node| node.node_id == node_id);
     if !known {
         return error_response(StatusCode::NOT_FOUND, "no such node");
     }
-    match outcome {
+    match state.place_nodes(&BTreeMap::from([(node_id.clone(), position)])) {
         Ok(()) => {
             state.record(
                 Event::new(EventKind::ConfigurationChanged)

@@ -84,6 +84,25 @@ export function formatDay(us: number, locale: string): string {
   });
 }
 
+/**
+ * The day a model says it was trained, spelled out like the others.
+ *
+ * Read in UTC: the manifest carries a calendar day with no zone, and a reader
+ * west of Greenwich would otherwise be shown the day before.
+ */
+export function formatTrained(trainedAt: string, locale: string): string {
+  const at = Date.parse(trainedAt);
+  if (Number.isNaN(at)) {
+    return trainedAt;
+  }
+  return new Date(at).toLocaleDateString(locale, {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 /** A window in seconds, which is how anyone discusses one. */
 export function formatWindow(us: number): string {
   const seconds = us / 1_000_000;

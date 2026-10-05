@@ -6,4 +6,4 @@
   let { status, onupdated }: { status: Status; onupdated: (status: Status) => void } = $props();
 </script>
 
-<CaptureSession {status} lead={t('cal.wizardLead')} positionsOpen {onupdated} />
+<CaptureSession {status} lead={t('cal.wizardLead')} {onupdated} />

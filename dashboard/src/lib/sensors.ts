@@ -6,7 +6,7 @@
  * tested without a browser.
  */
 
-import { type NodeHealth } from './api/live';
+import { type NodeHealth, type StreamHealth } from './api/live';
 import { type Candidate, type Discovery } from './api/nodes';
 import { type SensingNode } from './api/status';
 
@@ -73,6 +73,34 @@ export function transmitterHeard(
 }
 
 /**
+ * Which nodes are doing what a recording needs of them, keyed by node id.
+ *
+ * Asked of every paired node rather than of those the stream has heard: a
+ * receiver that never streamed is absent from it, and is the one a recording
+ * most needs flagged. The transmitter is known through the receivers alone.
+ */
+export function answering(
+  nodes: SensingNode[],
+  stream: StreamHealth | undefined,
+  nowUs?: number,
+): Record<string, boolean> {
+  const receivers = nodes.filter((node) => node.role === 'rx');
+  const streaming = new Set(
+    receivers
+      .filter(
+        (node) => receiverState(stream?.nodes[node.node_id], stream, nowUs).kind === 'streaming',
+      )
+      .map((node) => node.node_id),
+  );
+  return Object.fromEntries(
+    nodes.map((node) => [
+      node.node_id,
+      node.role === 'tx' ? streaming.size > 0 : streaming.has(node.node_id),
+    ]),
+  );
+}
+
+/**
  * Senders that could be the replacement for a failed node.
  *
  * Anything already paired is excluded: offering a working sibling as the
@@ -103,6 +131,11 @@ export function transmitterReplacement(
     return null;
   }
   return { mac, agreement: discovery?.proposal.tx_agreement ?? 0 };
+}
+
+/** Whether every node has been described, so the recording form need not ask. */
+export function allPlaced(nodes: SensingNode[]): boolean {
+  return nodes.every((node) => Boolean(node.position));
 }
 
 /** The positions the recording form starts from. */

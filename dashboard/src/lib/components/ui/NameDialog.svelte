@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
 
   import { t } from '$lib/i18n/i18n.svelte';
+  import Button from '$components/ui/Button.svelte';
   import Modal from '$components/ui/Modal.svelte';
 
   let {
@@ -42,13 +43,8 @@
       required={!allowEmpty}
       class="-mt-2 block w-full rounded-md border border-ink-200 px-3 py-2 text-base text-ink-900"
     />
-    <button
-      type="submit"
-      disabled={!allowEmpty && name.trim().length === 0}
-      class="rounded-md bg-mariam-600 px-4 py-3 text-sm font-medium text-white transition-colors
-             hover:bg-mariam-700 disabled:bg-ink-200 disabled:text-ink-500"
-    >
+    <Button type="submit" size="block" disabled={!allowEmpty && name.trim().length === 0}>
       {t('settings.save')}
-    </button>
+    </Button>
   </form>
 </Modal>

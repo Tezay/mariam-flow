@@ -14,7 +14,7 @@
     children,
   }: {
     variant?: 'primary' | 'outline' | 'quiet' | 'danger';
-    size?: 'md' | 'sm' | 'icon';
+    size?: 'md' | 'sm' | 'icon' | 'block';
     type?: 'button' | 'submit';
     href?: string;
     download?: boolean;
@@ -40,6 +40,7 @@
     md: 'h-9 gap-2 rounded-md px-3 text-sm font-medium sm:h-8',
     sm: 'h-8 gap-1.5 rounded-md px-2.5 text-xs font-medium sm:h-7',
     icon: 'size-9 rounded-md sm:size-7',
+    block: 'w-full gap-2 rounded-md px-4 py-3 text-sm font-medium',
   } as const;
 
   const shape = $derived(

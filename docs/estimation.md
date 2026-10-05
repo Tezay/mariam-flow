@@ -68,10 +68,12 @@ pairing, capture and sensor health survive a bad model — and importing a
 replacement rebuilds the intake on its own.
 
 The intake is rebuilt whenever the configuration changes, since the sender
-mapping and the site tuning are what the installation writes. It also ticks on
-a read timeout, so stream health and the senders it has heard are refreshed
-without waiting for traffic. The frame source is the UDP socket the receivers
-stream to, or a recorded capture:
+mapping and the site tuning are what the installation writes. Where a sensor
+sits is the exception: the intake is built from nothing of it, and a position
+given as a recording starts would otherwise rebuild it inside that recording.
+It also ticks on a read timeout, so stream health and the senders it has heard
+are refreshed without waiting for traffic. The frame source is the UDP socket
+the receivers stream to, or a recorded capture:
 
 ```sh
 flow-edge serve --config … --data-dir … \

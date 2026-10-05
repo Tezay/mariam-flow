@@ -6,10 +6,26 @@
   let {
     title,
     lead,
+    wide = false,
     oncancel,
     children,
-  }: { title: string; lead?: string; oncancel: () => void; children: Snippet } = $props();
+  }: {
+    title: string;
+    lead?: string;
+    /** Room for a short form rather than one question. */
+    wide?: boolean;
+    oncancel: () => void;
+    children: Snippet;
+  } = $props();
 </script>
+
+<svelte:window
+  onkeydown={(event) => {
+    if (event.key === 'Escape') {
+      oncancel();
+    }
+  }}
+/>
 
 <!-- Bottom sheet on a phone, centred on a wide screen: the same component,
      placed where the hand that dismisses it already is. -->
@@ -19,7 +35,12 @@
   aria-modal="true"
   aria-label={title}
 >
-  <div class="w-full max-w-sm rounded-lg bg-white p-5 ring-1 ring-ink-200 sm:rounded-md">
+  <!-- Bounded by the viewport and scrolled inside: a sheet taller than a
+       phone would otherwise put its own buttons out of reach. -->
+  <div
+    class="max-h-full w-full overflow-y-auto rounded-lg bg-white p-5 ring-1 ring-ink-200
+           sm:rounded-md {wide ? 'max-w-lg' : 'max-w-sm'}"
+  >
     <h2 class="text-base font-semibold text-ink-900">{title}</h2>
     {#if lead}
       <p class="mt-2 text-sm text-ink-500">{lead}</p>

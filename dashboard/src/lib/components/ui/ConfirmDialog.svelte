@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Button from '$components/ui/Button.svelte';
   import Modal from '$components/ui/Modal.svelte';
 
   let {
@@ -17,12 +18,5 @@
 </script>
 
 <Modal {title} {lead} {oncancel}>
-  <button
-    type="button"
-    onclick={onconfirm}
-    class="rounded-md bg-density-saturated px-4 py-3 text-sm font-medium text-white
-           transition-colors hover:opacity-90"
-  >
-    {confirmLabel}
-  </button>
+  <Button variant="danger" size="block" onclick={onconfirm}>{confirmLabel}</Button>
 </Modal>

@@ -17,23 +17,23 @@ function model(id: string, name: string, active = false): StoredModel {
   };
 }
 
-const BASE = { onupdated() {}, onchanged() {}, onopen() {}, oncompare() {} };
+const BASE = { onupdated() {}, onchanged() {}, onopen() {} };
 
 describe('ModelsSection', () => {
-  it('heads the list with the model in service', () => {
+  it('lists the models that are kept, not the one in service', () => {
     render(ModelsSection, {
       props: { ...BASE, models: [model('b', 'June'), model('a', 'September', true)] },
     });
 
-    expect(screen.getByRole('heading', { name: 'September' })).toBeInTheDocument();
-    // The one in service is not offered as something to switch to.
+    expect(screen.getByText('June')).toBeInTheDocument();
+    expect(screen.queryByText('September')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /^use$/i })).toHaveLength(1);
   });
 
-  it('says plainly when nothing is estimating', () => {
-    render(ModelsSection, { props: { ...BASE, models: [] } });
+  it('says so when no other model is kept', () => {
+    render(ModelsSection, { props: { ...BASE, models: [model('a', 'September', true)] } });
 
-    expect(screen.getByText(/no model yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no other model is kept/i)).toBeInTheDocument();
   });
 
   it('names a bundle that never said what it was', () => {
@@ -45,11 +45,5 @@ describe('ModelsSection', () => {
     });
 
     expect(screen.getByText(/unnamed bundle/i)).toBeInTheDocument();
-  });
-
-  it('cannot import until a bundle is chosen', () => {
-    render(ModelsSection, { props: { ...BASE, models: [] } });
-
-    expect(screen.getByRole('button', { name: /import and activate/i })).toBeDisabled();
   });
 });
